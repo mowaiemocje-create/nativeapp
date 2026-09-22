@@ -4,24 +4,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 // Współdzielony, bezpieczny wątkowo magazyn danych "na żywo" — serwis nagrywający dopisuje
-// nowe próbki/punkty pitch, a widok (PitchWaveView) czyta je do rysowania. Odpowiednik
-// wavBuf/pitchPts z PitchRec (JS), tylko po stronie natywnej.
+// nowe próbki/punkty pitch, a widok (PitchWaveView) czyta je do rysowania.
+//
+// WYDAJNOŚĆ (v2): obwiednia jest teraz surową tablicą float[] (rosnącą manualnie, jak
+// ArrayList, ale bez pakowania/boxing) — poprzednia wersja (List<Float>) tworzyła nowy
+// obiekt Float dla KAŻDEJ pojedynczej próbki audio (tysiące na sekundę), co generowało
+// ogromny ruch dla Garbage Collectora i było prawdopodobnie głównym źródłem zacięć
+// widocznych podczas nagrywania — pauzy GC wpływają na CAŁY wątek UI, nie tylko na
+// przetwarzanie audio.
 public class LiveAudioData {
 
     public static final int SAMPLE_RATE = 44100;
-
-    // Downsamplowana obwiednia amplitudy (do rysowania fali) — nie surowe próbki (zbyt duże),
-    // tylko wartość maksymalną z każdego "kawałka" o rozmiarze ENVELOPE_CHUNK próbek.
     private static final int ENVELOPE_CHUNK = 256;
-    private static final List<Float> envelope = new ArrayList<>();
+
+    private static float[] envelope = new float[4096];
+    private static int envelopeSize = 0;
     private static float envelopeChunkMax = 0f;
     private static int envelopeChunkCount = 0;
 
-    // Punkty pitch — odpowiednik pitchPts z JS: {pozycja w próbkach, częstotliwość albo null
-    // gdy przerwa (cisza) między segmentami głosu}.
     public static class PitchPoint {
         public final long sampleIndex;
-        public final float freq; // -1 oznacza "null" (przerwa)
+        public final float freq;
 
         PitchPoint(long sampleIndex, float freq) {
             this.sampleIndex = sampleIndex;
@@ -34,9 +37,10 @@ public class LiveAudioData {
 
     private static final Object lock = new Object();
 
-    public static synchronized void reset() {
+    public static void reset() {
         synchronized (lock) {
-            envelope.clear();
+            envelope = new float[4096];
+            envelopeSize = 0;
             envelopeChunkMax = 0f;
             envelopeChunkCount = 0;
             pitchPts.clear();
@@ -44,8 +48,16 @@ public class LiveAudioData {
         }
     }
 
-    // Wywoływane z pętli odczytu serwisu dla KAŻDEJ nowo przeczytanej porcji próbek PCM
-    // (16-bit signed, znormalizowane wewnątrz do [-1,1] przy liczeniu obwiedni).
+    private static void appendEnvelopeValue(float value) {
+        if (envelopeSize >= envelope.length) {
+            float[] bigger = new float[envelope.length * 2];
+            System.arraycopy(envelope, 0, bigger, 0, envelope.length);
+            envelope = bigger;
+        }
+        envelope[envelopeSize] = value;
+        envelopeSize++;
+    }
+
     public static void appendSamples(short[] buffer, int length) {
         synchronized (lock) {
             for (int i = 0; i < length; i++) {
@@ -53,7 +65,7 @@ public class LiveAudioData {
                 if (normalized > envelopeChunkMax) envelopeChunkMax = normalized;
                 envelopeChunkCount++;
                 if (envelopeChunkCount >= ENVELOPE_CHUNK) {
-                    envelope.add(envelopeChunkMax);
+                    appendEnvelopeValue(envelopeChunkMax);
                     envelopeChunkMax = 0f;
                     envelopeChunkCount = 0;
                 }
@@ -62,16 +74,12 @@ public class LiveAudioData {
         }
     }
 
-    // Wywoływane z serwisu po wykryciu wysokości głosu dla aktualnego okna próbek — freq=-1
-    // oznacza brak wykrycia (cisza/brak tonu), co odpowiada "null" w JS (przerywa linię).
     public static void appendPitch(long sampleIndex, float freq) {
         synchronized (lock) {
             if (freq > 0) {
                 if (!pitchPts.isEmpty()) {
                     PitchPoint last = pitchPts.get(pitchPts.size() - 1);
                     if (last.freq > 0 && sampleIndex - last.sampleIndex <= SAMPLE_RATE / 20) {
-                        // Zbyt blisko poprzedniego punktu — zaktualizuj go zamiast dodawać nowy
-                        // (odpowiednik "else pitchPts[last].fq=fSm" w JS).
                         pitchPts.set(pitchPts.size() - 1, new PitchPoint(last.sampleIndex, freq));
                         return;
                     }
@@ -80,61 +88,79 @@ public class LiveAudioData {
             } else if (!pitchPts.isEmpty() && pitchPts.get(pitchPts.size() - 1).freq > 0) {
                 pitchPts.add(new PitchPoint(sampleIndex, -1));
             }
-            // Ogranicz rozmiar listy (odpowiednik "if length>18000 splice" w JS)
             if (pitchPts.size() > 18000) {
                 for (int i = 0; i < 2000; i++) pitchPts.remove(0);
             }
         }
     }
 
-    // Zwraca KOPIĘ aktualnej obwiedni i punktów pitch — bezpieczne do odczytu z wątku UI
-    // podczas rysowania, bez blokowania wątku nagrywania na dłużej niż potrzeba do skopiowania.
-    // Zwraca KOPIĘ tylko OSTATNICH maxCount elementów obwiedni — nie całej historii. To
-    // kluczowe dla wydajności: bez tego, kopiowanie całej (rosnącej) listy przy każdej
-    // klatce (nawet gdy używamy tylko końcówki) samo w sobie powodowało lagi przy
-    // dłuższym nagraniu.
-    public static float[] snapshotEnvelopeTail(int maxCount) {
+    // Jedno, POŁĄCZONE zapytanie o wszystko potrzebne do narysowania jednej klatki —
+    // WYDAJNOŚĆ: zamiast 3-4 osobnych wywołań synchronized (envelope, pitch, total samples)
+    // na klatkę, jedno wejście w blokadę. Mniej rywalizacji o zamek z wątkiem nagrywania,
+    // który dopisuje dane bardzo częstotliwie.
+    public static class FrameSnapshot {
+        public float[] envelope;
+        public int envelopeStartIndex; // pozycja pierwszego punktu tablicy w PELNEJ historii
+        public List<PitchPoint> pitchPoints;
+        public long visibleStartSample;
+        public long totalSamples;
+    }
+
+    public static FrameSnapshot snapshotForDrawing(int envelopeTailCount) {
         synchronized (lock) {
-            int size = envelope.size();
-            int start = Math.max(0, size - maxCount);
-            float[] result = new float[size - start];
-            for (int i = 0; i < result.length; i++) result[i] = envelope.get(start + i);
-            return result;
+            int start = Math.max(0, envelopeSize - envelopeTailCount);
+            return snapshotForDrawingAtIndex(start, envelopeTailCount);
         }
     }
 
-    // Zwraca KOPIĘ punktów pitch o sampleIndex >= minSampleIndex (przeszukiwanie binarne,
-    // bez kopiowania wcześniejszej historii).
-    public static List<PitchPoint> snapshotPitchPointsFrom(long minSampleIndex) {
+    // Jak snapshotForDrawing, ale od DOWOLNEJ pozycji (nie tylko najnowszych) — potrzebne do
+    // przewijania palcem w trybie statycznym (wczytany plik), gdzie użytkownik może chcieć
+    // zobaczyć wcześniejszy fragment, nie tylko koniec.
+    public static FrameSnapshot snapshotForDrawingAtSample(long startSample, int envelopeChunkCount) {
         synchronized (lock) {
-            int lo = 0, hi = pitchPts.size();
-            while (lo < hi) {
-                int mid = (lo + hi) / 2;
-                if (pitchPts.get(mid).sampleIndex < minSampleIndex) lo = mid + 1;
-                else hi = mid;
-            }
-            int start = Math.max(0, lo - 1);
-            return new ArrayList<>(pitchPts.subList(start, pitchPts.size()));
+            int startIdx = Math.max(0, (int) (startSample / ENVELOPE_CHUNK));
+            return snapshotForDrawingAtIndex(startIdx, envelopeChunkCount);
+        }
+    }
+
+    // UWAGA: musi być wołane WEWNĄTRZ synchronized(lock) — nie synchronizuje samo, żeby
+    // uniknąć podwójnego wejścia w blokadę z metod publicznych powyżej.
+    private static FrameSnapshot snapshotForDrawingAtIndex(int startIdx, int envelopeChunkCount) {
+        FrameSnapshot snap = new FrameSnapshot();
+        int clampedStart = Math.max(0, Math.min(startIdx, envelopeSize));
+        int len = Math.min(envelopeChunkCount, envelopeSize - clampedStart);
+        snap.envelope = new float[Math.max(0, len)];
+        if (len > 0) System.arraycopy(envelope, clampedStart, snap.envelope, 0, len);
+        snap.envelopeStartIndex = clampedStart;
+
+        snap.visibleStartSample = (long) clampedStart * ENVELOPE_CHUNK;
+        snap.totalSamples = totalSamplesWritten;
+
+        int lo = 0, hi = pitchPts.size();
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (pitchPts.get(mid).sampleIndex < snap.visibleStartSample) lo = mid + 1;
+            else hi = mid;
+        }
+        int pitchStart = Math.max(0, lo - 1);
+        snap.pitchPoints = new ArrayList<>(pitchPts.subList(pitchStart, pitchPts.size()));
+
+        return snap;
+    }
+
+    public static float[] snapshotEnvelopeTail(int maxCount) {
+        synchronized (lock) {
+            int start = Math.max(0, envelopeSize - maxCount);
+            int len = envelopeSize - start;
+            float[] result = new float[len];
+            System.arraycopy(envelope, start, result, 0, len);
+            return result;
         }
     }
 
     public static int getEnvelopeSize() {
         synchronized (lock) {
-            return envelope.size();
-        }
-    }
-
-    public static float[] snapshotEnvelope() {
-        synchronized (lock) {
-            float[] result = new float[envelope.size()];
-            for (int i = 0; i < result.length; i++) result[i] = envelope.get(i);
-            return result;
-        }
-    }
-
-    public static List<PitchPoint> snapshotPitchPoints() {
-        synchronized (lock) {
-            return new ArrayList<>(pitchPts);
+            return envelopeSize;
         }
     }
 

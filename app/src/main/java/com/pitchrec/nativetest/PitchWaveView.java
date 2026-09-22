@@ -4,22 +4,41 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.View;
 
 import java.util.List;
+import java.util.Locale;
 
-// Rysuje falę (obwiednia amplitudy) + żółtą linię pitch, odpowiednik drawStatic() z PitchRec
-// (JS) — skala Y dla pitch jest logarytmiczna (fY), tak samo jak w oryginale.
+// Rysuje falę (obwiednia amplitudy) + żółtą linię pitch + podziałkę sekundową na górze +
+// suwak odtwarzania (playhead). Wsparcie dla DWÓCH trybów:
+//  - "na żywo" (isLiveMode=true): automatyczne przewijanie do najnowszych próbek, jak
+//    podczas nagrywania.
+//  - "statyczny" (isLiveMode=false, po wczytaniu zapisanego pliku): użytkownik może
+//    przewijać palcem (drag) i dotknięciem (tap) wskazać punkt, od którego ma zacząć się
+//    odtwarzanie — rysowany jako biała, pełna linia (suwak).
 public class PitchWaveView extends View {
 
     private static final float PMIN = 55f;
     private static final float PMAX = 1050f;
+    private static final int RULER_HEIGHT_DP = 26;
 
     private final Paint bgPaint = new Paint();
     private final Paint envelopePaint = new Paint();
     private final Paint midlinePaint = new Paint();
     private final Paint pitchPaint = new Paint();
+    private final Paint rulerBgPaint = new Paint();
+    private final Paint rulerTickPaint = new Paint();
+    private final Paint rulerTextPaint = new Paint();
+    private final Paint playheadPaint = new Paint();
+
+    public interface OnSeekListener {
+        void onSeek(long sampleIndex);
+    }
+
+    private OnSeekListener seekListener;
 
     public PitchWaveView(Context context) {
         super(context);
@@ -40,15 +59,58 @@ public class PitchWaveView extends View {
         pitchPaint.setColor(Color.parseColor("#FFE600"));
         pitchPaint.setStrokeWidth(4f);
         pitchPaint.setStrokeJoin(Paint.Join.ROUND);
+        pitchPaint.setStrokeCap(Paint.Cap.ROUND);
         pitchPaint.setStyle(Paint.Style.STROKE);
         pitchPaint.setAntiAlias(true);
+
+        rulerBgPaint.setColor(Color.parseColor("#08081a"));
+        rulerTickPaint.setColor(Color.parseColor("#FFFFFF"));
+        rulerTickPaint.setStrokeWidth(2f);
+        rulerTextPaint.setColor(Color.parseColor("#FFFFFF"));
+        rulerTextPaint.setTextSize(dp(12));
+        rulerTextPaint.setAntiAlias(true);
+        rulerTextPaint.setFakeBoldText(true);
+
+        playheadPaint.setColor(Color.parseColor("#FFFFFF"));
+        playheadPaint.setStrokeWidth(dp(2));
     }
 
-    private float zoomSeconds = 0f; // 0 = pokaz tyle ile sie zmiesci (domyslnie), >0 = ograniczony zakres czasu
+    private float dp(float v) {
+        return v * getResources().getDisplayMetrics().density;
+    }
+
+    private float zoomSeconds = 0f;
+    private boolean isLiveMode = true;
+    private long panOffsetSample = 0L;
+    private long playheadSample = -1L; // -1 = brak (nie ustawiony)
 
     public void setZoomSeconds(float seconds) {
         zoomSeconds = seconds;
         invalidate();
+    }
+
+    // true podczas aktywnego nagrywania (auto-przewijanie), false po wczytaniu zapisanego
+    // pliku do przeglądania/odtwarzania (przewijanie palcem, wskazywanie miejsca startu).
+    public void setLiveMode(boolean live) {
+        isLiveMode = live;
+        if (live) panOffsetSample = 0L;
+        invalidate();
+    }
+
+    public void setOnSeekListener(OnSeekListener l) {
+        seekListener = l;
+    }
+
+    // Wywoływane z zewnątrz (MainActivity) podczas odtwarzania, żeby suwak przesuwał się w
+    // takt aktualnej pozycji odtwarzacza.
+    public void setPlayheadSample(long sample) {
+        playheadSample = sample;
+        invalidate();
+    }
+
+    public void resetPan() {
+        panOffsetSample = 0L;
+        playheadSample = -1L;
     }
 
     private float freqToY(float freq, int height) {
@@ -58,64 +120,153 @@ public class PitchWaveView extends View {
         return (float) (height * (1 - (logF - logMin) / (logMax - logMin)));
     }
 
+    private float[] envelopeLinePts = new float[0];
+    private final Path pitchPath = new Path();
+
+    // ── Obsługa dotyku: przewijanie (drag) w trybie statycznym, dotknięcie (tap) = ustaw
+    // punkt odtwarzania. Odróżniamy tap od drag na podstawie całkowitego przemieszczenia. ──
+    private float touchStartX = 0f;
+    private float touchLastX = 0f;
+    private boolean touchMoved = false;
+    private static final float TAP_THRESHOLD_PX = 12f;
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (isLiveMode) return false; // przewijanie tylko w trybie statycznym
+
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                touchStartX = event.getX();
+                touchLastX = touchStartX;
+                touchMoved = false;
+                return true;
+            case MotionEvent.ACTION_MOVE: {
+                float dx = event.getX() - touchLastX;
+                touchLastX = event.getX();
+                if (Math.abs(event.getX() - touchStartX) > TAP_THRESHOLD_PX) touchMoved = true;
+
+                float pxPerSecond = getWidth() / Math.max(0.001f, currentVisibleSeconds());
+                long sampleDelta = (long) (-dx / pxPerSecond * LiveAudioData.SAMPLE_RATE);
+                panOffsetSample = Math.max(0, panOffsetSample + sampleDelta);
+                invalidate();
+                return true;
+            }
+            case MotionEvent.ACTION_UP:
+                if (!touchMoved) {
+                    // Tap — ustaw punkt odtwarzania w miejscu dotknięcia.
+                    float pxPerSecond = getWidth() / Math.max(0.001f, currentVisibleSeconds());
+                    long tappedSample = panOffsetSample + (long) (event.getX() / pxPerSecond * LiveAudioData.SAMPLE_RATE);
+                    playheadSample = tappedSample;
+                    if (seekListener != null) seekListener.onSeek(tappedSample);
+                    invalidate();
+                }
+                return true;
+        }
+        return false;
+    }
+
+    private float lastVisibleSeconds = 1f;
+
+    private float currentVisibleSeconds() {
+        return lastVisibleSeconds;
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int w = getWidth();
-        int h = getHeight();
+        int fullH = getHeight();
+        float rulerHeight = dp(RULER_HEIGHT_DP);
+        int h = (int) (fullH - rulerHeight);
         int mid = h / 2;
 
-        canvas.drawRect(0, 0, w, h, bgPaint);
-        canvas.drawLine(0, mid, w, mid, midlinePaint);
+        canvas.drawRect(0, 0, w, fullH, bgPaint);
+        canvas.drawLine(0, rulerHeight + mid, w, rulerHeight + mid, midlinePaint);
 
-        int totalEnvelopeCount = LiveAudioData.getEnvelopeSize();
-        // Gdy zoomSeconds>0, ograniczamy widoczny zakres do tylu sekund (ile chunkow
-        // obwiedni odpowiada tej liczbie sekund) — inaczej pokazujemy tyle punktow ile
-        // pikseli szerokosci ma widok (czyli "ALL", zawsze dopasowane do ekranu).
         int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
         int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
-        float[] envelope = LiveAudioData.snapshotEnvelopeTail(tailCount);
+
+        LiveAudioData.FrameSnapshot snap = isLiveMode
+                ? LiveAudioData.snapshotForDrawing(tailCount)
+                : LiveAudioData.snapshotForDrawingAtSample(panOffsetSample, tailCount);
+        float[] envelope = snap.envelope;
+
         if (envelope.length > 0) {
-            int startIdx = totalEnvelopeCount - envelope.length; // pozycja pierwszego punktu w PELNEJ historii
             float xStep = (float) w / Math.max(1, envelope.length);
 
+            int neededSize = envelope.length * 4;
+            if (envelopeLinePts.length != neededSize) envelopeLinePts = new float[neededSize];
             for (int i = 0; i < envelope.length; i++) {
-                float amp = envelope[i];
-                float barHeight = amp * mid;
+                float barHeight = envelope[i] * mid;
                 float x = i * xStep;
-                canvas.drawLine(x, mid - barHeight, x, mid + barHeight, envelopePaint);
+                int base = i * 4;
+                envelopeLinePts[base] = x;
+                envelopeLinePts[base + 1] = rulerHeight + mid - barHeight;
+                envelopeLinePts[base + 2] = x;
+                envelopeLinePts[base + 3] = rulerHeight + mid + barHeight;
             }
+            canvas.drawLines(envelopeLinePts, 0, neededSize, envelopePaint);
 
-            long visibleStartSample = (long) startIdx * 256;
-            long totalSamples = LiveAudioData.getTotalSamplesWritten();
-            float visibleSampleRange = Math.max(1, totalSamples - visibleStartSample);
+            long visibleStartSample = snap.visibleStartSample;
+            long totalSamples = snap.totalSamples;
+            float visibleSampleRange = Math.max(1, isLiveMode
+                    ? (totalSamples - visibleStartSample)
+                    : ((long) tailCount * 256));
+            lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
 
-            List<LiveAudioData.PitchPoint> pitchPts = LiveAudioData.snapshotPitchPointsFrom(visibleStartSample);
-
-            float[] pathX = new float[pitchPts.size()];
-            float[] pathY = new float[pathX.length];
-            int segLen = 0;
+            List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
+            pitchPath.reset();
+            boolean penDown = false;
 
             for (LiveAudioData.PitchPoint p : pitchPts) {
                 if (p.freq <= 0 || p.freq < PMIN || p.freq > PMAX) {
-                    drawSegment(canvas, pathX, pathY, segLen);
-                    segLen = 0;
+                    penDown = false;
                     continue;
                 }
                 float x = ((p.sampleIndex - visibleStartSample) / visibleSampleRange) * w;
-                if (x < 0 || x > w) continue;
-                pathX[segLen] = x;
-                pathY[segLen] = freqToY(p.freq, h);
-                segLen++;
+                if (x < 0 || x > w) { penDown = false; continue; }
+                float y = rulerHeight + freqToY(p.freq, h);
+                if (!penDown) {
+                    pitchPath.moveTo(x, y);
+                    penDown = true;
+                } else {
+                    pitchPath.lineTo(x, y);
+                }
             }
-            drawSegment(canvas, pathX, pathY, segLen);
+            canvas.drawPath(pitchPath, pitchPaint);
+
+            // Suwak odtwarzania — biala linia w miejscu wskazanym dotknieciem, albo
+            // aktualnej pozycji odtwarzacza.
+            if (playheadSample >= 0) {
+                float px = ((playheadSample - visibleStartSample) / visibleSampleRange) * w;
+                if (px >= 0 && px <= w) {
+                    canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
+                }
+            }
+
+            drawRuler(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+        } else {
+            canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         }
     }
 
-    private void drawSegment(Canvas canvas, float[] xs, float[] ys, int len) {
-        if (len < 2) return;
-        for (int i = 0; i < len - 1; i++) {
-            canvas.drawLine(xs[i], ys[i], xs[i + 1], ys[i + 1], pitchPaint);
+    private void drawRuler(Canvas canvas, int w, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
+        canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
+        float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
+        float pxPerSecond = w / visibleSeconds;
+
+        float tickIntervalSec = 1f;
+        while (tickIntervalSec * pxPerSecond < dp(40)) tickIntervalSec *= 2;
+
+        float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
+        float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
+
+        for (float sec = firstTickSecond; ; sec += tickIntervalSec) {
+            float x = (sec - startSecond) * pxPerSecond;
+            if (x > w) break;
+            canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
+            String label = String.format(Locale.getDefault(), "%.0fs", sec);
+            canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);
         }
     }
 }

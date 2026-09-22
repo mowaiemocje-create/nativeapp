@@ -61,6 +61,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private long pausedAccumMs = 0L;
     private long lastResumeAtMs = 0L;
     private String lastSavedFilePath = null;
+    private long pendingSeekSample = 0L;
     private static final int REQUEST_MIC_PERMISSION = 100;
 
     private final Handler redrawHandler = new Handler(Looper.getMainLooper());
@@ -143,7 +144,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
         });
 
-        playButton.setOnClickListener(v -> playLastRecording());
+        playButton.setOnClickListener(v -> {
+            String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
+            if (path != null) playFile(path, pendingSeekSample);
+        });
+        pitchWaveView.setOnSeekListener(sample -> pendingSeekSample = sample);
         resetButton.setOnClickListener(v -> resetRecording());
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
 
@@ -196,6 +201,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setEnabled(true);
         pauseButton.setText("⏸ PAUZA");
         playButton.setEnabled(false);
+        pitchWaveView.setLiveMode(true);
         statusText.setText("Nagrywanie… (możesz zablokować ekran)");
         redrawHandler.post(redrawLoop);
     }
@@ -268,8 +274,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     public void onSuccess(String base64, long durationMs, String mimeType) {
         runOnUiThread(() -> {
             statusText.setText("Nagrano " + (durationMs / 1000) + "s — zapisano");
-            pitchWaveView.invalidate();
             saveRecordingForPlayback(base64, mimeType);
+            loadedFilePath = null; // swiezo nagrany plik jest juz w LiveAudioData, nie trzeba wczytywac ponownie
+            pendingSeekSample = 0L;
+            pitchWaveView.setLiveMode(false); // pozwala przewijac/wskazac miejsce w tym co wlasnie nagrano
+            pitchWaveView.resetPan();
+            pitchWaveView.invalidate();
             playButton.setEnabled(true);
         });
     }
@@ -293,27 +303,70 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
     }
 
-    private void playLastRecording() {
-        if (lastSavedFilePath == null) return;
-        playFile(lastSavedFilePath);
+    private MediaPlayer currentPlayer;
+    private String loadedFilePath = null;
+
+    // Wczytuje plik z powrotem do wykresu (fala + pitch), przełącza widok w tryb statyczny
+    // (przewijalny palcem, z możliwością wskazania miejsca odtwarzania).
+    private void loadAndDisplayFile(File file) {
+        try {
+            AudioFileLoader.loadIntoLiveData(file);
+            loadedFilePath = file.getAbsolutePath();
+            pitchWaveView.setLiveMode(false);
+            pitchWaveView.resetPan();
+            pitchWaveView.invalidate();
+            statusText.setText("Wczytano: " + file.getName());
+        } catch (IOException e) {
+            statusText.setText("Błąd wczytywania: " + e.getMessage());
+        }
     }
 
-    private void playFile(String path) {
+    // startSampleIndex: pozycja (w próbkach), od której ma zacząć się odtwarzanie — 0 =
+    // od początku. Odpowiada dotknięciu wykresu (suwak odtwarzania).
+    private void playFile(String path, long startSampleIndex) {
         try {
+            if (currentPlayer != null) {
+                currentPlayer.release();
+                currentPlayer = null;
+            }
             MediaPlayer player = new MediaPlayer();
             player.setDataSource(path);
-            player.setOnCompletionListener(MediaPlayer::release);
+            player.setOnCompletionListener(mp -> {
+                mp.release();
+                currentPlayer = null;
+            });
             player.prepare();
+            int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
+            if (startMs > 0) player.seekTo(startMs);
             player.start();
+            currentPlayer = player;
             statusText.setText("Odtwarzanie…");
+            startPlayheadUpdateLoop();
         } catch (IOException e) {
             statusText.setText("Błąd odtwarzania: " + e.getMessage());
         }
     }
 
-    // Prosta lista zapisanych nagrań — na razie okno dialogowe z opcja odtworzenia po
-    // kliknieciu. Pelny ekran (jak "NAGRANIA" w PitchRec, z wysylka/pobieraniem) to
-    // kolejny etap.
+    // Przesuwa suwak (biala linia) w takt aktualnej pozycji odtwarzacza.
+    private final Runnable playheadUpdateLoop = new Runnable() {
+        @Override
+        public void run() {
+            if (currentPlayer != null) {
+                try {
+                    long sample = (long) currentPlayer.getCurrentPosition() * LiveAudioData.SAMPLE_RATE / 1000L;
+                    pitchWaveView.setPlayheadSample(sample);
+                } catch (IllegalStateException e) { /* odtwarzacz mogl sie juz zwolnic */ }
+                redrawHandler.postDelayed(this, 50);
+            }
+        }
+    };
+
+    private void startPlayheadUpdateLoop() {
+        redrawHandler.post(playheadUpdateLoop);
+    }
+
+    // Prosta lista zapisanych nagrań — kliknięcie wczytuje plik do wykresu i odtwarza od
+    // początku. Pełny ekran (jak "NAGRANIA" w PitchRec, z wysyłką/pobieraniem) to kolejny etap.
     private void showRecordingsList() {
         File[] files = getFilesDir().listFiles((dir, name) -> name.startsWith("recording_"));
         if (files == null || files.length == 0) {
@@ -331,7 +384,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         ListView listView = new ListView(this);
         listView.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels));
         listView.setOnItemClickListener((parent, view, position, id) -> {
-            playFile(files[position].getAbsolutePath());
+            loadAndDisplayFile(files[position]);
+            playFile(files[position].getAbsolutePath(), 0L);
         });
 
         new AlertDialog.Builder(this)
