@@ -6,7 +6,8 @@ import android.content.pm.PackageManager;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import android.widget.Button;
 import android.widget.TextView;
@@ -23,16 +24,28 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
-// Minimalna aktywność testowa — Faza 1: sprawdzenie, czy w pełni natywna architektura
-// (bez WebView/Capacitor w procesie) przetrwa nagrywanie z zablokowanym ekranem, przy
-// targetSdkVersion 36. Po zatrzymaniu, nagranie jest automatycznie odtwarzane, żeby od
-// razu było słychać czy dźwięk jest ciągły, czy milknie w jakimś momencie.
+// Faza 1B: nagrywanie + na żywo rysowany wykres fali i pitch (żółta linia), bez logowania.
+// Menu i logowanie NS to kolejny, osobny etap.
 public class MainActivity extends AppCompatActivity implements RecordingResultHolder.Listener {
 
     private Button recordButton;
+    private Button playButton;
     private TextView statusText;
+    private PitchWaveView pitchWaveView;
     private boolean isRecording = false;
+    private String lastSavedFilePath = null;
     private static final int REQUEST_MIC_PERMISSION = 100;
+
+    private final Handler redrawHandler = new Handler(Looper.getMainLooper());
+    private final Runnable redrawLoop = new Runnable() {
+        @Override
+        public void run() {
+            pitchWaveView.invalidate();
+            if (isRecording) {
+                redrawHandler.postDelayed(this, 50);
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,7 +53,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         setContentView(R.layout.activity_main);
 
         recordButton = findViewById(R.id.recordButton);
+        playButton = findViewById(R.id.playButton);
         statusText = findViewById(R.id.statusText);
+        pitchWaveView = findViewById(R.id.pitchWaveView);
 
         RecordingResultHolder.setListener(this);
 
@@ -51,6 +66,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 stopRecordingFlow();
             }
         });
+
+        playButton.setOnClickListener(v -> playLastRecording());
     }
 
     private void startRecordingFlow() {
@@ -60,12 +77,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
             return;
         }
-        // UWAGA: prośba o wyjątek od optymalizacji baterii USUNIĘTA z tego miejsca — wywołanie
-        // startActivity() (ekran ustawień) w tym samym momencie co startForegroundService()
-        // (bez czekania aż pierwsze się ustabilizuje) prawdopodobnie powodowało, że system
-        // (Samsung One UI) zabijał cały proces (signal 9), zanim nagrywanie nawet się zaczęło.
-        // Nie jest to kluczowe dla testu — jeśli okaże się potrzebne, dodamy to jako osobny,
-        // wcześniejszy krok (np. przy starcie aplikacji, nie w momencie startu nagrywania).
 
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_START);
@@ -76,7 +87,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         isRecording = true;
         recordButton.setText("Zatrzymaj");
+        playButton.setEnabled(false);
         statusText.setText("Nagrywanie… (możesz zablokować ekran)");
+        redrawHandler.post(redrawLoop);
     }
 
     private void stopRecordingFlow() {
@@ -99,13 +112,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
     }
 
-    // ── RecordingResultHolder.Listener ──
-
     @Override
     public void onSuccess(String base64, long durationMs, String mimeType) {
         runOnUiThread(() -> {
-            statusText.setText("Nagrano " + (durationMs / 1000) + "s — odtwarzanie do sprawdzenia…");
-            playBackRecording(base64);
+            statusText.setText("Nagrano " + (durationMs / 1000) + "s — zapisano");
+            pitchWaveView.invalidate();
+            saveRecordingForPlayback(base64);
+            playButton.setEnabled(true);
         });
     }
 
@@ -114,18 +127,28 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         runOnUiThread(() -> statusText.setText("Błąd: " + code + " — " + message));
     }
 
-    private void playBackRecording(String base64) {
+    private void saveRecordingForPlayback(String base64) {
         try {
             byte[] bytes = Base64.decode(base64, Base64.NO_WRAP);
-            File tempFile = new File(getCacheDir(), "playback_test.m4a");
-            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+            File savedFile = new File(getFilesDir(), "recording_" + System.currentTimeMillis() + ".wav");
+            try (FileOutputStream fos = new FileOutputStream(savedFile)) {
                 fos.write(bytes);
             }
+            lastSavedFilePath = savedFile.getAbsolutePath();
+        } catch (IOException e) {
+            statusText.setText("Błąd zapisu: " + e.getMessage());
+        }
+    }
+
+    private void playLastRecording() {
+        if (lastSavedFilePath == null) return;
+        try {
             MediaPlayer player = new MediaPlayer();
-            player.setDataSource(tempFile.getAbsolutePath());
+            player.setDataSource(lastSavedFilePath);
             player.setOnCompletionListener(MediaPlayer::release);
             player.prepare();
             player.start();
+            statusText.setText("Odtwarzanie…");
         } catch (IOException e) {
             statusText.setText("Błąd odtwarzania: " + e.getMessage());
         }
