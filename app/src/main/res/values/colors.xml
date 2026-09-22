@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dokładne odwzorowanie zmiennych CSS z PitchRec (wariant ciemny) -->
+    <color name="pr_bg">#17171C</color>
+    <color name="pr_card">#232329</color>
+    <color name="pr_border">#33333C</color>
+    <color name="pr_accent">#F0973A</color>
+    <color name="pr_purple">#B8B8C4</color>
+    <color name="pr_warn">#FF6B5C</color>
+    <color name="pr_pause">#E0A438</color>
+    <color name="pr_text">#FFFFFF</color>
+    <color name="pr_muted">#8A8A94</color>
+    <color name="pr_thumb">#FF9500</color>
+</resources>

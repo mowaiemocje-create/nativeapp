@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
 import android.widget.Button;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -23,16 +24,26 @@ import com.pitchrec.backgroundrecorder.RecordingResultHolder;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.Locale;
 
-// Faza 1B: nagrywanie + na żywo rysowany wykres fali i pitch (żółta linia), bez logowania.
-// Menu i logowanie NS to kolejny, osobny etap.
+// Ekran DAW — odtworzony uklad z PitchRec: suwaki MIC/ZOOM, miernik poziomu, przyciski
+// PLAY/REC/RESET, wyswietlacz czasu. Bez logowania na razie (Faza 1) — menu NS to kolejny etap.
 public class MainActivity extends AppCompatActivity implements RecordingResultHolder.Listener {
 
     private Button recordButton;
     private Button playButton;
+    private Button resetButton;
     private TextView statusText;
+    private TextView timeText;
+    private TextView gainValueText;
+    private TextView zoomValueText;
     private PitchWaveView pitchWaveView;
+    private SliderView gainSlider;
+    private SliderView zoomSlider;
+    private ProgressBar levelMeter;
+
     private boolean isRecording = false;
+    private long recordingStartedAtMs = 0L;
     private String lastSavedFilePath = null;
     private static final int REQUEST_MIC_PERMISSION = 100;
 
@@ -41,6 +52,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         @Override
         public void run() {
             pitchWaveView.invalidate();
+            updateTimeDisplay();
+            updateLevelMeter();
             if (isRecording) {
                 redrawHandler.postDelayed(this, 50);
             }
@@ -54,10 +67,36 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         recordButton = findViewById(R.id.recordButton);
         playButton = findViewById(R.id.playButton);
+        resetButton = findViewById(R.id.resetButton);
         statusText = findViewById(R.id.statusText);
+        timeText = findViewById(R.id.timeText);
+        gainValueText = findViewById(R.id.gainValueText);
+        zoomValueText = findViewById(R.id.zoomValueText);
         pitchWaveView = findViewById(R.id.pitchWaveView);
+        gainSlider = findViewById(R.id.gainSlider);
+        zoomSlider = findViewById(R.id.zoomSlider);
+        levelMeter = findViewById(R.id.levelMeter);
 
         RecordingResultHolder.setListener(this);
+
+        gainSlider.setValue(0.3f); // odpowiednik domyslnego gainLvl w PitchRec
+        gainSlider.setOnValueChangeListener(v -> {
+            float gain = 0.5f + v * 14.5f; // zakres podobny do gainLvl (0.5 - 15.0) w JS
+            gainValueText.setText(String.format(Locale.getDefault(), "%.1fx", gain));
+        });
+        gainValueText.setText("1.0x");
+
+        zoomSlider.setValue(0f); // 0 = ALL (caly zakres), jak w PitchRec
+        zoomSlider.setOnValueChangeListener(v -> {
+            if (v < 0.05f) {
+                zoomValueText.setText("ALL");
+                pitchWaveView.setZoomSeconds(0);
+            } else {
+                float seconds = 1f + v * 59f; // 1s - 60s zakres, podobnie do ZOOMS w JS
+                zoomValueText.setText(String.format(Locale.getDefault(), "%.0fs", seconds));
+                pitchWaveView.setZoomSeconds(seconds);
+            }
+        });
 
         recordButton.setOnClickListener(v -> {
             if (!isRecording) {
@@ -68,6 +107,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
 
         playButton.setOnClickListener(v -> playLastRecording());
+        resetButton.setOnClickListener(v -> resetRecording());
     }
 
     private void startRecordingFlow() {
@@ -86,7 +126,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             startService(intent);
         }
         isRecording = true;
-        recordButton.setText("Zatrzymaj");
+        recordingStartedAtMs = System.currentTimeMillis();
+        recordButton.setText("■ STOP");
         playButton.setEnabled(false);
         statusText.setText("Nagrywanie… (możesz zablokować ekran)");
         redrawHandler.post(redrawLoop);
@@ -97,8 +138,30 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         intent.setAction(BackgroundRecorderService.ACTION_STOP);
         startService(intent);
         isRecording = false;
-        recordButton.setText("Nagraj");
+        recordButton.setText("● REC");
         statusText.setText("Przetwarzanie…");
+    }
+
+    private void resetRecording() {
+        if (isRecording) stopRecordingFlow();
+        LiveAudioData.reset();
+        pitchWaveView.invalidate();
+        timeText.setText("00:00:00");
+        statusText.setText("Gotowy");
+    }
+
+    private void updateTimeDisplay() {
+        long elapsedMs = System.currentTimeMillis() - recordingStartedAtMs;
+        long totalSec = elapsedMs / 1000;
+        long h = totalSec / 3600, m = (totalSec % 3600) / 60, s = totalSec % 60;
+        timeText.setText(String.format(Locale.getDefault(), "%02d:%02d:%02d", h, m, s));
+    }
+
+    private void updateLevelMeter() {
+        float[] recent = LiveAudioData.snapshotEnvelopeTail(5);
+        float maxLevel = 0f;
+        for (float v : recent) if (v > maxLevel) maxLevel = v;
+        levelMeter.setProgress((int) Math.min(100, maxLevel * 100));
     }
 
     @Override

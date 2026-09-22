@@ -44,6 +44,13 @@ public class PitchWaveView extends View {
         pitchPaint.setAntiAlias(true);
     }
 
+    private float zoomSeconds = 0f; // 0 = pokaz tyle ile sie zmiesci (domyslnie), >0 = ograniczony zakres czasu
+
+    public void setZoomSeconds(float seconds) {
+        zoomSeconds = seconds;
+        invalidate();
+    }
+
     private float freqToY(float freq, int height) {
         double logF = Math.log(freq) / Math.log(2);
         double logMin = Math.log(PMIN) / Math.log(2);
@@ -61,26 +68,32 @@ public class PitchWaveView extends View {
         canvas.drawRect(0, 0, w, h, bgPaint);
         canvas.drawLine(0, mid, w, mid, midlinePaint);
 
-        float[] envelope = LiveAudioData.snapshotEnvelope();
+        int totalEnvelopeCount = LiveAudioData.getEnvelopeSize();
+        // Gdy zoomSeconds>0, ograniczamy widoczny zakres do tylu sekund (ile chunkow
+        // obwiedni odpowiada tej liczbie sekund) — inaczej pokazujemy tyle punktow ile
+        // pikseli szerokosci ma widok (czyli "ALL", zawsze dopasowane do ekranu).
+        int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
+        int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
+        float[] envelope = LiveAudioData.snapshotEnvelopeTail(tailCount);
         if (envelope.length > 0) {
-            int startIdx = Math.max(0, envelope.length - w);
-            int visibleCount = envelope.length - startIdx;
-            float xStep = (float) w / Math.max(1, visibleCount);
+            int startIdx = totalEnvelopeCount - envelope.length; // pozycja pierwszego punktu w PELNEJ historii
+            float xStep = (float) w / Math.max(1, envelope.length);
 
-            for (int i = 0; i < visibleCount; i++) {
-                float amp = envelope[startIdx + i];
+            for (int i = 0; i < envelope.length; i++) {
+                float amp = envelope[i];
                 float barHeight = amp * mid;
                 float x = i * xStep;
                 canvas.drawLine(x, mid - barHeight, x, mid + barHeight, envelopePaint);
             }
 
-            List<LiveAudioData.PitchPoint> pitchPts = LiveAudioData.snapshotPitchPoints();
             long visibleStartSample = (long) startIdx * 256;
             long totalSamples = LiveAudioData.getTotalSamplesWritten();
             float visibleSampleRange = Math.max(1, totalSamples - visibleStartSample);
 
+            List<LiveAudioData.PitchPoint> pitchPts = LiveAudioData.snapshotPitchPointsFrom(visibleStartSample);
+
             float[] pathX = new float[pitchPts.size()];
-            float[] pathY = new float[pitchPts.size()];
+            float[] pathY = new float[pathX.length];
             int segLen = 0;
 
             for (LiveAudioData.PitchPoint p : pitchPts) {

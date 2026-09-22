@@ -89,6 +89,41 @@ public class LiveAudioData {
 
     // Zwraca KOPIĘ aktualnej obwiedni i punktów pitch — bezpieczne do odczytu z wątku UI
     // podczas rysowania, bez blokowania wątku nagrywania na dłużej niż potrzeba do skopiowania.
+    // Zwraca KOPIĘ tylko OSTATNICH maxCount elementów obwiedni — nie całej historii. To
+    // kluczowe dla wydajności: bez tego, kopiowanie całej (rosnącej) listy przy każdej
+    // klatce (nawet gdy używamy tylko końcówki) samo w sobie powodowało lagi przy
+    // dłuższym nagraniu.
+    public static float[] snapshotEnvelopeTail(int maxCount) {
+        synchronized (lock) {
+            int size = envelope.size();
+            int start = Math.max(0, size - maxCount);
+            float[] result = new float[size - start];
+            for (int i = 0; i < result.length; i++) result[i] = envelope.get(start + i);
+            return result;
+        }
+    }
+
+    // Zwraca KOPIĘ punktów pitch o sampleIndex >= minSampleIndex (przeszukiwanie binarne,
+    // bez kopiowania wcześniejszej historii).
+    public static List<PitchPoint> snapshotPitchPointsFrom(long minSampleIndex) {
+        synchronized (lock) {
+            int lo = 0, hi = pitchPts.size();
+            while (lo < hi) {
+                int mid = (lo + hi) / 2;
+                if (pitchPts.get(mid).sampleIndex < minSampleIndex) lo = mid + 1;
+                else hi = mid;
+            }
+            int start = Math.max(0, lo - 1);
+            return new ArrayList<>(pitchPts.subList(start, pitchPts.size()));
+        }
+    }
+
+    public static int getEnvelopeSize() {
+        synchronized (lock) {
+            return envelope.size();
+        }
+    }
+
     public static float[] snapshotEnvelope() {
         synchronized (lock) {
             float[] result = new float[envelope.size()];

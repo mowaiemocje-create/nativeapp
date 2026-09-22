@@ -3,47 +3,164 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:background="@color/pr_bg">
+
+    <!-- Obszar wykresu (DAW) -->
+    <com.pitchrec.nativetest.PitchWaveView
+        android:id="@+id/pitchWaveView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
     <TextView
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Gotowy"
-        android:textSize="16sp"
+        android:textSize="12sp"
+        android:textColor="@color/pr_muted"
         android:gravity="center"
-        android:paddingBottom="12dp" />
+        android:padding="4dp"
+        android:background="@color/pr_card" />
 
-    <com.pitchrec.nativetest.PitchWaveView
-        android:id="@+id/pitchWaveView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginBottom="16dp" />
-
+    <!-- Panel kontrolny (.ctrl) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center">
+        android:orientation="vertical"
+        android:background="@color/pr_card"
+        android:padding="10dp">
 
-        <Button
-            android:id="@+id/recordButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Nagraj"
-            android:textSize="18sp"
-            android:padding="16dp"
-            android:layout_marginEnd="12dp" />
+        <!-- Suwak MIC (gain) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="MIC"
+                android:textSize="10sp"
+                android:textColor="@color/pr_muted" />
+            <com.pitchrec.nativetest.SliderView
+                android:id="@+id/gainSlider"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1" />
+            <TextView
+                android:id="@+id/gainValueText"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="1.0x"
+                android:textSize="10sp"
+                android:textColor="@color/pr_text"
+                android:gravity="end" />
+        </LinearLayout>
 
-        <Button
-            android:id="@+id/playButton"
-            android:layout_width="wrap_content"
+        <!-- Suwak ZOOM -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="ZOOM"
+                android:textSize="10sp"
+                android:textColor="@color/pr_muted" />
+            <com.pitchrec.nativetest.SliderView
+                android:id="@+id/zoomSlider"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1" />
+            <TextView
+                android:id="@+id/zoomValueText"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="ALL"
+                android:textSize="10sp"
+                android:textColor="@color/pr_text"
+                android:gravity="end" />
+        </LinearLayout>
+
+        <!-- Miernik poziomu -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Odtwórz"
-            android:textSize="18sp"
-            android:padding="16dp"
-            android:enabled="false" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+            <TextView
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="POZIOM"
+                android:textSize="9sp"
+                android:textColor="@color/pr_muted" />
+            <ProgressBar
+                android:id="@+id/levelMeter"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="6dp"
+                android:layout_weight="1"
+                android:max="100"
+                android:progress="0" />
+        </LinearLayout>
+
+        <!-- Rzad przyciskow (.br) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/playButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="▶ PLAY"
+                android:textSize="11sp"
+                android:textColor="@color/pr_purple"
+                android:backgroundTint="@color/pr_card"
+                android:enabled="false" />
+
+            <Button
+                android:id="@+id/recordButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="● REC"
+                android:textSize="11sp"
+                android:textColor="@color/pr_warn"
+                android:backgroundTint="@color/pr_card" />
+
+            <TextView
+                android:id="@+id/timeText"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="00:00:00"
+                android:textColor="@color/pr_text"
+                android:textSize="13sp"
+                android:background="@color/pr_bg" />
+
+            <Button
+                android:id="@+id/resetButton"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.55"
+                android:layout_marginStart="4dp"
+                android:text="↺"
+                android:textColor="@color/pr_text"
+                android:backgroundTint="@color/pr_card" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
