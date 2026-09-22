@@ -60,7 +60,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
             return;
         }
-        requestBatteryOptimizationExemption();
+        // UWAGA: prośba o wyjątek od optymalizacji baterii USUNIĘTA z tego miejsca — wywołanie
+        // startActivity() (ekran ustawień) w tym samym momencie co startForegroundService()
+        // (bez czekania aż pierwsze się ustabilizuje) prawdopodobnie powodowało, że system
+        // (Samsung One UI) zabijał cały proces (signal 9), zanim nagrywanie nawet się zaczęło.
+        // Nie jest to kluczowe dla testu — jeśli okaże się potrzebne, dodamy to jako osobny,
+        // wcześniejszy krok (np. przy starcie aplikacji, nie w momencie startu nagrywania).
 
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_START);
@@ -81,17 +86,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         isRecording = false;
         recordButton.setText("Nagraj");
         statusText.setText("Przetwarzanie…");
-    }
-
-    private void requestBatteryOptimizationExemption() {
-        try {
-            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
-            if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
-                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                intent.setData(android.net.Uri.parse("package:" + getPackageName()));
-                startActivity(intent);
-            }
-        } catch (Exception e) { /* ignorowane */ }
     }
 
     @Override
