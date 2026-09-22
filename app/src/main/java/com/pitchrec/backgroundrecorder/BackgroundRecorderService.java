@@ -24,23 +24,28 @@ import android.util.Base64;
 import com.pitchrec.nativetest.LiveAudioData;
 import com.pitchrec.nativetest.YinPitchDetector;
 
+import net.sourceforge.lame.lowlevel.LameEncoder;
+import net.sourceforge.lame.mp3.Lame;
+import net.sourceforge.lame.mp3.MPEGMode;
+
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.ByteArrayOutputStream;
 
 // Foreground Service — nagrywanie przez AudioRecord (ręczna pętla odczytu), żeby mieć dostęp
 // do surowych próbek PCM potrzebnych do liczenia pitch (YIN) i rysowania fali w czasie
-// rzeczywistym. Potwierdzone: w pełni natywna architektura (bez WebView) przetrwała
-// nagrywanie z zablokowanym ekranem na SDK 36 nawet z MediaRecorder — AudioRecord powinien
-// zadziałać identycznie dobrze, to nie API audio było wcześniej problemem, tylko WebView.
+// rzeczywistym. Wspiera dwa formaty zapisu: WAV (surowe PCM) albo prawdziwe MP3 (przez
+// czysty port Javy biblioteki LAME — java-lame, bez C++/NDK).
 public class BackgroundRecorderService extends Service {
 
     public static final String ACTION_START = "com.pitchrec.backgroundrecorder.START";
     public static final String ACTION_PAUSE = "com.pitchrec.backgroundrecorder.PAUSE";
     public static final String ACTION_RESUME = "com.pitchrec.backgroundrecorder.RESUME";
     public static final String ACTION_STOP = "com.pitchrec.backgroundrecorder.STOP";
+    public static final String EXTRA_FORMAT = "format"; // "wav" albo "mp3"
     public static final String CHANNEL_ID = "pitchrec_recording_channel";
     public static final int NOTIFICATION_ID = 1001;
 
@@ -49,15 +54,24 @@ public class BackgroundRecorderService extends Service {
     private static final int SAMPLE_RATE = 44100;
     private static final int CHANNELS = AudioFormat.CHANNEL_IN_MONO;
     private static final int ENCODING = AudioFormat.ENCODING_PCM_16BIT;
-    private static final int YIN_WINDOW = 2048; // rozmiar okna do liczenia pitch, jak AN.frequencyBinCount w JS
+    private static final int YIN_WINDOW = 2048;
 
     private AudioRecord audioRecord;
     private Thread recordThread;
     private volatile boolean recording = false;
     private volatile boolean paused = false;
-    private RandomAccessFile outputStream;
-    private File outputFile;
+    private String outputFormat = "wav";
+
+    // Sciezka WAV (surowe PCM + naglowek)
+    private RandomAccessFile wavOutputStream;
     private long pcmBytesWritten = 0L;
+
+    // Sciezka MP3 (kodowanie na biezaco przez java-lame)
+    private LameEncoder lameEncoder;
+    private FileOutputStream mp3OutputStream;
+    private byte[] mp3EncodeBuffer;
+
+    private File outputFile;
     private long recordingStartedAt = 0L;
     private long pausedAccumMs = 0L;
     private long lastResumeAt = 0L;
@@ -81,15 +95,19 @@ public class BackgroundRecorderService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : null;
-        if (ACTION_START.equals(action)) handleStart();
+        if (ACTION_START.equals(action)) {
+            String fmt = intent.getStringExtra(EXTRA_FORMAT);
+            handleStart(fmt != null ? fmt : "wav");
+        }
         else if (ACTION_PAUSE.equals(action)) handlePause();
         else if (ACTION_RESUME.equals(action)) handleResume();
         else if (ACTION_STOP.equals(action)) handleStop();
         return START_STICKY;
     }
 
-    private void handleStart() {
+    private void handleStart(String format) {
         if ("RECORDING".equals(currentStatus)) return;
+        outputFormat = format;
 
         LiveAudioData.reset();
         createNotificationChannel();
@@ -129,7 +147,6 @@ public class BackgroundRecorderService extends Service {
         } catch (Exception e) { /* ignorowane */ }
 
         try {
-            outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
             int minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNELS, ENCODING);
             if (minBufferSize <= 0) throw new IOException("AudioRecord.getMinBufferSize failed: " + minBufferSize);
             int bufferSize = minBufferSize * 4;
@@ -139,9 +156,19 @@ public class BackgroundRecorderService extends Service {
                 throw new IOException("AudioRecord nie zainicjalizowany poprawnie");
             }
 
-            outputStream = new RandomAccessFile(outputFile, "rw");
-            writeWavHeaderPlaceholder(outputStream);
-            pcmBytesWritten = 0L;
+            if ("mp3".equals(outputFormat)) {
+                outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".mp3");
+                javax.sound.sampled.AudioFormat lameFormat =
+                        new javax.sound.sampled.AudioFormat(SAMPLE_RATE, 16, 1, true, false);
+                lameEncoder = new LameEncoder(lameFormat, 192, MPEGMode.MONO, Lame.QUALITY_HIGHEST, false);
+                mp3OutputStream = new FileOutputStream(outputFile);
+                mp3EncodeBuffer = new byte[lameEncoder.getPCMBufferSize()];
+            } else {
+                outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
+                wavOutputStream = new RandomAccessFile(outputFile, "rw");
+                writeWavHeaderPlaceholder(wavOutputStream);
+                pcmBytesWritten = 0L;
+            }
 
             audioRecord.startRecording();
             if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
@@ -172,17 +199,12 @@ public class BackgroundRecorderService extends Service {
                         }
                         int read = audioRecord.read(buffer, 0, buffer.length);
                         if (read > 0) {
-                            // Zapis do pliku WAV (16-bit little-endian, tak jak nagrywalismy dotad)
                             try {
-                                byte[] bytes = shortsToBytesLE(buffer, read);
-                                outputStream.write(bytes);
-                                pcmBytesWritten += bytes.length;
-                            } catch (IOException ioe) { /* kontynuuj, jak wczesniej */ }
+                                writeAudioChunk(buffer, read);
+                            } catch (IOException ioe) { /* kontynuuj */ }
 
-                            // Obwiednia dla rysowania fali
                             LiveAudioData.appendSamples(buffer, read);
 
-                            // Wypelnij okno YIN, licz pitch gdy okno pelne
                             for (int i = 0; i < read; i++) {
                                 yinWindow[yinFillCount] = buffer[i] / 32768f;
                                 yinFillCount++;
@@ -194,9 +216,6 @@ public class BackgroundRecorderService extends Service {
                                     } else {
                                         LiveAudioData.appendPitch(windowStartSample, -1);
                                     }
-                                    // Przesuwamy okno o pol dlugosci (overlap), nie zerujemy calkowicie —
-                                    // prostsze podejscie: po prostu zaczynamy nowe okno od zera (mniej
-                                    // czestа aktualizacja pitch, ale wystarczajaca dla wizualizacji).
                                     yinFillCount = 0;
                                 }
                             }
@@ -215,6 +234,24 @@ public class BackgroundRecorderService extends Service {
             RecordingResultHolder.rejectStop("FAILED_TO_RECORD", e.getMessage());
             stopForegroundCompat();
             stopSelf();
+        }
+    }
+
+    // Zapisuje porcje probek do wybranego formatu wyjsciowego (WAV: surowe bajty; MP3:
+    // kodowanie na biezaco przez LameEncoder).
+    private void writeAudioChunk(short[] samples, int count) throws IOException {
+        if ("mp3".equals(outputFormat)) {
+            if (lameEncoder == null || mp3OutputStream == null) return;
+            byte[] pcmBytes = shortsToBytesLE(samples, count);
+            int bytesEncoded = lameEncoder.encodeBuffer(pcmBytes, 0, pcmBytes.length, mp3EncodeBuffer);
+            if (bytesEncoded > 0) {
+                mp3OutputStream.write(mp3EncodeBuffer, 0, bytesEncoded);
+            }
+        } else {
+            if (wavOutputStream == null) return;
+            byte[] bytes = shortsToBytesLE(samples, count);
+            wavOutputStream.write(bytes);
+            pcmBytesWritten += bytes.length;
         }
     }
 
@@ -259,15 +296,15 @@ public class BackgroundRecorderService extends Service {
             }
             cleanupAudioResources();
 
-            if (outputFile == null || !outputFile.exists() || pcmBytesWritten == 0L) {
+            boolean hasData = outputFile != null && outputFile.exists() && outputFile.length() > 0;
+            if (!hasData) {
                 RecordingResultHolder.rejectStop("EMPTY_RECORDING", null);
             } else {
                 long durationMs = System.currentTimeMillis() - recordingStartedAt - pausedAccumMs;
                 byte[] bytes = readFileBytes(outputFile);
                 String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                RecordingResultHolder.resolveStop(base64, durationMs, "audio/wav");
-                // UWAGA: NIE usuwamy pliku od razu — zostaje na dysku pod outputFile.getAbsolutePath(),
-                // żeby MainActivity mogła go odtworzyć bez konieczności dekodowania base64 z powrotem.
+                String mime = "mp3".equals(outputFormat) ? "audio/mpeg" : "audio/wav";
+                RecordingResultHolder.resolveStop(base64, durationMs, mime);
             }
         } catch (Exception e) {
             RecordingResultHolder.rejectStop("FAILED_TO_FETCH_RECORDING", e.getMessage());
@@ -281,20 +318,30 @@ public class BackgroundRecorderService extends Service {
         }
     }
 
-    public File getLastOutputFile() {
-        return outputFile;
-    }
-
     private void cleanupAudioResources() {
         try { if (audioRecord != null) { audioRecord.stop(); audioRecord.release(); } } catch (Exception e) { }
         audioRecord = null;
+
         try {
-            if (outputStream != null) {
-                finalizeWavHeader(outputStream, pcmBytesWritten);
-                outputStream.close();
+            if (wavOutputStream != null) {
+                finalizeWavHeader(wavOutputStream, pcmBytesWritten);
+                wavOutputStream.close();
             }
         } catch (Exception e) { }
-        outputStream = null;
+        wavOutputStream = null;
+
+        try {
+            if (lameEncoder != null && mp3OutputStream != null) {
+                // Ostatnie wywolanie z pusta wejsciowka - wymusza zapis buforowanych ramek
+                // MP3, ktore koder mogl jeszcze przetrzymywac wewnetrznie.
+                int flushed = lameEncoder.encodeFinish(mp3EncodeBuffer);
+                if (flushed > 0) mp3OutputStream.write(mp3EncodeBuffer, 0, flushed);
+                mp3OutputStream.close();
+                lameEncoder.close();
+            }
+        } catch (Exception e) { }
+        lameEncoder = null;
+        mp3OutputStream = null;
     }
 
     private void writeWavHeaderPlaceholder(RandomAccessFile raf) throws IOException {

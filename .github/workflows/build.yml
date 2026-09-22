@@ -21,6 +21,14 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Pobiera prawdziwy, oficjalny, wstepnie zbudowany plik JAR biblioteki java-lame
+      # (czysty port LAME do Javy, potrzebny do kodowania MP3 bez C++/NDK).
+      - name: Download java-lame JAR
+        run: |
+          mkdir -p app/libs
+          curl -L -o app/libs/net.sourceforge.lame-3.98.4.jar \
+            https://github.com/nwaldispuehl/java-lame/releases/download/v3.98.4/net.sourceforge.lame-3.98.4.jar
+
       - name: Build APK
         run: gradle assembleDebug --no-daemon
 

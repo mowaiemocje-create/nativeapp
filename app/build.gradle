@@ -30,4 +30,5 @@ dependencies {
         exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
     }
     implementation 'androidx.core:core:1.13.1'
+    implementation files('libs/net.sourceforge.lame-3.98.4.jar')
 }
