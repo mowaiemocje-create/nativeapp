@@ -292,7 +292,7 @@ public class BackgroundRecorderService extends Service {
         }
         builder.setContentTitle("PitchRec")
                 .setContentText(text)
-                .setSmallIcon(getApplicationInfo().icon)
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true);
 
         if (mediaSession != null) {
