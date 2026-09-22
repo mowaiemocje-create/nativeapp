@@ -39,4 +39,39 @@ public class AudioFormat {
     public int getFrameSize() {
         return (sampleSizeInBits / 8) * channels;
     }
+
+    // Zagnieżdżona klasa Encoding — brakujący element powodujący
+    // NoClassDefFoundError w statycznym inicjalizatorze LameEncoder. Odtworzona zgodnie z
+    // prawdziwym API javax.sound.sampled.AudioFormat.Encoding (zestaw predefiniowanych,
+    // nazwanych stałych, nie realne I/O — bezpieczne do odtworzenia).
+    public static class Encoding {
+        public static final Encoding PCM_SIGNED = new Encoding("PCM_SIGNED");
+        public static final Encoding PCM_UNSIGNED = new Encoding("PCM_UNSIGNED");
+        public static final Encoding PCM_FLOAT = new Encoding("PCM_FLOAT");
+        public static final Encoding ULAW = new Encoding("ULAW");
+        public static final Encoding ALAW = new Encoding("ALAW");
+
+        private final String name;
+
+        public Encoding(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public final String toString() {
+            return name;
+        }
+
+        @Override
+        public final boolean equals(Object obj) {
+            if (obj == this) return true;
+            if (!(obj instanceof Encoding)) return false;
+            return name.equals(((Encoding) obj).name);
+        }
+
+        @Override
+        public final int hashCode() {
+            return name.hashCode();
+        }
+    }
 }
