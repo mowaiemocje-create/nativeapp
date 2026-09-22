@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
+import android.view.View;
 import android.widget.Button;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -17,6 +18,8 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.pitchrec.backgroundrecorder.BackgroundRecorderService;
 import com.pitchrec.backgroundrecorder.RecordingResultHolder;
@@ -64,6 +67,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // Jawna obsluga wciec systemowych — samo fitsSystemWindows bywa niepewne na
+        // nowszych SDK, gdzie Android wymusza tryb edge-to-edge. To dopelnia dol ekranu o
+        // wysokosc paska nawigacji systemowej, zeby przyciski nie byly pod nim zakryte.
+        View rootLayout = findViewById(R.id.rootLayout);
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, insets) -> {
+            int bottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
+            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(), bottomInset);
+            return insets;
+        });
 
         recordButton = findViewById(R.id.recordButton);
         playButton = findViewById(R.id.playButton);
