@@ -33,6 +33,7 @@ public class PitchWaveView extends View {
     private final Paint rulerTickPaint = new Paint();
     private final Paint rulerTextPaint = new Paint();
     private final Paint playheadPaint = new Paint();
+    private final Paint gridLinePaint = new Paint();
 
     public interface OnSeekListener {
         void onSeek(long sampleIndex);
@@ -73,6 +74,9 @@ public class PitchWaveView extends View {
         rulerTextPaint.setTextSize(dp(12));
         rulerTextPaint.setAntiAlias(true);
         rulerTextPaint.setFakeBoldText(true);
+
+        gridLinePaint.setColor(Color.parseColor("#20FFFFFF"));
+        gridLinePaint.setStrokeWidth(1f);
 
         playheadPaint.setColor(Color.parseColor("#FFFFFF"));
         playheadPaint.setStrokeWidth(dp(2));
@@ -247,13 +251,13 @@ public class PitchWaveView extends View {
                 }
             }
 
-            drawRuler(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            drawRuler(canvas, w, fullH, rulerHeight, visibleStartSample, visibleSampleRange);
         } else {
             canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         }
     }
 
-    private void drawRuler(Canvas canvas, int w, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
+    private void drawRuler(Canvas canvas, int w, int fullH, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
         canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
         float pxPerSecond = w / visibleSeconds;
@@ -267,6 +271,9 @@ public class PitchWaveView extends View {
         for (float sec = firstTickSecond; ; sec += tickIntervalSec) {
             float x = (sec - startSecond) * pxPerSecond;
             if (x > w) break;
+            // Prążek siatki — pełna wysokość wykresu (nie tylko znacznik w podziałce), jak
+            // w profesjonalnych edytorach audio (RecForge i podobne).
+            canvas.drawLine(x, rulerHeight, x, fullH, gridLinePaint);
             canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
             String label = String.format(Locale.getDefault(), "%.0fs", sec);
             canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);

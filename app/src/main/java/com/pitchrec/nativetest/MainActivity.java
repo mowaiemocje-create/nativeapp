@@ -72,7 +72,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             updateTimeDisplay();
             updateLevelMeter();
             if (isRecording) {
-                redrawHandler.postDelayed(this, 50);
+                // postOnAnimation zamiast postDelayed — synchronizuje sie z odswiezaniem
+                // ekranu (VSYNC), dajac plynniejszy efekt niz sztywny czasomierz co 50ms.
+                pitchWaveView.postOnAnimation(this);
             }
         }
     };
@@ -208,7 +210,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         playButton.setEnabled(false);
         pitchWaveView.setLiveMode(true);
         statusText.setText("Nagrywanie… (możesz zablokować ekran)");
-        redrawHandler.post(redrawLoop);
+        pitchWaveView.postOnAnimation(redrawLoop);
     }
 
     private void stopRecordingFlow() {
@@ -229,7 +231,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         isPaused = true;
         pausedAccumMs += System.currentTimeMillis() - lastResumeAtMs;
         pauseButton.setText("▶ WZNÓW");
-        statusText.setText("Pauza");
+        statusText.setText("Pauza — możesz przewinąć palcem");
+        pitchWaveView.setLiveMode(false); // pozwala przewijac to, co juz nagrane
     }
 
     private void resumeRecordingFlow() {
@@ -240,6 +243,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         lastResumeAtMs = System.currentTimeMillis();
         pauseButton.setText("⏸ PAUZA");
         statusText.setText("Nagrywanie…");
+        pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
 
     private void resetRecording() {
@@ -342,11 +346,21 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             });
             player.prepare();
             int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
-            if (startMs > 0) player.seekTo(startMs);
-            player.start();
             currentPlayer = player;
-            statusText.setText("Odtwarzanie…");
-            startPlayheadUpdateLoop();
+            if (startMs > 0) {
+                // Niektóre urządzenia nie przewijają poprawnie, jeśli start() jest wołane
+                // natychmiast po seekTo() — czekamy na potwierdzenie zakończenia przewijania.
+                player.setOnSeekCompleteListener(mp -> {
+                    mp.start();
+                    statusText.setText("Odtwarzanie…");
+                    startPlayheadUpdateLoop();
+                });
+                player.seekTo(startMs);
+            } else {
+                player.start();
+                statusText.setText("Odtwarzanie…");
+                startPlayheadUpdateLoop();
+            }
         } catch (IOException e) {
             statusText.setText("Błąd odtwarzania: " + e.getMessage());
         }
@@ -391,6 +405,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         listView.setOnItemClickListener((parent, view, position, id) -> {
             loadAndDisplayFile(files[position]);
             playFile(files[position].getAbsolutePath(), 0L);
+        });
+        listView.setOnItemLongClickListener((parent, view, position, id) -> {
+            File toDelete = files[position];
+            new AlertDialog.Builder(this)
+                    .setTitle("Usunąć nagranie?")
+                    .setMessage(toDelete.getName())
+                    .setPositiveButton("Usuń", (dialog, which) -> {
+                        toDelete.delete();
+                        Toast.makeText(this, "Usunięto", Toast.LENGTH_SHORT).show();
+                        showRecordingsList(); // odswiez liste
+                    })
+                    .setNegativeButton("Anuluj", null)
+                    .show();
+            return true;
         });
 
         new AlertDialog.Builder(this)
