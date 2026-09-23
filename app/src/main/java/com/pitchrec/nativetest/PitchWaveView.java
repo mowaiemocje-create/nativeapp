@@ -6,19 +6,16 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.util.AttributeSet;
-import android.view.MotionEvent;
 import android.view.View;
 
 import java.util.List;
 import java.util.Locale;
 
-// Rysuje falę (obwiednia amplitudy) + żółtą linię pitch + podziałkę sekundową na górze +
-// suwak odtwarzania (playhead). Wsparcie dla DWÓCH trybów:
-//  - "na żywo" (isLiveMode=true): automatyczne przewijanie do najnowszych próbek, jak
-//    podczas nagrywania.
-//  - "statyczny" (isLiveMode=false, po wczytaniu zapisanego pliku): użytkownik może
-//    przewijać palcem (drag) i dotknięciem (tap) wskazać punkt, od którego ma zacząć się
-//    odtwarzanie — rysowany jako biała, pełna linia (suwak).
+// Rysuje falę (obwiednia amplitudy) + żółtą linię pitch + podziałkę sekundową na górze.
+// WYDAJNOŚĆ: linia pitch rysowana jako Path (jedno wywołanie drawPath na segment, gładkie
+// połączenia) zamiast wielu pojedynczych drawLine — to była przyczyna zarówno lagów, jak i
+// "poszarpanego" wyglądu linii pitch. Fala rysowana przez drawLines (wsadowo, jedno
+// wywołanie), nie po jednej kolumnie na wywołanie.
 public class PitchWaveView extends View {
 
     private static final float PMIN = 55f;
@@ -32,14 +29,6 @@ public class PitchWaveView extends View {
     private final Paint rulerBgPaint = new Paint();
     private final Paint rulerTickPaint = new Paint();
     private final Paint rulerTextPaint = new Paint();
-    private final Paint playheadPaint = new Paint();
-    private final Paint gridLinePaint = new Paint();
-
-    public interface OnSeekListener {
-        void onSeek(long sampleIndex);
-    }
-
-    private OnSeekListener seekListener;
 
     public PitchWaveView(Context context) {
         super(context);
@@ -52,9 +41,6 @@ public class PitchWaveView extends View {
     }
 
     private void init() {
-        setClickable(true);
-        setFocusable(true);
-
         bgPaint.setColor(Color.parseColor("#050510"));
         envelopePaint.setColor(Color.parseColor("#8B7EFF"));
         envelopePaint.setStrokeWidth(2f);
@@ -74,12 +60,6 @@ public class PitchWaveView extends View {
         rulerTextPaint.setTextSize(dp(12));
         rulerTextPaint.setAntiAlias(true);
         rulerTextPaint.setFakeBoldText(true);
-
-        gridLinePaint.setColor(Color.parseColor("#20FFFFFF"));
-        gridLinePaint.setStrokeWidth(1f);
-
-        playheadPaint.setColor(Color.parseColor("#FFFFFF"));
-        playheadPaint.setStrokeWidth(dp(2));
     }
 
     private float dp(float v) {
@@ -87,37 +67,10 @@ public class PitchWaveView extends View {
     }
 
     private float zoomSeconds = 0f;
-    private boolean isLiveMode = true;
-    private long panOffsetSample = 0L;
-    private long playheadSample = -1L; // -1 = brak (nie ustawiony)
 
     public void setZoomSeconds(float seconds) {
         zoomSeconds = seconds;
         invalidate();
-    }
-
-    // true podczas aktywnego nagrywania (auto-przewijanie), false po wczytaniu zapisanego
-    // pliku do przeglądania/odtwarzania (przewijanie palcem, wskazywanie miejsca startu).
-    public void setLiveMode(boolean live) {
-        isLiveMode = live;
-        if (live) panOffsetSample = 0L;
-        invalidate();
-    }
-
-    public void setOnSeekListener(OnSeekListener l) {
-        seekListener = l;
-    }
-
-    // Wywoływane z zewnątrz (MainActivity) podczas odtwarzania, żeby suwak przesuwał się w
-    // takt aktualnej pozycji odtwarzacza.
-    public void setPlayheadSample(long sample) {
-        playheadSample = sample;
-        invalidate();
-    }
-
-    public void resetPan() {
-        panOffsetSample = 0L;
-        playheadSample = -1L;
     }
 
     private float freqToY(float freq, int height) {
@@ -127,56 +80,10 @@ public class PitchWaveView extends View {
         return (float) (height * (1 - (logF - logMin) / (logMax - logMin)));
     }
 
+    // Reużywalne bufory — unikamy alokacji nowych tablic przy każdej klatce (dodatkowe
+    // usprawnienie wydajności, oprócz Path/drawLines).
     private float[] envelopeLinePts = new float[0];
     private final Path pitchPath = new Path();
-
-    // ── Obsługa dotyku: przewijanie (drag) w trybie statycznym, dotknięcie (tap) = ustaw
-    // punkt odtwarzania. Odróżniamy tap od drag na podstawie całkowitego przemieszczenia. ──
-    private float touchStartX = 0f;
-    private float touchLastX = 0f;
-    private boolean touchMoved = false;
-    private static final float TAP_THRESHOLD_PX = 12f;
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (isLiveMode) return false; // przewijanie tylko w trybie statycznym
-
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_DOWN:
-                touchStartX = event.getX();
-                touchLastX = touchStartX;
-                touchMoved = false;
-                return true;
-            case MotionEvent.ACTION_MOVE: {
-                float dx = event.getX() - touchLastX;
-                touchLastX = event.getX();
-                if (Math.abs(event.getX() - touchStartX) > TAP_THRESHOLD_PX) touchMoved = true;
-
-                float pxPerSecond = getWidth() / Math.max(0.001f, currentVisibleSeconds());
-                long sampleDelta = (long) (-dx / pxPerSecond * LiveAudioData.SAMPLE_RATE);
-                panOffsetSample = Math.max(0, panOffsetSample + sampleDelta);
-                invalidate();
-                return true;
-            }
-            case MotionEvent.ACTION_UP:
-                if (!touchMoved) {
-                    // Tap — ustaw punkt odtwarzania w miejscu dotknięcia.
-                    float pxPerSecond = getWidth() / Math.max(0.001f, currentVisibleSeconds());
-                    long tappedSample = panOffsetSample + (long) (event.getX() / pxPerSecond * LiveAudioData.SAMPLE_RATE);
-                    playheadSample = tappedSample;
-                    if (seekListener != null) seekListener.onSeek(tappedSample);
-                    invalidate();
-                }
-                return true;
-        }
-        return false;
-    }
-
-    private float lastVisibleSeconds = 1f;
-
-    private float currentVisibleSeconds() {
-        return lastVisibleSeconds;
-    }
 
     @Override
     protected void onDraw(Canvas canvas) {
@@ -190,17 +97,16 @@ public class PitchWaveView extends View {
         canvas.drawRect(0, 0, w, fullH, bgPaint);
         canvas.drawLine(0, rulerHeight + mid, w, rulerHeight + mid, midlinePaint);
 
+        int totalEnvelopeCount = LiveAudioData.getEnvelopeSize();
         int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
         int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
-
-        LiveAudioData.FrameSnapshot snap = isLiveMode
-                ? LiveAudioData.snapshotForDrawing(tailCount)
-                : LiveAudioData.snapshotForDrawingAtSample(panOffsetSample, tailCount);
-        float[] envelope = snap.envelope;
+        float[] envelope = LiveAudioData.snapshotEnvelopeTail(tailCount);
 
         if (envelope.length > 0) {
+            int startIdx = totalEnvelopeCount - envelope.length;
             float xStep = (float) w / Math.max(1, envelope.length);
 
+            // Fala — wsadowe rysowanie przez drawLines (jedno wywolanie, nie N wywolan).
             int neededSize = envelope.length * 4;
             if (envelopeLinePts.length != neededSize) envelopeLinePts = new float[neededSize];
             for (int i = 0; i < envelope.length; i++) {
@@ -214,14 +120,12 @@ public class PitchWaveView extends View {
             }
             canvas.drawLines(envelopeLinePts, 0, neededSize, envelopePaint);
 
-            long visibleStartSample = snap.visibleStartSample;
-            long totalSamples = snap.totalSamples;
-            float visibleSampleRange = Math.max(1, isLiveMode
-                    ? (totalSamples - visibleStartSample)
-                    : ((long) tailCount * 256));
-            lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
+            long visibleStartSample = (long) startIdx * 256;
+            long totalSamples = LiveAudioData.getTotalSamplesWritten();
+            float visibleSampleRange = Math.max(1, totalSamples - visibleStartSample);
 
-            List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
+            // Linia pitch — Path (gladkie, polaczone segmenty), jedno drawPath na segment.
+            List<LiveAudioData.PitchPoint> pitchPts = LiveAudioData.snapshotPitchPointsFrom(visibleStartSample);
             pitchPath.reset();
             boolean penDown = false;
 
@@ -242,28 +146,21 @@ public class PitchWaveView extends View {
             }
             canvas.drawPath(pitchPath, pitchPaint);
 
-            // Suwak odtwarzania — biala linia w miejscu wskazanym dotknieciem, albo
-            // aktualnej pozycji odtwarzacza.
-            if (playheadSample >= 0) {
-                float px = ((playheadSample - visibleStartSample) / visibleSampleRange) * w;
-                if (px >= 0 && px <= w) {
-                    canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
-                }
-            }
-
-            drawRuler(canvas, w, fullH, rulerHeight, visibleStartSample, visibleSampleRange);
+            drawRuler(canvas, w, rulerHeight, visibleStartSample, totalSamples);
         } else {
             canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         }
     }
 
-    private void drawRuler(Canvas canvas, int w, int fullH, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
+    // Podziałka sekundowa (inspirowana RecForge) — znaczniki i etykiety co 1s (albo więcej,
+    // gdy widoczny zakres jest długi — dostrajamy odstęp, żeby etykiety się nie zlewały).
+    private void drawRuler(Canvas canvas, int w, float rulerHeight, long visibleStartSample, long totalSamples) {
         canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
-        float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
+        float visibleSeconds = Math.max(0.001f, (totalSamples - visibleStartSample) / (float) LiveAudioData.SAMPLE_RATE);
         float pxPerSecond = w / visibleSeconds;
 
         float tickIntervalSec = 1f;
-        while (tickIntervalSec * pxPerSecond < dp(40)) tickIntervalSec *= 2;
+        while (tickIntervalSec * pxPerSecond < dp(40)) tickIntervalSec *= 2; // nie za gesto
 
         float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
         float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
@@ -271,9 +168,6 @@ public class PitchWaveView extends View {
         for (float sec = firstTickSecond; ; sec += tickIntervalSec) {
             float x = (sec - startSecond) * pxPerSecond;
             if (x > w) break;
-            // Prążek siatki — pełna wysokość wykresu (nie tylko znacznik w podziałce), jak
-            // w profesjonalnych edytorach audio (RecForge i podobne).
-            canvas.drawLine(x, rulerHeight, x, fullH, gridLinePaint);
             canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
             String label = String.format(Locale.getDefault(), "%.0fs", sec);
             canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);

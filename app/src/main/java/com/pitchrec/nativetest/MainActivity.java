@@ -1,28 +1,20 @@
 package com.pitchrec.nativetest;
 
 import android.Manifest;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.provider.Settings;
 import android.util.Base64;
-import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.ListView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 
 import com.pitchrec.backgroundrecorder.BackgroundRecorderService;
 import com.pitchrec.backgroundrecorder.RecordingResultHolder;
@@ -30,107 +22,27 @@ import com.pitchrec.backgroundrecorder.RecordingResultHolder;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Locale;
 
-// Ekran DAW — odtworzony uklad z PitchRec: suwaki MIC/ZOOM, miernik poziomu, przyciski
-// PLAY/REC/PAUZA/RESET, wyswietlacz czasu, wybor formatu WAV/MP3, lista nagran.
-// Bez logowania na razie (Faza 1) — menu NS to kolejny etap.
+// Minimalna aktywność testowa — Faza 1: sprawdzenie, czy w pełni natywna architektura
+// (bez WebView/Capacitor w procesie) przetrwa nagrywanie z zablokowanym ekranem, przy
+// targetSdkVersion 36. Po zatrzymaniu, nagranie jest automatycznie odtwarzane, żeby od
+// razu było słychać czy dźwięk jest ciągły, czy milknie w jakimś momencie.
 public class MainActivity extends AppCompatActivity implements RecordingResultHolder.Listener {
 
     private Button recordButton;
-    private Button pauseButton;
-    private Button playButton;
-    private Button resetButton;
-    private Button recordingsListButton;
-    private Button formatWavButton;
-    private Button formatMp3Button;
     private TextView statusText;
-    private TextView timeText;
-    private TextView gainValueText;
-    private TextView zoomValueText;
-    private PitchWaveView pitchWaveView;
-    private SliderView gainSlider;
-    private SliderView zoomSlider;
-    private ProgressBar levelMeter;
-
     private boolean isRecording = false;
-    private boolean isPaused = false;
-    private String selectedFormat = "wav";
-    private long recordingStartedAtMs = 0L;
-    private long pausedAccumMs = 0L;
-    private long lastResumeAtMs = 0L;
-    private String lastSavedFilePath = null;
-    private long pendingSeekSample = 0L;
     private static final int REQUEST_MIC_PERMISSION = 100;
-
-    private final Handler redrawHandler = new Handler(Looper.getMainLooper());
-    private final Runnable redrawLoop = new Runnable() {
-        @Override
-        public void run() {
-            pitchWaveView.invalidate();
-            updateTimeDisplay();
-            updateLevelMeter();
-            if (isRecording) {
-                // postOnAnimation zamiast postDelayed — synchronizuje sie z odswiezaniem
-                // ekranu (VSYNC), dajac plynniejszy efekt niz sztywny czasomierz co 50ms.
-                pitchWaveView.postOnAnimation(this);
-            }
-        }
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        View rootLayout = findViewById(R.id.rootLayout);
-        ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, insets) -> {
-            androidx.core.graphics.Insets systemInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(v.getPaddingLeft(), systemInsets.top, v.getPaddingRight(), systemInsets.bottom);
-            return insets;
-        });
-
         recordButton = findViewById(R.id.recordButton);
-        pauseButton = findViewById(R.id.pauseButton);
-        playButton = findViewById(R.id.playButton);
-        resetButton = findViewById(R.id.resetButton);
-        recordingsListButton = findViewById(R.id.recordingsListButton);
-        formatWavButton = findViewById(R.id.formatWavButton);
-        formatMp3Button = findViewById(R.id.formatMp3Button);
         statusText = findViewById(R.id.statusText);
-        timeText = findViewById(R.id.timeText);
-        gainValueText = findViewById(R.id.gainValueText);
-        zoomValueText = findViewById(R.id.zoomValueText);
-        pitchWaveView = findViewById(R.id.pitchWaveView);
-        gainSlider = findViewById(R.id.gainSlider);
-        zoomSlider = findViewById(R.id.zoomSlider);
-        levelMeter = findViewById(R.id.levelMeter);
 
         RecordingResultHolder.setListener(this);
-
-        gainSlider.setValue(0.3f);
-        gainSlider.setOnValueChangeListener(v -> {
-            float gain = 0.5f + v * 49.5f; // zakres 0.5x - 50x
-            LiveAudioData.gainMultiplier = gain;
-            gainValueText.setText(String.format(Locale.getDefault(), "%.1fx", gain));
-        });
-        LiveAudioData.gainMultiplier = 0.5f + 0.3f * 49.5f;
-        gainValueText.setText(String.format(Locale.getDefault(), "%.1fx", LiveAudioData.gainMultiplier));
-
-        zoomSlider.setValue(0.12f); // domyslnie ~8s
-        zoomValueText.setText("8s");
-        pitchWaveView.setZoomSeconds(8f);
-        zoomSlider.setOnValueChangeListener(v -> {
-            if (v < 0.02f) {
-                zoomValueText.setText("ALL");
-                pitchWaveView.setZoomSeconds(0);
-            } else {
-                float seconds = 1f + v * 59f;
-                zoomValueText.setText(String.format(Locale.getDefault(), "%.0fs", seconds));
-                pitchWaveView.setZoomSeconds(seconds);
-            }
-        });
 
         recordButton.setOnClickListener(v -> {
             if (!isRecording) {
@@ -139,48 +51,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 stopRecordingFlow();
             }
         });
-
-        pauseButton.setOnClickListener(v -> {
-            if (!isPaused) {
-                pauseRecordingFlow();
-            } else {
-                resumeRecordingFlow();
-            }
-        });
-
-        playButton.setOnClickListener(v -> {
-            String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
-            if (path != null) playFile(path, pendingSeekSample);
-        });
-        pitchWaveView.setOnSeekListener(sample -> {
-            pendingSeekSample = sample;
-            Toast.makeText(this, "Wskazano: " + (sample / (float) LiveAudioData.SAMPLE_RATE) + "s", Toast.LENGTH_SHORT).show();
-        });
-        resetButton.setOnClickListener(v -> resetRecording());
-        recordingsListButton.setOnClickListener(v -> showRecordingsList());
-
-        formatWavButton.setOnClickListener(v -> selectFormat("wav"));
-        formatMp3Button.setOnClickListener(v -> selectFormat("mp3"));
-        updateFormatButtonsUi();
-    }
-
-    private void selectFormat(String format) {
-        if (isRecording) {
-            Toast.makeText(this, "Zatrzymaj nagrywanie, żeby zmienić format", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        selectedFormat = format;
-        updateFormatButtonsUi();
-    }
-
-    private void updateFormatButtonsUi() {
-        boolean isWav = "wav".equals(selectedFormat);
-        formatWavButton.setTextColor(getColorCompat(isWav ? R.color.pr_accent : R.color.pr_muted));
-        formatMp3Button.setTextColor(getColorCompat(!isWav ? R.color.pr_accent : R.color.pr_muted));
-    }
-
-    private int getColorCompat(int colorRes) {
-        return getResources().getColor(colorRes);
     }
 
     private void startRecordingFlow() {
@@ -190,27 +60,23 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
             return;
         }
+        // UWAGA: prośba o wyjątek od optymalizacji baterii USUNIĘTA z tego miejsca — wywołanie
+        // startActivity() (ekran ustawień) w tym samym momencie co startForegroundService()
+        // (bez czekania aż pierwsze się ustabilizuje) prawdopodobnie powodowało, że system
+        // (Samsung One UI) zabijał cały proces (signal 9), zanim nagrywanie nawet się zaczęło.
+        // Nie jest to kluczowe dla testu — jeśli okaże się potrzebne, dodamy to jako osobny,
+        // wcześniejszy krok (np. przy starcie aplikacji, nie w momencie startu nagrywania).
 
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_START);
-        intent.putExtra(BackgroundRecorderService.EXTRA_FORMAT, selectedFormat);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
         } else {
             startService(intent);
         }
         isRecording = true;
-        isPaused = false;
-        recordingStartedAtMs = System.currentTimeMillis();
-        pausedAccumMs = 0L;
-        lastResumeAtMs = recordingStartedAtMs;
-        recordButton.setText("■ STOP");
-        pauseButton.setEnabled(true);
-        pauseButton.setText("⏸ PAUZA");
-        playButton.setEnabled(false);
-        pitchWaveView.setLiveMode(true);
+        recordButton.setText("Zatrzymaj");
         statusText.setText("Nagrywanie… (możesz zablokować ekran)");
-        pitchWaveView.postOnAnimation(redrawLoop);
     }
 
     private void stopRecordingFlow() {
@@ -218,54 +84,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         intent.setAction(BackgroundRecorderService.ACTION_STOP);
         startService(intent);
         isRecording = false;
-        isPaused = false;
-        recordButton.setText("● REC");
-        pauseButton.setEnabled(false);
+        recordButton.setText("Nagraj");
         statusText.setText("Przetwarzanie…");
-    }
-
-    private void pauseRecordingFlow() {
-        Intent intent = new Intent(this, BackgroundRecorderService.class);
-        intent.setAction(BackgroundRecorderService.ACTION_PAUSE);
-        startService(intent);
-        isPaused = true;
-        pausedAccumMs += System.currentTimeMillis() - lastResumeAtMs;
-        pauseButton.setText("▶ WZNÓW");
-        statusText.setText("Pauza — możesz przewinąć palcem");
-        pitchWaveView.setLiveMode(false); // pozwala przewijac to, co juz nagrane
-    }
-
-    private void resumeRecordingFlow() {
-        Intent intent = new Intent(this, BackgroundRecorderService.class);
-        intent.setAction(BackgroundRecorderService.ACTION_RESUME);
-        startService(intent);
-        isPaused = false;
-        lastResumeAtMs = System.currentTimeMillis();
-        pauseButton.setText("⏸ PAUZA");
-        statusText.setText("Nagrywanie…");
-        pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
-    }
-
-    private void resetRecording() {
-        if (isRecording) stopRecordingFlow();
-        LiveAudioData.reset();
-        pitchWaveView.invalidate();
-        timeText.setText("00:00:00");
-        statusText.setText("Gotowy");
-    }
-
-    private void updateTimeDisplay() {
-        long elapsedMs = System.currentTimeMillis() - recordingStartedAtMs - pausedAccumMs;
-        long totalSec = elapsedMs / 1000;
-        long h = totalSec / 3600, m = (totalSec % 3600) / 60, s = totalSec % 60;
-        timeText.setText(String.format(Locale.getDefault(), "%02d:%02d:%02d", h, m, s));
-    }
-
-    private void updateLevelMeter() {
-        float[] recent = LiveAudioData.snapshotEnvelopeTail(5);
-        float maxLevel = 0f;
-        for (float v : recent) if (v > maxLevel) maxLevel = v;
-        levelMeter.setProgress((int) Math.min(100, maxLevel * 100));
     }
 
     @Override
@@ -279,17 +99,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
     }
 
+    // ── RecordingResultHolder.Listener ──
+
     @Override
     public void onSuccess(String base64, long durationMs, String mimeType) {
         runOnUiThread(() -> {
-            statusText.setText("Nagrano " + (durationMs / 1000) + "s — zapisano");
-            saveRecordingForPlayback(base64, mimeType);
-            loadedFilePath = null; // swiezo nagrany plik jest juz w LiveAudioData, nie trzeba wczytywac ponownie
-            pendingSeekSample = 0L;
-            pitchWaveView.setLiveMode(false); // pozwala przewijac/wskazac miejsce w tym co wlasnie nagrano
-            pitchWaveView.resetPan();
-            pitchWaveView.invalidate();
-            playButton.setEnabled(true);
+            statusText.setText("Nagrano " + (durationMs / 1000) + "s — odtwarzanie do sprawdzenia…");
+            playBackRecording(base64);
         });
     }
 
@@ -298,133 +114,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         runOnUiThread(() -> statusText.setText("Błąd: " + code + " — " + message));
     }
 
-    private void saveRecordingForPlayback(String base64, String mimeType) {
+    private void playBackRecording(String base64) {
         try {
             byte[] bytes = Base64.decode(base64, Base64.NO_WRAP);
-            String ext = "audio/mpeg".equals(mimeType) ? ".mp3" : ".wav";
-            File savedFile = new File(getFilesDir(), "recording_" + System.currentTimeMillis() + ext);
-            try (FileOutputStream fos = new FileOutputStream(savedFile)) {
+            File tempFile = new File(getCacheDir(), "playback_test.m4a");
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
                 fos.write(bytes);
             }
-            lastSavedFilePath = savedFile.getAbsolutePath();
-        } catch (IOException e) {
-            statusText.setText("Błąd zapisu: " + e.getMessage());
-        }
-    }
-
-    private MediaPlayer currentPlayer;
-    private String loadedFilePath = null;
-
-    // Wczytuje plik z powrotem do wykresu (fala + pitch), przełącza widok w tryb statyczny
-    // (przewijalny palcem, z możliwością wskazania miejsca odtwarzania).
-    private void loadAndDisplayFile(File file) {
-        try {
-            AudioFileLoader.loadIntoLiveData(file);
-            loadedFilePath = file.getAbsolutePath();
-            pitchWaveView.setLiveMode(false);
-            pitchWaveView.resetPan();
-            pitchWaveView.invalidate();
-            statusText.setText("Wczytano: " + file.getName());
-        } catch (IOException e) {
-            statusText.setText("Błąd wczytywania: " + e.getMessage());
-        }
-    }
-
-    // startSampleIndex: pozycja (w próbkach), od której ma zacząć się odtwarzanie — 0 =
-    // od początku. Odpowiada dotknięciu wykresu (suwak odtwarzania).
-    private void playFile(String path, long startSampleIndex) {
-        try {
-            if (currentPlayer != null) {
-                currentPlayer.release();
-                currentPlayer = null;
-            }
             MediaPlayer player = new MediaPlayer();
-            player.setDataSource(path);
-            player.setOnCompletionListener(mp -> {
-                mp.release();
-                currentPlayer = null;
-            });
+            player.setDataSource(tempFile.getAbsolutePath());
+            player.setOnCompletionListener(MediaPlayer::release);
             player.prepare();
-            int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
-            currentPlayer = player;
-            if (startMs > 0) {
-                // Niektóre urządzenia nie przewijają poprawnie, jeśli start() jest wołane
-                // natychmiast po seekTo() — czekamy na potwierdzenie zakończenia przewijania.
-                player.setOnSeekCompleteListener(mp -> {
-                    mp.start();
-                    statusText.setText("Odtwarzanie…");
-                    startPlayheadUpdateLoop();
-                });
-                player.seekTo(startMs);
-            } else {
-                player.start();
-                statusText.setText("Odtwarzanie…");
-                startPlayheadUpdateLoop();
-            }
+            player.start();
         } catch (IOException e) {
             statusText.setText("Błąd odtwarzania: " + e.getMessage());
         }
-    }
-
-    // Przesuwa suwak (biala linia) w takt aktualnej pozycji odtwarzacza.
-    private final Runnable playheadUpdateLoop = new Runnable() {
-        @Override
-        public void run() {
-            if (currentPlayer != null) {
-                try {
-                    long sample = (long) currentPlayer.getCurrentPosition() * LiveAudioData.SAMPLE_RATE / 1000L;
-                    pitchWaveView.setPlayheadSample(sample);
-                } catch (IllegalStateException e) { /* odtwarzacz mogl sie juz zwolnic */ }
-                redrawHandler.postDelayed(this, 50);
-            }
-        }
-    };
-
-    private void startPlayheadUpdateLoop() {
-        redrawHandler.post(playheadUpdateLoop);
-    }
-
-    // Prosta lista zapisanych nagrań — kliknięcie wczytuje plik do wykresu i odtwarza od
-    // początku. Pełny ekran (jak "NAGRANIA" w PitchRec, z wysyłką/pobieraniem) to kolejny etap.
-    private void showRecordingsList() {
-        File[] files = getFilesDir().listFiles((dir, name) -> name.startsWith("recording_"));
-        if (files == null || files.length == 0) {
-            Toast.makeText(this, "Brak zapisanych nagrań", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-
-        ArrayList<String> labels = new ArrayList<>();
-        for (File f : files) {
-            float sizeKb = f.length() / 1024f;
-            labels.add(f.getName() + String.format(Locale.getDefault(), " (%.0f KB)", sizeKb));
-        }
-
-        ListView listView = new ListView(this);
-        listView.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels));
-        listView.setOnItemClickListener((parent, view, position, id) -> {
-            loadAndDisplayFile(files[position]);
-            playFile(files[position].getAbsolutePath(), 0L);
-        });
-        listView.setOnItemLongClickListener((parent, view, position, id) -> {
-            File toDelete = files[position];
-            new AlertDialog.Builder(this)
-                    .setTitle("Usunąć nagranie?")
-                    .setMessage(toDelete.getName())
-                    .setPositiveButton("Usuń", (dialog, which) -> {
-                        toDelete.delete();
-                        Toast.makeText(this, "Usunięto", Toast.LENGTH_SHORT).show();
-                        showRecordingsList(); // odswiez liste
-                    })
-                    .setNegativeButton("Anuluj", null)
-                    .show();
-            return true;
-        });
-
-        new AlertDialog.Builder(this)
-                .setTitle("Nagrania")
-                .setView(listView)
-                .setNegativeButton("Zamknij", null)
-                .show();
     }
 }
