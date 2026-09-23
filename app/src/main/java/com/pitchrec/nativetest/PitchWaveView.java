@@ -1,26 +1,30 @@
 package com.pitchrec.nativetest;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
+import android.view.View;
 
 import java.util.List;
 import java.util.Locale;
 
-// SurfaceView z dedykowanym watkiem rysujacym (nie zwykly View na glownym watku UI) — ta
-// sama architektura co profesjonalne aplikacje do nagrywania (RecForge i podobne), unikajaca
-// calkowicie rywalizacji o czas procesora z watkiem interfejsu. Rysuje falę (zielona
-// obwiednia, jak RecForge) + zolta linie pitch + siatke (pionowa+pozioma) + podzialke
-// sekundowa + suwak odtwarzania. Publiczne API (setZoomSeconds, setLiveMode,
-// setOnSeekListener, setPlayheadSample, resetPan) identyczne jak poprzednio — MainActivity
-// nie wymaga zmian poza deklaracja typu.
-public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback {
+// Rysuje falę (zielona obwiednia) + żółtą linię pitch + siatkę + podziałkę sekundową +
+// suwak odtwarzania.
+//
+// WYDAJNOŚĆ (v3) — potwierdzone przez analizę zdekompilowanego RecForge: sekret ich
+// płynności to NIE inna architektura (zwykły View, jak my — nie SurfaceView, na co dałem
+// się wcześniej złapać), ale PODWÓJNE BUFOROWANIE: statyczna zawartość (fala+siatka+pitch)
+// jest rysowana do CACHOWANEJ bitmapy TYLKO gdy dane faktycznie się zmienią, nie przy
+// każdej klatce. onDraw() w większości klatek tylko WKLEJA gotową bitmapę (bardzo szybkie)
+// + dorysowuje jedynie suwak odtwarzania na wierzchu. To dokładnie ten sam wzorzec, który
+// zastosowałem wcześniej dla wersji webowej PitchRec (drawStatic/draw), tylko teraz
+// faktycznie wdrożony też tutaj.
+public class PitchWaveView extends View {
 
     private static final float PMIN = 55f;
     private static final float PMAX = 1050f;
@@ -42,9 +46,13 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
 
     private OnSeekListener seekListener;
 
-    // ── Watek rysujacy ──
-    private RenderThread renderThread;
-    private volatile boolean surfaceReady = false;
+    // ── Cache (podwojne buforowanie) ──
+    private Bitmap cacheBitmap;
+    private Canvas cacheCanvas;
+    private long lastCachedTotalSamples = -1L;
+    private long lastCachedPanOffset = -1L;
+    private float lastCachedZoomSeconds = -1f;
+    private boolean lastCachedLiveMode = true;
 
     public PitchWaveView(Context context) {
         super(context);
@@ -59,7 +67,6 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
     private void init() {
         setClickable(true);
         setFocusable(true);
-        getHolder().addCallback(this);
 
         bgPaint.setColor(Color.parseColor("#1a1a1a"));
         envelopePaint.setColor(Color.parseColor("#00E000"));
@@ -92,78 +99,6 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
         return v * getResources().getDisplayMetrics().density;
     }
 
-    // ── SurfaceHolder.Callback ──
-
-    @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        surfaceReady = true;
-        renderThread = new RenderThread(holder);
-        renderThread.setRunning(true);
-        renderThread.start();
-    }
-
-    @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        surfaceReady = false;
-        if (renderThread != null) {
-            renderThread.setRunning(false);
-            boolean retry = true;
-            while (retry) {
-                try {
-                    renderThread.join();
-                    retry = false;
-                } catch (InterruptedException e) { /* sprobuj znowu */ }
-            }
-        }
-    }
-
-    // Wywolywane z zewnatrz (MainActivity), zeby wymusic natychmiastowe przerysowanie —
-    // odpowiednik invalidate() ze zwyklego View, tutaj po prostu budzi wątek rysujący,
-    // ktory i tak rysuje w petli, wiec w praktyce nie jest to nawet niezbedne, ale zostaje
-    // dla zgodnosci z poprzednim API.
-    public void invalidate() {
-        // no-op — RenderThread rysuje nieprzerwanie w wlasnej petli
-    }
-
-    private class RenderThread extends Thread {
-        private final SurfaceHolder holder;
-        private volatile boolean running = false;
-
-        RenderThread(SurfaceHolder holder) {
-            this.holder = holder;
-        }
-
-        void setRunning(boolean r) {
-            running = r;
-        }
-
-        @Override
-        public void run() {
-            while (running) {
-                Canvas canvas = null;
-                try {
-                    canvas = holder.lockCanvas();
-                    if (canvas != null) {
-                        synchronized (holder) {
-                            drawFrame(canvas);
-                        }
-                    }
-                } finally {
-                    if (canvas != null) {
-                        try { holder.unlockCanvasAndPost(canvas); } catch (Exception e) { }
-                    }
-                }
-                // Lekkie ograniczenie (~60fps) — lockCanvas() sam nie synchronizuje z
-                // odswiezaniem ekranu, wiec bez tego watek probowalby rysowac tak szybko jak
-                // mozliwe, niepotrzebnie obciazajac procesor.
-                try { Thread.sleep(16); } catch (InterruptedException e) { }
-            }
-        }
-    }
-
     private float zoomSeconds = 0f;
     private boolean isLiveMode = true;
     private long panOffsetSample = 0L;
@@ -171,10 +106,12 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
 
     public void setZoomSeconds(float seconds) {
         zoomSeconds = seconds;
+        invalidate();
     }
 
     public void setLiveMode(boolean live) {
         isLiveMode = live;
+        invalidate();
     }
 
     public void setOnSeekListener(OnSeekListener l) {
@@ -183,11 +120,13 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
 
     public void setPlayheadSample(long sample) {
         playheadSample = sample;
+        invalidate(); // suwak jest lekki do przerysowania, ale i tak wystarczy blit z cache
     }
 
     public void resetPan() {
         panOffsetSample = 0L;
         playheadSample = -1L;
+        lastCachedTotalSamples = -1L; // wymuszamy odswiezenie cache
     }
 
     private float freqToY(float freq, int height) {
@@ -224,6 +163,7 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
                 float pxPerSecond = getWidth() / Math.max(0.001f, lastVisibleSeconds);
                 long sampleDelta = (long) (-dx / pxPerSecond * LiveAudioData.SAMPLE_RATE);
                 panOffsetSample = Math.max(0, panOffsetSample + sampleDelta);
+                invalidate();
                 return true;
             }
             case MotionEvent.ACTION_UP:
@@ -232,16 +172,71 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
                     long tappedSample = panOffsetSample + (long) (event.getX() / pxPerSecond * LiveAudioData.SAMPLE_RATE);
                     playheadSample = tappedSample;
                     if (seekListener != null) seekListener.onSeek(tappedSample);
+                    invalidate();
                 }
                 return true;
         }
         return false;
     }
 
-    private void drawFrame(Canvas canvas) {
+    @Override
+    protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
         int w = getWidth();
         int fullH = getHeight();
         if (w <= 0 || fullH <= 0) return;
+
+        ensureCacheBitmap(w, fullH);
+
+        long totalSamples = LiveAudioData.getTotalSamplesWritten();
+        // KLUCZOWA OPTYMALIZACJA: przerysuj cache TYLKO gdy dane faktycznie sie zmienily
+        // (nowe probki podczas nagrywania) albo zmienil sie zoom/pan/tryb — NIE przy kazdej
+        // klatce. To jest dokladnie technika z RecForge (Bitmap L odswiezana tylko gdy
+        // potrzeba, nie w petli rysowania).
+        boolean needsRebuild = totalSamples != lastCachedTotalSamples
+                || panOffsetSample != lastCachedPanOffset
+                || zoomSeconds != lastCachedZoomSeconds
+                || isLiveMode != lastCachedLiveMode;
+
+        if (needsRebuild) {
+            rebuildCache(w, fullH);
+            lastCachedTotalSamples = totalSamples;
+            lastCachedPanOffset = panOffsetSample;
+            lastCachedZoomSeconds = zoomSeconds;
+            lastCachedLiveMode = isLiveMode;
+        }
+
+        // Szybki blit gotowej bitmapy — to jest to, co dzieje sie w WIEKSZOSCI klatek.
+        canvas.drawBitmap(cacheBitmap, 0, 0, null);
+
+        // Suwak odtwarzania rysowany ZAWSZE bezposrednio na widocznym canvasie (nie w
+        // cache) — to jedyny element zmieniajacy sie NIEZALEZNIE od danych fali/pitch
+        // (podczas odtwarzania), wiec nie powinien wymuszac przebudowy calego cache.
+        if (playheadSample >= 0 && lastVisibleSampleRange > 0) {
+            float rulerHeight = dp(RULER_HEIGHT_DP);
+            float px = ((playheadSample - lastVisibleStartSample) / lastVisibleSampleRange) * w;
+            if (px >= 0 && px <= w) {
+                canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
+            }
+        }
+    }
+
+    private void ensureCacheBitmap(int w, int h) {
+        if (cacheBitmap == null || cacheBitmap.getWidth() != w || cacheBitmap.getHeight() != h) {
+            if (cacheBitmap != null) cacheBitmap.recycle();
+            cacheBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            cacheCanvas = new Canvas(cacheBitmap);
+            lastCachedTotalSamples = -1L; // wymuszamy przebudowe po zmianie rozmiaru
+        }
+    }
+
+    private long lastVisibleStartSample = 0L;
+    private float lastVisibleSampleRange = 1f;
+
+    // Odpowiednik drawStatic() z wersji webowej — rysuje CAŁĄ zawartość (fala, siatka,
+    // pitch, podziałka) do cachowanej bitmapy. Wywoływane TYLKO gdy dane się zmienią.
+    private void rebuildCache(int w, int fullH) {
+        Canvas canvas = cacheCanvas;
         float rulerHeight = dp(RULER_HEIGHT_DP);
         int h = (int) (fullH - rulerHeight);
         int mid = h / 2;
@@ -286,6 +281,8 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
                     ? (totalSamples - visibleStartSample)
                     : ((long) tailCount * 256));
             lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
+            lastVisibleStartSample = visibleStartSample;
+            lastVisibleSampleRange = visibleSampleRange;
 
             List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
             pitchPath.reset();
@@ -307,13 +304,6 @@ public class PitchWaveView extends SurfaceView implements SurfaceHolder.Callback
                 }
             }
             canvas.drawPath(pitchPath, pitchPaint);
-
-            if (playheadSample >= 0) {
-                float px = ((playheadSample - visibleStartSample) / visibleSampleRange) * w;
-                if (px >= 0 && px <= w) {
-                    canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
-                }
-            }
 
             drawRuler(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
         } else {
