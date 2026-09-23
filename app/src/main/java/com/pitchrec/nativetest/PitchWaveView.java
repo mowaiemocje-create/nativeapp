@@ -1,6 +1,7 @@
 package com.pitchrec.nativetest;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -12,6 +13,11 @@ import android.view.View;
 import java.util.List;
 import java.util.Locale;
 
+// Podwojne buforowanie (technika potwierdzona w RecForge — Bitmap L rysowana od nowa TYLKO
+// gdy dane sie zmienia, nie przy kazdej klatce). Wersja v2, znacznie bardziej defensywna niz
+// poprzednia proba (ktora spowodowala zawieszenie) — kazdy krok zabezpieczony przed
+// znanymi przyczynami zawieszen (zerowe wymiary, wyjatki, potencjalnie zdegenerowane
+// wartosci w petlach).
 public class PitchWaveView extends View {
 
     private static final float PMIN = 55f;
@@ -33,6 +39,14 @@ public class PitchWaveView extends View {
     }
 
     private OnSeekListener seekListener;
+
+    private Bitmap cacheBitmap;
+    private Canvas cacheCanvas;
+    private long lastCachedTotalSamples = -1L;
+    private long lastCachedPanOffset = -1L;
+    private float lastCachedZoomSeconds = -999f;
+    private boolean lastCachedLiveMode = true;
+    private boolean cacheValid = false;
 
     public PitchWaveView(Context context) {
         super(context);
@@ -94,6 +108,16 @@ public class PitchWaveView extends View {
         invalidate();
     }
 
+    public void pauseKeepingPosition() {
+        long totalSamples = LiveAudioData.getTotalSamplesWritten();
+        int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
+        int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : 1000;
+        long tailSamples = (long) tailCount * 256;
+        panOffsetSample = Math.max(0, totalSamples - tailSamples);
+        isLiveMode = false;
+        invalidate();
+    }
+
     public void setOnSeekListener(OnSeekListener l) {
         seekListener = l;
     }
@@ -106,6 +130,7 @@ public class PitchWaveView extends View {
     public void resetPan() {
         panOffsetSample = 0L;
         playheadSample = -1L;
+        cacheValid = false;
     }
 
     private float freqToY(float freq, int height) {
@@ -123,6 +148,8 @@ public class PitchWaveView extends View {
     private boolean touchMoved = false;
     private static final float TAP_THRESHOLD_PX = 12f;
     private float lastVisibleSeconds = 1f;
+    private long lastVisibleStartSample = 0L;
+    private float lastVisibleSampleRange = 1f;
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
@@ -163,8 +190,63 @@ public class PitchWaveView extends View {
         super.onDraw(canvas);
         int w = getWidth();
         int fullH = getHeight();
+
+        // ZABEZPIECZENIE: bez tego, Bitmap.createBitmap ponizej moglby otrzymac 0 albo
+        // ujemny wymiar (np. przy pierwszym layout-pass, zanim widok ma realny rozmiar) —
+        // co jest znanym powodem wyjatkow/zawieszen na niektorych urzadzeniach.
+        if (w <= 0 || fullH <= 0) return;
+
+        try {
+            drawWithCache(canvas, w, fullH);
+        } catch (Exception e) {
+            // ZABEZPIECZENIE: jakikolwiek nieoczekiwany wyjatek w rysowaniu NIE MOZE
+            // zablokowac calego wątku UI — lepiej pokazac jedna pusta klatke niz zawiesic
+            // caly interfejs (to bylo prawdopodobne zrodlo poprzedniej regresji).
+            cacheValid = false;
+        }
+    }
+
+    private void drawWithCache(Canvas canvas, int w, int fullH) {
+        if (cacheBitmap == null || cacheBitmap.getWidth() != w || cacheBitmap.getHeight() != fullH) {
+            if (cacheBitmap != null) {
+                try { cacheBitmap.recycle(); } catch (Exception e) { }
+            }
+            cacheBitmap = Bitmap.createBitmap(w, fullH, Bitmap.Config.ARGB_8888);
+            cacheCanvas = new Canvas(cacheBitmap);
+            cacheValid = false;
+        }
+
+        long totalSamples = LiveAudioData.getTotalSamplesWritten();
+        boolean needsRebuild = !cacheValid
+                || totalSamples != lastCachedTotalSamples
+                || panOffsetSample != lastCachedPanOffset
+                || zoomSeconds != lastCachedZoomSeconds
+                || isLiveMode != lastCachedLiveMode;
+
+        if (needsRebuild) {
+            rebuildCache(cacheCanvas, w, fullH);
+            lastCachedTotalSamples = totalSamples;
+            lastCachedPanOffset = panOffsetSample;
+            lastCachedZoomSeconds = zoomSeconds;
+            lastCachedLiveMode = isLiveMode;
+            cacheValid = true;
+        }
+
+        canvas.drawBitmap(cacheBitmap, 0, 0, null);
+
+        if (playheadSample >= 0 && lastVisibleSampleRange > 0) {
+            float rulerHeight = dp(RULER_HEIGHT_DP);
+            float px = ((playheadSample - lastVisibleStartSample) / lastVisibleSampleRange) * w;
+            if (px >= 0 && px <= w) {
+                canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
+            }
+        }
+    }
+
+    private void rebuildCache(Canvas canvas, int w, int fullH) {
         float rulerHeight = dp(RULER_HEIGHT_DP);
         int h = (int) (fullH - rulerHeight);
+        if (h <= 0) return; // zabezpieczenie — widok za maly, nic sensownego do rysowania
         int mid = h / 2;
 
         canvas.drawRect(0, 0, w, fullH, bgPaint);
@@ -179,6 +261,7 @@ public class PitchWaveView extends View {
 
         int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
         int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
+        if (tailCount <= 0) tailCount = 1; // zabezpieczenie
 
         LiveAudioData.FrameSnapshot snap = isLiveMode
                 ? LiveAudioData.snapshotForDrawing(tailCount)
@@ -207,6 +290,8 @@ public class PitchWaveView extends View {
                     ? (totalSamples - visibleStartSample)
                     : ((long) tailCount * 256));
             lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
+            lastVisibleStartSample = visibleStartSample;
+            lastVisibleSampleRange = visibleSampleRange;
 
             List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
             pitchPath.reset();
@@ -229,28 +314,26 @@ public class PitchWaveView extends View {
             }
             canvas.drawPath(pitchPath, pitchPaint);
 
-            if (playheadSample >= 0) {
-                float px = ((playheadSample - visibleStartSample) / visibleSampleRange) * w;
-                if (px >= 0 && px <= w) {
-                    canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
-                }
-            }
-
-            drawRuler(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            drawRuler(canvas, w, fullH, rulerHeight, visibleStartSample, visibleSampleRange);
         } else {
             canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         }
     }
 
-    private void drawRuler(Canvas canvas, int w, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
+    private void drawRuler(Canvas canvas, int w, int fullH, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
         canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
         float pxPerSecond = w / visibleSeconds;
-        if (pxPerSecond <= 0f || !Float.isFinite(pxPerSecond)) return; // zabezpieczenie przed nieskoncz. petla
+
+        // ZABEZPIECZENIE: to byl glowny podejrzany poprzedniej regresji — zdegenerowana
+        // wartosc pxPerSecond (zero/NaN/nieskonczonosc) moglaby uwiezic petle nizej w
+        // nieskonczonosci, blokujac caly watek UI.
+        if (pxPerSecond <= 0f || !Float.isFinite(pxPerSecond)) return;
 
         float tickIntervalSec = 1f;
         int safety = 0;
         while (tickIntervalSec * pxPerSecond < dp(40) && safety < 30) { tickIntervalSec *= 2; safety++; }
+        if (tickIntervalSec <= 0f || !Float.isFinite(tickIntervalSec)) return;
 
         float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
         float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
@@ -259,7 +342,7 @@ public class PitchWaveView extends View {
         for (float sec = firstTickSecond; tickSafety < 200; sec += tickIntervalSec, tickSafety++) {
             float x = (sec - startSecond) * pxPerSecond;
             if (x > w) break;
-            canvas.drawLine(x, rulerHeight, x, canvas.getHeight(), gridLinePaint);
+            canvas.drawLine(x, rulerHeight, x, fullH, gridLinePaint);
             canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
             String label = String.format(Locale.getDefault(), "%.0fs", sec);
             canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);

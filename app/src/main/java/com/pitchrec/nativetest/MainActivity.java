@@ -251,7 +251,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pausedAccumMs += System.currentTimeMillis() - lastResumeAtMs;
         pauseButton.setText("▶ WZNÓW");
         statusText.setText("Pauza — możesz przewinąć palcem");
-        pitchWaveView.setLiveMode(false); // pozwala przewijac to, co juz nagrane
+        pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
     }
 
     private void resumeRecordingFlow() {
