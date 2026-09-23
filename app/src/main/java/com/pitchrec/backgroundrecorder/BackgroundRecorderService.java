@@ -199,6 +199,19 @@ public class BackgroundRecorderService extends Service {
                         }
                         int read = audioRecord.read(buffer, 0, buffer.length);
                         if (read > 0) {
+                            // Zastosuj gain (mnożnik z suwaka MIC) — z ograniczeniem do
+                            // zakresu 16-bit, żeby nie "obcinać" dźwięku (clipping) przy
+                            // wysokim wzmocnieniu.
+                            float gain = LiveAudioData.gainMultiplier;
+                            if (gain != 1f) {
+                                for (int i = 0; i < read; i++) {
+                                    int amplified = (int) (buffer[i] * gain);
+                                    if (amplified > Short.MAX_VALUE) amplified = Short.MAX_VALUE;
+                                    else if (amplified < Short.MIN_VALUE) amplified = Short.MIN_VALUE;
+                                    buffer[i] = (short) amplified;
+                                }
+                            }
+
                             try {
                                 writeAudioChunk(buffer, read);
                             } catch (IOException ioe) { /* kontynuuj */ }

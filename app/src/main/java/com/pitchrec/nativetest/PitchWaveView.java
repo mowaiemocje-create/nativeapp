@@ -51,6 +51,9 @@ public class PitchWaveView extends View {
     }
 
     private void init() {
+        setClickable(true);
+        setFocusable(true);
+
         bgPaint.setColor(Color.parseColor("#050510"));
         envelopePaint.setColor(Color.parseColor("#8B7EFF"));
         envelopePaint.setStrokeWidth(2f);

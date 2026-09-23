@@ -37,6 +37,11 @@ public class LiveAudioData {
 
     private static final Object lock = new Object();
 
+    // Wspolny mnoznik gain — ustawiany przez suwak w MainActivity, odczytywany przez petle
+    // odczytu w BackgroundRecorderService. Wczesniej suwak TYLKO zmienial wyswietlany tekst,
+    // nigdy faktycznie nie wplywal na dzwiek — to byl prawdziwy blad.
+    public static volatile float gainMultiplier = 1f;
+
     public static void reset() {
         synchronized (lock) {
             envelope = new float[4096];

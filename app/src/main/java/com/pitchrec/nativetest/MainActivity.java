@@ -84,8 +84,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         View rootLayout = findViewById(R.id.rootLayout);
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout, (v, insets) -> {
-            int bottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
-            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(), bottomInset);
+            androidx.core.graphics.Insets systemInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), systemInsets.top, v.getPaddingRight(), systemInsets.bottom);
             return insets;
         });
 
@@ -110,9 +110,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         gainSlider.setValue(0.3f);
         gainSlider.setOnValueChangeListener(v -> {
             float gain = 0.5f + v * 49.5f; // zakres 0.5x - 50x
+            LiveAudioData.gainMultiplier = gain;
             gainValueText.setText(String.format(Locale.getDefault(), "%.1fx", gain));
         });
-        gainValueText.setText("1.0x");
+        LiveAudioData.gainMultiplier = 0.5f + 0.3f * 49.5f;
+        gainValueText.setText(String.format(Locale.getDefault(), "%.1fx", LiveAudioData.gainMultiplier));
 
         zoomSlider.setValue(0.12f); // domyslnie ~8s
         zoomValueText.setText("8s");
@@ -148,7 +150,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
             if (path != null) playFile(path, pendingSeekSample);
         });
-        pitchWaveView.setOnSeekListener(sample -> pendingSeekSample = sample);
+        pitchWaveView.setOnSeekListener(sample -> {
+            pendingSeekSample = sample;
+            Toast.makeText(this, "Wskazano: " + (sample / (float) LiveAudioData.SAMPLE_RATE) + "s", Toast.LENGTH_SHORT).show();
+        });
         resetButton.setOnClickListener(v -> resetRecording());
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
 
