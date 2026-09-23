@@ -221,11 +221,94 @@
                 android:layout_height="match_parent"
                 android:layout_weight="0.55"
                 android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
                 android:text="↺"
                 android:textColor="@color/pr_text"
                 android:backgroundTint="@color/pr_card" />
 
+            <!-- Nieaktywne na razie — jak w PitchRec, funkcja w kolejnym etapie -->
+            <Button
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.55"
+                android:layout_marginEnd="4dp"
+                android:text="AG\nOFF"
+                android:textSize="9sp"
+                android:textColor="@color/pr_muted"
+                android:backgroundTint="@color/pr_card"
+                android:enabled="false" />
+
+            <Button
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="0.55"
+                android:text="⬛\nBS"
+                android:textSize="9sp"
+                android:textColor="@color/pr_muted"
+                android:backgroundTint="@color/pr_card"
+                android:enabled="false" />
+
         </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Dolne menu nawigacji — jak w PitchRec, NIEAKTYWNE na razie (logowanie/menu NS to
+         kolejny, osobny etap prac). -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="@color/pr_card">
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="📁\nNagrania"
+            android:textSize="9sp"
+            android:textColor="@color/pr_accent"
+            android:background="@android:color/transparent"
+            android:enabled="false" />
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="✓\nKorekta"
+            android:textSize="9sp"
+            android:textColor="@color/pr_muted"
+            android:background="@android:color/transparent"
+            android:enabled="false" />
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="📖\nDziennik"
+            android:textSize="9sp"
+            android:textColor="@color/pr_muted"
+            android:background="@android:color/transparent"
+            android:enabled="false" />
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="📊\nStatystyki"
+            android:textSize="9sp"
+            android:textColor="@color/pr_muted"
+            android:background="@android:color/transparent"
+            android:enabled="false" />
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="⚙\nUstawienia"
+            android:textSize="9sp"
+            android:textColor="@color/pr_muted"
+            android:background="@android:color/transparent"
+            android:enabled="false" />
 
     </LinearLayout>
 
