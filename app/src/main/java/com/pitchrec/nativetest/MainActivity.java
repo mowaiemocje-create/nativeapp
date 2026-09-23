@@ -256,6 +256,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         isRecording = true;
         isPaused = false;
         recordingStartedAtMs = System.currentTimeMillis();
+        lastDisplayedSecond = -1L;
         pausedAccumMs = 0L;
         lastResumeAtMs = recordingStartedAtMs;
         recordButton.setText("⏸ PAUZA");
@@ -315,14 +316,23 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         statusText.setText("Gotowy");
     }
 
+    private long lastDisplayedSecond = -1L;
+
     private void updateTimeDisplay() {
         long elapsedMs = System.currentTimeMillis() - recordingStartedAtMs - pausedAccumMs;
         long totalSec = elapsedMs / 1000;
+        if (totalSec == lastDisplayedSecond) return; // bez zmiany — pomijamy String.format
+        lastDisplayedSecond = totalSec;
         long h = totalSec / 3600, m = (totalSec % 3600) / 60, s = totalSec % 60;
         timeText.setText(String.format(Locale.getDefault(), "%02d:%02d:%02d", h, m, s));
     }
 
+    private long lastLevelMeterUpdateMs = 0L;
+
     private void updateLevelMeter() {
+        long now = System.currentTimeMillis();
+        if (now - lastLevelMeterUpdateMs < 100) return; // co ~100ms wystarczy dla miernika
+        lastLevelMeterUpdateMs = now;
         float[] recent = LiveAudioData.snapshotEnvelopeTail(5);
         float maxLevel = 0f;
         for (float v : recent) if (v > maxLevel) maxLevel = v;

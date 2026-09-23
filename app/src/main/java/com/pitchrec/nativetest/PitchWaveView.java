@@ -206,6 +206,9 @@ public class PitchWaveView extends View {
         }
     }
 
+    private long lastRebuildTimeMs = 0L;
+    private static final long MIN_REBUILD_INTERVAL_MS = 40; // ~25 odswiezen/sek dla KOSZTOWNEJ przebudowy
+
     private void drawWithCache(Canvas canvas, int w, int fullH) {
         if (cacheBitmap == null || cacheBitmap.getWidth() != w || cacheBitmap.getHeight() != fullH) {
             if (cacheBitmap != null) {
@@ -217,11 +220,17 @@ public class PitchWaveView extends View {
         }
 
         long totalSamples = LiveAudioData.getTotalSamplesWritten();
-        boolean needsRebuild = !cacheValid
-                || totalSamples != lastCachedTotalSamples
+        long now = System.currentTimeMillis();
+        boolean dataChanged = totalSamples != lastCachedTotalSamples
                 || panOffsetSample != lastCachedPanOffset
                 || zoomSeconds != lastCachedZoomSeconds
                 || isLiveMode != lastCachedLiveMode;
+        // KLUCZOWA POPRAWKA: nawet gdy dane sie zmienily, nie przebudowuj czesciej niz co
+        // MIN_REBUILD_INTERVAL_MS — audio dopisuje nowe probki czesciej niz warto
+        // przerysowywac caly wykres, wiec bez tego ograniczenia cache przebudowywal sie
+        // praktycznie przy kazdej klatce, negujac wiekszosc korzysci buforowania.
+        boolean needsRebuild = !cacheValid
+                || (dataChanged && (now - lastRebuildTimeMs >= MIN_REBUILD_INTERVAL_MS));
 
         if (needsRebuild) {
             rebuildCache(cacheCanvas, w, fullH);
@@ -229,6 +238,7 @@ public class PitchWaveView extends View {
             lastCachedPanOffset = panOffsetSample;
             lastCachedZoomSeconds = zoomSeconds;
             lastCachedLiveMode = isLiveMode;
+            lastRebuildTimeMs = now;
             cacheValid = true;
         }
 
