@@ -618,12 +618,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         scrollView.addView(listContainer);
 
-        new AlertDialog.Builder(this)
+        android.app.AlertDialog recsDialog = new AlertDialog.Builder(this)
                 .setTitle("Nagrania")
                 .setView(scrollView)
                 .setNegativeButton("Zamknij", null)
                 .setNeutralButton("📁 Wgraj plik", (d, w) -> importExternalFile())
                 .show();
+        // Pelny ekran (jak strona "NAGRANIA" w PitchRec) — domyslnie AlertDialog ma
+        // marginesy i nie wypelnia calego ekranu, wiec wymuszamy wymiary okna.
+        if (recsDialog.getWindow() != null) {
+            recsDialog.getWindow().setLayout(
+                    android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                    android.view.WindowManager.LayoutParams.MATCH_PARENT);
+        }
     }
 
     // Odpowiednik ".rec-item" z PitchRec (JS) — gorny wiersz: nazwa + kategoria (placeholder
