@@ -67,7 +67,7 @@ public class PitchWaveView extends View {
         envelopePaint.setStrokeWidth(2f);
         midlinePaint.setColor(Color.parseColor("#40FFFFFF"));
         midlinePaint.setStrokeWidth(1f);
-        pitchPaint.setColor(Color.parseColor("#FFE600"));
+        pitchPaint.setColor(Color.parseColor("#FF3B30"));
         pitchPaint.setStrokeWidth(4f);
         pitchPaint.setStrokeJoin(Paint.Join.ROUND);
         pitchPaint.setStrokeCap(Paint.Cap.ROUND);

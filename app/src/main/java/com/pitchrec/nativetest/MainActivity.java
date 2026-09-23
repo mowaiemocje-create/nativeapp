@@ -537,62 +537,128 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
         final File[] finalFiles = files;
 
-        ArrayList<String> labels = new ArrayList<>();
-        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
-        for (File f : finalFiles) {
-            float sizeKb = f.length() / 1024f;
-            String ext = f.getName().endsWith(".mp3") ? "MP3" : "WAV";
-            labels.add(fmt.format(new java.util.Date(f.lastModified()))
-                    + String.format(Locale.getDefault(), "  •  %s  •  %.0f KB", ext, sizeKb));
-        }
-        if (labels.isEmpty()) labels.add("Brak zapisanych nagrań");
+        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
+        android.widget.LinearLayout listContainer = new android.widget.LinearLayout(this);
+        listContainer.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (8 * getResources().getDisplayMetrics().density);
+        listContainer.setPadding(pad, pad, pad, pad);
 
-        ListView listView = new ListView(this);
-        listView.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels));
-        listView.setOnItemClickListener((parent, view, position, id) -> {
-            if (position >= finalFiles.length) return;
-            loadAndDisplayFile(finalFiles[position]);
-            playFile(finalFiles[position].getAbsolutePath(), 0L);
-        });
-        listView.setOnItemLongClickListener((parent, view, position, id) -> {
-            if (position >= finalFiles.length) return false;
-            File target = finalFiles[position];
-            String[] options = {"▶ Odtwórz", "📤 Udostępnij", "☁ Wyślij do NS", "🗑 Usuń"};
-            new AlertDialog.Builder(this)
-                    .setTitle(target.getName())
-                    .setItems(options, (dialog, which) -> {
-                        if (which == 0) {
-                            loadAndDisplayFile(target);
-                            playFile(target.getAbsolutePath(), 0L);
-                        } else if (which == 1) {
-                            shareRecording(target);
-                        } else if (which == 2) {
-                            // Wymaga logowania — logowanie i integracja z serwerem NS to
-                            // kolejny, osobny etap prac (zgodnie z wczesniejsza decyzja).
-                            Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show();
-                        } else {
-                            new AlertDialog.Builder(this)
-                                    .setTitle("Usunąć nagranie?")
-                                    .setMessage(target.getName())
-                                    .setPositiveButton("Usuń", (d2, w2) -> {
-                                        target.delete();
-                                        Toast.makeText(this, "Usunięto", Toast.LENGTH_SHORT).show();
-                                        showRecordingsList();
-                                    })
-                                    .setNegativeButton("Anuluj", null)
-                                    .show();
-                        }
-                    })
-                    .show();
-            return true;
-        });
+        if (finalFiles.length == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("Brak nagrań");
+            empty.setTextColor(getResources().getColor(R.color.pr_muted));
+            listContainer.addView(empty);
+        } else {
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d.M HH:mm", Locale.getDefault());
+            for (File f : finalFiles) {
+                listContainer.addView(buildRecordingCard(f, fmt));
+            }
+        }
+
+        scrollView.addView(listContainer);
 
         new AlertDialog.Builder(this)
                 .setTitle("Nagrania")
-                .setView(listView)
+                .setView(scrollView)
                 .setNegativeButton("Zamknij", null)
                 .setNeutralButton("📁 Wgraj plik", (d, w) -> importExternalFile())
                 .show();
+    }
+
+    // Odpowiednik ".rec-item" z PitchRec (JS) — gorny wiersz: nazwa + kategoria (placeholder
+    // "bez opisu", kategorie to kolejny etap) + ikona NS; wiersz daty; wiersz 4 przyciskow
+    // (Opisz i wyslij / Otworz / Udostepnij / Usun) — dokladnie ta sama struktura, tylko
+    // "Wyslij do NS" jest na razie zablokowane (wymaga logowania, kolejny etap).
+    private android.widget.LinearLayout buildRecordingCard(File file, java.text.SimpleDateFormat fmt) {
+        float density = getResources().getDisplayMetrics().density;
+        int pad = (int) (10 * density);
+        int marginBottom = (int) (8 * density);
+
+        android.widget.LinearLayout card = new android.widget.LinearLayout(this);
+        card.setOrientation(android.widget.LinearLayout.VERTICAL);
+        card.setPadding(pad, pad, pad, pad);
+        card.setBackgroundColor(getResources().getColor(R.color.pr_card));
+
+        // Wiersz gorny: nazwa + "kategoria" (placeholder) + ikona NS
+        android.widget.LinearLayout topRow = new android.widget.LinearLayout(this);
+        topRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        TextView nameView = new TextView(this);
+        String shortName = file.getName().replace("recording_", "").replaceAll("\\.(wav|mp3)$", "");
+        nameView.setText(shortName);
+        nameView.setTextColor(getResources().getColor(R.color.pr_accent));
+        topRow.addView(nameView);
+
+        TextView catBadge = new TextView(this);
+        catBadge.setText(" bez opisu ");
+        catBadge.setTextColor(getResources().getColor(R.color.pr_pause));
+        topRow.addView(catBadge);
+
+        TextView nsIcon = new TextView(this);
+        nsIcon.setText(" ☁"); // zwykla, nieaktywna chmurka — brak integracji NS na tym etapie
+        nsIcon.setTextColor(getResources().getColor(R.color.pr_muted));
+        topRow.addView(nsIcon);
+
+        card.addView(topRow);
+
+        // Wiersz daty
+        TextView dateView = new TextView(this);
+        dateView.setText(fmt.format(new java.util.Date(file.lastModified())));
+        dateView.setTextColor(getResources().getColor(R.color.pr_muted));
+        card.addView(dateView);
+
+        // Wiersz przyciskow — dokladnie 4, jak w PitchRec (nsB/open/dl/del)
+        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
+        btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        Button sendBtn = new Button(this);
+        sendBtn.setText("📝 Opisz i wyślij");
+        sendBtn.setTextColor(getResources().getColor(R.color.pr_pause));
+        sendBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        sendBtn.setOnClickListener(v -> Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show());
+        btnRow.addView(sendBtn);
+
+        Button openBtn = new Button(this);
+        openBtn.setText("DAW");
+        openBtn.setTextColor(getResources().getColor(R.color.pr_accent));
+        openBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        openBtn.setOnClickListener(v -> {
+            loadAndDisplayFile(file);
+            playFile(file.getAbsolutePath(), 0L);
+        });
+        btnRow.addView(openBtn);
+
+        Button shareBtn = new Button(this);
+        shareBtn.setText("⬇");
+        shareBtn.setTextColor(getResources().getColor(R.color.pr_accent));
+        shareBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        shareBtn.setOnClickListener(v -> shareRecording(file));
+        btnRow.addView(shareBtn);
+
+        Button delBtn = new Button(this);
+        delBtn.setText("Usuń");
+        delBtn.setTextColor(getResources().getColor(R.color.pr_warn));
+        delBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Usunąć nagranie?")
+                .setMessage(file.getName())
+                .setPositiveButton("Usuń", (d2, w2) -> {
+                    file.delete();
+                    Toast.makeText(this, "Usunięto", Toast.LENGTH_SHORT).show();
+                    showRecordingsList();
+                })
+                .setNegativeButton("Anuluj", null)
+                .show());
+        btnRow.addView(delBtn);
+
+        card.addView(btnRow);
+
+        android.widget.LinearLayout.LayoutParams cardParams = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        cardParams.bottomMargin = marginBottom;
+        card.setLayoutParams(cardParams);
+
+        return card;
     }
 
     // Import zewnetrznego pliku audio (jak "Wgraj plik" w PitchRec) — otwiera systemowy
