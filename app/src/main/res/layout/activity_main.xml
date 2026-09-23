@@ -23,20 +23,6 @@
         android:padding="6dp"
         android:background="@color/pr_card">
 
-        <Button
-            android:id="@+id/recordingsListButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="📁 Nagrania"
-            android:textSize="10sp"
-            android:textColor="@color/pr_text"
-            android:backgroundTint="@color/pr_bg" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -256,26 +242,26 @@
          kolejny, osobny etap prac). -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="72dp"
         android:orientation="horizontal"
         android:background="@color/pr_card">
 
         <Button
+            android:id="@+id/recordingsListButton"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="📁\nNagrania"
-            android:textSize="9sp"
+            android:textSize="13sp"
             android:textColor="@color/pr_accent"
-            android:background="@android:color/transparent"
-            android:enabled="false" />
+            android:background="@android:color/transparent" />
 
         <Button
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="✓\nKorekta"
-            android:textSize="9sp"
+            android:textSize="13sp"
             android:textColor="@color/pr_muted"
             android:background="@android:color/transparent"
             android:enabled="false" />
@@ -285,7 +271,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="📖\nDziennik"
-            android:textSize="9sp"
+            android:textSize="13sp"
             android:textColor="@color/pr_muted"
             android:background="@android:color/transparent"
             android:enabled="false" />
@@ -295,7 +281,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="📊\nStatystyki"
-            android:textSize="9sp"
+            android:textSize="13sp"
             android:textColor="@color/pr_muted"
             android:background="@android:color/transparent"
             android:enabled="false" />
@@ -305,7 +291,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="⚙\nUstawienia"
-            android:textSize="9sp"
+            android:textSize="13sp"
             android:textColor="@color/pr_muted"
             android:background="@android:color/transparent"
             android:enabled="false" />
