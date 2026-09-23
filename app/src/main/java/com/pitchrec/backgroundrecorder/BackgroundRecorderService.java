@@ -71,6 +71,11 @@ public class BackgroundRecorderService extends Service {
     private FileOutputStream mp3OutputStream;
     private byte[] mp3EncodeBuffer;
 
+    // Wspolna, biezaca sciezka pliku i format — pozwala MainActivity na podglad/odtworzenie
+    // fragmentu nagrania PODCZAS pauzy, zanim plik zostanie sfinalizowany przy Stop.
+    public static volatile String currentOutputFilePath = null;
+    public static volatile String currentOutputFormat = "wav";
+
     private File outputFile;
     private long recordingStartedAt = 0L;
     private long pausedAccumMs = 0L;
@@ -169,6 +174,8 @@ public class BackgroundRecorderService extends Service {
                 writeWavHeaderPlaceholder(wavOutputStream);
                 pcmBytesWritten = 0L;
             }
+            currentOutputFilePath = outputFile.getAbsolutePath();
+            currentOutputFormat = outputFormat;
 
             audioRecord.startRecording();
             if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
@@ -191,6 +198,7 @@ public class BackgroundRecorderService extends Service {
                     float[] yinWindow = new float[YIN_WINDOW];
                     int yinFillCount = 0;
                     long samplePos = 0;
+                    float lastSmoothedFreq = 0f; // do wygladzania (fSm), jak w oryginalnym JS
 
                     while (recording) {
                         if (paused) {
@@ -222,10 +230,29 @@ public class BackgroundRecorderService extends Service {
                                 yinWindow[yinFillCount] = buffer[i] / 32768f;
                                 yinFillCount++;
                                 if (yinFillCount >= YIN_WINDOW) {
+                                    // RMS calego okna — brakujacy w poprzedniej wersji prog
+                                    // glosnosci (rms>0.006 w oryginalnym JS), ktory zapobiega
+                                    // przyjmowaniu przypadkowych, szumowych wykryc podczas
+                                    // cichych momentow (naturalne przerwy w mowie) —
+                                    // to byla prawdopodobnie glowna przyczyna "skokow mimo
+                                    // stabilnego glosu".
+                                    float sum = 0;
+                                    for (int j = 0; j < YIN_WINDOW; j++) sum += yinWindow[j] * yinWindow[j];
+                                    float rms = (float) Math.sqrt(sum / YIN_WINDOW);
+
                                     float freq = YinPitchDetector.detect(yinWindow);
                                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
-                                    if (freq > 70 && freq < 1000) {
-                                        LiveAudioData.appendPitch(windowStartSample, freq);
+
+                                    if (freq > 70 && freq < 1000 && rms > 0.006f) {
+                                        // Wygladzanie wykladnicze (fSm), dokladnie jak w
+                                        // oryginalnym JS — bez tego kazde okno dawalo
+                                        // "surowy" wynik YIN, co przy naturalnym szumie
+                                        // analizy wygladalo jak nagle skoki.
+                                        float smoothed = lastSmoothedFreq > 0
+                                                ? lastSmoothedFreq * 0.88f + freq * 0.12f
+                                                : freq;
+                                        lastSmoothedFreq = smoothed;
+                                        LiveAudioData.appendPitch(windowStartSample, smoothed);
                                     } else {
                                         LiveAudioData.appendPitch(windowStartSample, -1);
                                     }
@@ -284,6 +311,14 @@ public class BackgroundRecorderService extends Service {
         currentStatus = "PAUSED";
         updatePlaybackState(PlaybackState.STATE_PAUSED);
         updateNotification("Pauza");
+        // Wymuszamy zapis na dysk — bez tego podglad/odtworzenie fragmentu podczas pauzy
+        // moglby nie widziec najnowszych, jeszcze zbuforowanych danych.
+        try {
+            if (wavOutputStream != null) wavOutputStream.getFD().sync();
+        } catch (Exception e) { /* ignorowane */ }
+        try {
+            if (mp3OutputStream != null) mp3OutputStream.flush();
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void handleResume() {
@@ -332,6 +367,7 @@ public class BackgroundRecorderService extends Service {
     }
 
     private void cleanupAudioResources() {
+        currentOutputFilePath = null;
         try { if (audioRecord != null) { audioRecord.stop(); audioRecord.release(); } } catch (Exception e) { }
         audioRecord = null;
 
