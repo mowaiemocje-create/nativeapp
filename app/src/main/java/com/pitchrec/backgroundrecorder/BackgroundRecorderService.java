@@ -62,14 +62,11 @@ public class BackgroundRecorderService extends Service {
     private volatile boolean paused = false;
     private String outputFormat = "wav";
 
-    // Sciezka WAV (surowe PCM + naglowek)
+    // Sciezka WAV (surowe PCM + naglowek) — nagrywanie na zywo jest teraz ZAWSZE WAV;
+    // MP3 (jesli wybrane) to wsadowa konwersja calego pliku dopiero przy Stop
+    // (patrz convertWavToMp3), nie kodowanie na zywo.
     private RandomAccessFile wavOutputStream;
     private long pcmBytesWritten = 0L;
-
-    // Sciezka MP3 (kodowanie na biezaco przez java-lame)
-    private LameEncoder lameEncoder;
-    private FileOutputStream mp3OutputStream;
-    private byte[] mp3EncodeBuffer;
 
     // Wspolna, biezaca sciezka pliku i format — pozwala MainActivity na podglad/odtworzenie
     // fragmentu nagrania PODCZAS pauzy, zanim plik zostanie sfinalizowany przy Stop.
@@ -161,21 +158,17 @@ public class BackgroundRecorderService extends Service {
                 throw new IOException("AudioRecord nie zainicjalizowany poprawnie");
             }
 
-            if ("mp3".equals(outputFormat)) {
-                outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".mp3");
-                javax.sound.sampled.AudioFormat lameFormat =
-                        new javax.sound.sampled.AudioFormat(SAMPLE_RATE, 16, 1, true, false);
-                lameEncoder = new LameEncoder(lameFormat, 192, MPEGMode.MONO, Lame.QUALITY_HIGHEST, false);
-                mp3OutputStream = new FileOutputStream(outputFile);
-                mp3EncodeBuffer = new byte[lameEncoder.getPCMBufferSize()];
-            } else {
-                outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
-                wavOutputStream = new RandomAccessFile(outputFile, "rw");
-                writeWavHeaderPlaceholder(wavOutputStream);
-                pcmBytesWritten = 0L;
-            }
+            // ZAWSZE nagrywamy na zywo jako WAV — niezaleznie od wybranego formatu
+            // koncowego. To wlacza podglad podczas pauzy UNIWERSALNIE (wczesniej nie
+            // dzialalo dla MP3, bo czesciowy strumien MP3 nie jest bezpiecznie
+            // odtwarzalny w trakcie kodowania). Konwersja do MP3 (jesli wybrana) dzieje
+            // sie na CALYM, gotowym pliku dopiero po wcisnieciu Stop.
+            outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
+            wavOutputStream = new RandomAccessFile(outputFile, "rw");
+            writeWavHeaderPlaceholder(wavOutputStream);
+            pcmBytesWritten = 0L;
             currentOutputFilePath = outputFile.getAbsolutePath();
-            currentOutputFormat = outputFormat;
+            currentOutputFormat = "wav"; // podczas nagrywania ZAWSZE wav, konwersja przy Stop
 
             audioRecord.startRecording();
             if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
@@ -199,6 +192,7 @@ public class BackgroundRecorderService extends Service {
                     int yinFillCount = 0;
                     long samplePos = 0;
                     float lastSmoothedFreq = 0f; // do wygladzania (fSm), jak w oryginalnym JS
+                    float currentAppliedGain = LiveAudioData.gainMultiplier; // do plynnego rampowania gain
 
                     while (recording) {
                         if (paused) {
@@ -207,17 +201,17 @@ public class BackgroundRecorderService extends Service {
                         }
                         int read = audioRecord.read(buffer, 0, buffer.length);
                         if (read > 0) {
-                            // Zastosuj gain (mnożnik z suwaka MIC) — z ograniczeniem do
-                            // zakresu 16-bit, żeby nie "obcinać" dźwięku (clipping) przy
-                            // wysokim wzmocnieniu.
-                            float gain = LiveAudioData.gainMultiplier;
-                            if (gain != 1f) {
-                                for (int i = 0; i < read; i++) {
-                                    int amplified = (int) (buffer[i] * gain);
-                                    if (amplified > Short.MAX_VALUE) amplified = Short.MAX_VALUE;
-                                    else if (amplified < Short.MIN_VALUE) amplified = Short.MIN_VALUE;
-                                    buffer[i] = (short) amplified;
-                                }
+                            // Zastosuj gain PLYNNIE (rampowanie próbka-po-próbce w strone
+                            // celu z suwaka) — bez tego, przesuniecie suwaka podczas
+                            // nagrywania powodowalo slyszalne "kliknieice/skok" na granicy
+                            // buforow, bo caly bufor od razu skakal na nowa wartosc.
+                            float targetGain = LiveAudioData.gainMultiplier;
+                            for (int i = 0; i < read; i++) {
+                                currentAppliedGain += (targetGain - currentAppliedGain) * 0.01f;
+                                int amplified = (int) (buffer[i] * currentAppliedGain);
+                                if (amplified > Short.MAX_VALUE) amplified = Short.MAX_VALUE;
+                                else if (amplified < Short.MIN_VALUE) amplified = Short.MIN_VALUE;
+                                buffer[i] = (short) amplified;
                             }
 
                             // Bramka szumów — jesli wlaczona, wycisz caly bufor gdy jego
@@ -292,22 +286,13 @@ public class BackgroundRecorderService extends Service {
         }
     }
 
-    // Zapisuje porcje probek do wybranego formatu wyjsciowego (WAV: surowe bajty; MP3:
-    // kodowanie na biezaco przez LameEncoder).
+    // Zapisuje porcje probek jako surowe PCM (WAV) — nagrywanie na zywo jest teraz ZAWSZE
+    // WAV, kodowanie MP3 (jesli wybrane) dzieje sie dopiero przy Stop, na calym pliku.
     private void writeAudioChunk(short[] samples, int count) throws IOException {
-        if ("mp3".equals(outputFormat)) {
-            if (lameEncoder == null || mp3OutputStream == null) return;
-            byte[] pcmBytes = shortsToBytesLE(samples, count);
-            int bytesEncoded = lameEncoder.encodeBuffer(pcmBytes, 0, pcmBytes.length, mp3EncodeBuffer);
-            if (bytesEncoded > 0) {
-                mp3OutputStream.write(mp3EncodeBuffer, 0, bytesEncoded);
-            }
-        } else {
-            if (wavOutputStream == null) return;
-            byte[] bytes = shortsToBytesLE(samples, count);
-            wavOutputStream.write(bytes);
-            pcmBytesWritten += bytes.length;
-        }
+        if (wavOutputStream == null) return;
+        byte[] bytes = shortsToBytesLE(samples, count);
+        wavOutputStream.write(bytes);
+        pcmBytesWritten += bytes.length;
     }
 
     private byte[] shortsToBytesLE(short[] samples, int count) {
@@ -330,9 +315,6 @@ public class BackgroundRecorderService extends Service {
         // moglby nie widziec najnowszych, jeszcze zbuforowanych danych.
         try {
             if (wavOutputStream != null) wavOutputStream.getFD().sync();
-        } catch (Exception e) { /* ignorowane */ }
-        try {
-            if (mp3OutputStream != null) mp3OutputStream.flush();
         } catch (Exception e) { /* ignorowane */ }
     }
 
@@ -363,10 +345,22 @@ public class BackgroundRecorderService extends Service {
             if (!hasData) {
                 RecordingResultHolder.rejectStop("EMPTY_RECORDING", null);
             } else {
+                File finalFile = outputFile;
+                String mime = "audio/wav";
+                if ("mp3".equals(outputFormat)) {
+                    // Konwersja calego, gotowego pliku WAV do MP3 — dzieje sie TERAZ,
+                    // dopiero po Stop (nie na zywo podczas nagrywania), zeby podglad
+                    // podczas pauzy dzialal zawsze (WAV), niezaleznie od wybranego
+                    // formatu koncowego.
+                    File mp3File = convertWavToMp3(outputFile);
+                    if (mp3File != null) {
+                        finalFile = mp3File;
+                        mime = "audio/mpeg";
+                    }
+                }
                 long durationMs = System.currentTimeMillis() - recordingStartedAt - pausedAccumMs;
-                byte[] bytes = readFileBytes(outputFile);
+                byte[] bytes = readFileBytes(finalFile);
                 String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                String mime = "mp3".equals(outputFormat) ? "audio/mpeg" : "audio/wav";
                 RecordingResultHolder.resolveStop(base64, durationMs, mime);
             }
         } catch (Exception e) {
@@ -378,6 +372,36 @@ public class BackgroundRecorderService extends Service {
             releaseMediaSession();
             stopForegroundCompat();
             stopSelf();
+        }
+    }
+
+    // Konwertuje caly, gotowy plik WAV do MP3 (wsadowo, nie na zywo) — uzywane dopiero
+    // przy Stop, jesli MP3 zostalo wybrane jako format koncowy.
+    private File convertWavToMp3(File wavFile) {
+        try {
+            File mp3File = new File(getCacheDir(), "converted_" + System.currentTimeMillis() + ".mp3");
+            javax.sound.sampled.AudioFormat lameFormat =
+                    new javax.sound.sampled.AudioFormat(SAMPLE_RATE, 16, 1, true, false);
+            LameEncoder encoder = new LameEncoder(lameFormat, 192, MPEGMode.MONO, Lame.QUALITY_HIGHEST, false);
+            byte[] encodeBuffer = new byte[encoder.getPCMBufferSize()];
+
+            try (RandomAccessFile in = new RandomAccessFile(wavFile, "r");
+                 FileOutputStream out = new FileOutputStream(mp3File)) {
+                in.seek(44); // pomijamy naglowek WAV
+                byte[] pcmChunk = new byte[8192];
+                int read;
+                while ((read = in.read(pcmChunk)) != -1) {
+                    int bytesEncoded = encoder.encodeBuffer(pcmChunk, 0, read, encodeBuffer);
+                    if (bytesEncoded > 0) out.write(encodeBuffer, 0, bytesEncoded);
+                }
+                int flushed = encoder.encodeFinish(encodeBuffer);
+                if (flushed > 0) out.write(encodeBuffer, 0, flushed);
+            }
+            encoder.close();
+            wavFile.delete(); // WAV juz niepotrzebny, mamy MP3
+            return mp3File;
+        } catch (Exception e) {
+            return null; // konwersja nieudana — zostajemy przy WAV (obsluzone przez wywolujacego)
         }
     }
 
@@ -393,19 +417,6 @@ public class BackgroundRecorderService extends Service {
             }
         } catch (Exception e) { }
         wavOutputStream = null;
-
-        try {
-            if (lameEncoder != null && mp3OutputStream != null) {
-                // Ostatnie wywolanie z pusta wejsciowka - wymusza zapis buforowanych ramek
-                // MP3, ktore koder mogl jeszcze przetrzymywac wewnetrznie.
-                int flushed = lameEncoder.encodeFinish(mp3EncodeBuffer);
-                if (flushed > 0) mp3OutputStream.write(mp3EncodeBuffer, 0, flushed);
-                mp3OutputStream.close();
-                lameEncoder.close();
-            }
-        } catch (Exception e) { }
-        lameEncoder = null;
-        mp3OutputStream = null;
     }
 
     private void writeWavHeaderPlaceholder(RandomAccessFile raf) throws IOException {

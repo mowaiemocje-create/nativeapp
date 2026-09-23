@@ -65,8 +65,10 @@ public class PitchWaveView extends View {
         bgPaint.setColor(Color.parseColor("#1a1a1a"));
         envelopePaint.setColor(Color.parseColor("#00E000"));
         envelopePaint.setStrokeWidth(2f);
+        envelopePaint.setAntiAlias(false);
         midlinePaint.setColor(Color.parseColor("#40FFFFFF"));
         midlinePaint.setStrokeWidth(1f);
+        midlinePaint.setAntiAlias(false);
         pitchPaint.setColor(Color.parseColor("#FF3B30"));
         pitchPaint.setStrokeWidth(4f);
         pitchPaint.setStrokeJoin(Paint.Join.ROUND);
@@ -84,6 +86,7 @@ public class PitchWaveView extends View {
 
         gridLinePaint.setColor(Color.parseColor("#20FFFFFF"));
         gridLinePaint.setStrokeWidth(1f);
+        gridLinePaint.setAntiAlias(false);
 
         playheadPaint.setColor(Color.parseColor("#FFFFFF"));
         playheadPaint.setStrokeWidth(dp(2));
@@ -254,6 +257,13 @@ public class PitchWaveView extends View {
     }
 
     private void rebuildCache(Canvas canvas, int w, int fullH) {
+        // Zastosuj ustawienia grubosci/koloru linii pitch (z ekranu Ustawien) — odczytywane
+        // przy kazdej przebudowie cache, wiec zmiana w ustawieniach dziala automatycznie.
+        pitchPaint.setColor(LiveAudioData.pitchLineColor);
+        pitchPaint.setStrokeWidth(dp(LiveAudioData.pitchLineWidthDp));
+        gridLinePaint.setColor(LiveAudioData.gridLineColor);
+        gridLinePaint.setStrokeWidth(dp(LiveAudioData.gridLineWidthDp));
+
         float rulerHeight = dp(RULER_HEIGHT_DP);
         int h = (int) (fullH - rulerHeight);
         if (h <= 0) return; // zabezpieczenie — widok za maly, nic sensownego do rysowania

@@ -221,6 +221,67 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
         container.addView(keepScreenOnCheck);
 
+        // Grubosc linii pitch
+        TextView pitchWidthLabel = new TextView(this);
+        pitchWidthLabel.setText("Grubość linii pitch:");
+        container.addView(pitchWidthLabel);
+
+        SliderView pitchWidthSlider = new SliderView(this);
+        android.widget.LinearLayout.LayoutParams sliderParams = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * getResources().getDisplayMetrics().density));
+        pitchWidthSlider.setLayoutParams(sliderParams);
+        pitchWidthSlider.setValue((LiveAudioData.pitchLineWidthDp - 1f) / 9f); // zakres 1-10dp
+        pitchWidthSlider.setOnValueChangeListener(v -> LiveAudioData.pitchLineWidthDp = 1f + v * 9f);
+        container.addView(pitchWidthSlider);
+
+        // Kolor linii pitch — kilka gotowych opcji (prosciej niz pelny wybor koloru)
+        TextView pitchColorLabel = new TextView(this);
+        pitchColorLabel.setText("Kolor linii pitch:");
+        container.addView(pitchColorLabel);
+
+        android.widget.LinearLayout colorRow = new android.widget.LinearLayout(this);
+        colorRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        int[] presetColors = {0xFFFF3B30, 0xFFFFE600, 0xFF00E000, 0xFFFFFFFF, 0xFF7EC8E3};
+        String[] presetNames = {"Czerwony", "Żółty", "Zielony", "Biały", "Niebieski"};
+        for (int idx = 0; idx < presetColors.length; idx++) {
+            final int colorValue = presetColors[idx];
+            Button colorBtn = new Button(this);
+            colorBtn.setText(presetNames[idx]);
+            colorBtn.setBackgroundColor(colorValue);
+            colorBtn.setOnClickListener(v -> LiveAudioData.pitchLineColor = colorValue);
+            colorRow.addView(colorBtn);
+        }
+        container.addView(colorRow);
+
+        // Grubosc siatki DAW
+        TextView gridWidthLabel = new TextView(this);
+        gridWidthLabel.setText("Grubość siatki:");
+        container.addView(gridWidthLabel);
+
+        SliderView gridWidthSlider = new SliderView(this);
+        gridWidthSlider.setLayoutParams(sliderParams);
+        gridWidthSlider.setValue((LiveAudioData.gridLineWidthDp - 0.5f) / 3.5f); // zakres 0.5-4dp
+        gridWidthSlider.setOnValueChangeListener(v -> LiveAudioData.gridLineWidthDp = 0.5f + v * 3.5f);
+        container.addView(gridWidthSlider);
+
+        // Kolor siatki DAW
+        TextView gridColorLabel = new TextView(this);
+        gridColorLabel.setText("Kolor siatki:");
+        container.addView(gridColorLabel);
+
+        android.widget.LinearLayout gridColorRow = new android.widget.LinearLayout(this);
+        gridColorRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        int[] gridPresetColors = {0x30FFFFFF, 0x50FFFFFF, 0x40F0973A, 0x400000FF, 0x30FF3B30};
+        String[] gridPresetNames = {"Subtelna", "Wyraźna", "Pomarańcz.", "Niebieska", "Czerwona"};
+        for (int idx = 0; idx < gridPresetColors.length; idx++) {
+            final int colorValue = gridPresetColors[idx];
+            Button gridColorBtn = new Button(this);
+            gridColorBtn.setText(gridPresetNames[idx]);
+            gridColorBtn.setOnClickListener(v -> LiveAudioData.gridLineColor = colorValue);
+            gridColorRow.addView(gridColorBtn);
+        }
+        container.addView(gridColorRow);
+
         new AlertDialog.Builder(this)
                 .setTitle("Ustawienia")
                 .setView(container)
@@ -629,7 +690,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         btnRow.addView(openBtn);
 
         Button shareBtn = new Button(this);
-        shareBtn.setText("⬇");
+        shareBtn.setText("📤 Udostępnij");
         shareBtn.setTextColor(getResources().getColor(R.color.pr_accent));
         shareBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
         shareBtn.setOnClickListener(v -> shareRecording(file));
