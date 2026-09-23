@@ -1,7 +1,6 @@
 package com.pitchrec.nativetest;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -13,17 +12,6 @@ import android.view.View;
 import java.util.List;
 import java.util.Locale;
 
-// Rysuje falę (zielona obwiednia) + żółtą linię pitch + siatkę + podziałkę sekundową +
-// suwak odtwarzania.
-//
-// WYDAJNOŚĆ (v3) — potwierdzone przez analizę zdekompilowanego RecForge: sekret ich
-// płynności to NIE inna architektura (zwykły View, jak my — nie SurfaceView, na co dałem
-// się wcześniej złapać), ale PODWÓJNE BUFOROWANIE: statyczna zawartość (fala+siatka+pitch)
-// jest rysowana do CACHOWANEJ bitmapy TYLKO gdy dane faktycznie się zmienią, nie przy
-// każdej klatce. onDraw() w większości klatek tylko WKLEJA gotową bitmapę (bardzo szybkie)
-// + dorysowuje jedynie suwak odtwarzania na wierzchu. To dokładnie ten sam wzorzec, który
-// zastosowałem wcześniej dla wersji webowej PitchRec (drawStatic/draw), tylko teraz
-// faktycznie wdrożony też tutaj.
 public class PitchWaveView extends View {
 
     private static final float PMIN = 55f;
@@ -45,14 +33,6 @@ public class PitchWaveView extends View {
     }
 
     private OnSeekListener seekListener;
-
-    // ── Cache (podwojne buforowanie) ──
-    private Bitmap cacheBitmap;
-    private Canvas cacheCanvas;
-    private long lastCachedTotalSamples = -1L;
-    private long lastCachedPanOffset = -1L;
-    private float lastCachedZoomSeconds = -1f;
-    private boolean lastCachedLiveMode = true;
 
     public PitchWaveView(Context context) {
         super(context);
@@ -120,13 +100,12 @@ public class PitchWaveView extends View {
 
     public void setPlayheadSample(long sample) {
         playheadSample = sample;
-        invalidate(); // suwak jest lekki do przerysowania, ale i tak wystarczy blit z cache
+        invalidate();
     }
 
     public void resetPan() {
         panOffsetSample = 0L;
         playheadSample = -1L;
-        lastCachedTotalSamples = -1L; // wymuszamy odswiezenie cache
     }
 
     private float freqToY(float freq, int height) {
@@ -184,59 +163,6 @@ public class PitchWaveView extends View {
         super.onDraw(canvas);
         int w = getWidth();
         int fullH = getHeight();
-        if (w <= 0 || fullH <= 0) return;
-
-        ensureCacheBitmap(w, fullH);
-
-        long totalSamples = LiveAudioData.getTotalSamplesWritten();
-        // KLUCZOWA OPTYMALIZACJA: przerysuj cache TYLKO gdy dane faktycznie sie zmienily
-        // (nowe probki podczas nagrywania) albo zmienil sie zoom/pan/tryb — NIE przy kazdej
-        // klatce. To jest dokladnie technika z RecForge (Bitmap L odswiezana tylko gdy
-        // potrzeba, nie w petli rysowania).
-        boolean needsRebuild = totalSamples != lastCachedTotalSamples
-                || panOffsetSample != lastCachedPanOffset
-                || zoomSeconds != lastCachedZoomSeconds
-                || isLiveMode != lastCachedLiveMode;
-
-        if (needsRebuild) {
-            rebuildCache(w, fullH);
-            lastCachedTotalSamples = totalSamples;
-            lastCachedPanOffset = panOffsetSample;
-            lastCachedZoomSeconds = zoomSeconds;
-            lastCachedLiveMode = isLiveMode;
-        }
-
-        // Szybki blit gotowej bitmapy — to jest to, co dzieje sie w WIEKSZOSCI klatek.
-        canvas.drawBitmap(cacheBitmap, 0, 0, null);
-
-        // Suwak odtwarzania rysowany ZAWSZE bezposrednio na widocznym canvasie (nie w
-        // cache) — to jedyny element zmieniajacy sie NIEZALEZNIE od danych fali/pitch
-        // (podczas odtwarzania), wiec nie powinien wymuszac przebudowy calego cache.
-        if (playheadSample >= 0 && lastVisibleSampleRange > 0) {
-            float rulerHeight = dp(RULER_HEIGHT_DP);
-            float px = ((playheadSample - lastVisibleStartSample) / lastVisibleSampleRange) * w;
-            if (px >= 0 && px <= w) {
-                canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
-            }
-        }
-    }
-
-    private void ensureCacheBitmap(int w, int h) {
-        if (cacheBitmap == null || cacheBitmap.getWidth() != w || cacheBitmap.getHeight() != h) {
-            if (cacheBitmap != null) cacheBitmap.recycle();
-            cacheBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-            cacheCanvas = new Canvas(cacheBitmap);
-            lastCachedTotalSamples = -1L; // wymuszamy przebudowe po zmianie rozmiaru
-        }
-    }
-
-    private long lastVisibleStartSample = 0L;
-    private float lastVisibleSampleRange = 1f;
-
-    // Odpowiednik drawStatic() z wersji webowej — rysuje CAŁĄ zawartość (fala, siatka,
-    // pitch, podziałka) do cachowanej bitmapy. Wywoływane TYLKO gdy dane się zmienią.
-    private void rebuildCache(int w, int fullH) {
-        Canvas canvas = cacheCanvas;
         float rulerHeight = dp(RULER_HEIGHT_DP);
         int h = (int) (fullH - rulerHeight);
         int mid = h / 2;
@@ -281,8 +207,6 @@ public class PitchWaveView extends View {
                     ? (totalSamples - visibleStartSample)
                     : ((long) tailCount * 256));
             lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
-            lastVisibleStartSample = visibleStartSample;
-            lastVisibleSampleRange = visibleSampleRange;
 
             List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
             pitchPath.reset();
@@ -305,6 +229,13 @@ public class PitchWaveView extends View {
             }
             canvas.drawPath(pitchPath, pitchPaint);
 
+            if (playheadSample >= 0) {
+                float px = ((playheadSample - visibleStartSample) / visibleSampleRange) * w;
+                if (px >= 0 && px <= w) {
+                    canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
+                }
+            }
+
             drawRuler(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
         } else {
             canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
@@ -315,14 +246,17 @@ public class PitchWaveView extends View {
         canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
         float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
         float pxPerSecond = w / visibleSeconds;
+        if (pxPerSecond <= 0f || !Float.isFinite(pxPerSecond)) return; // zabezpieczenie przed nieskoncz. petla
 
         float tickIntervalSec = 1f;
-        while (tickIntervalSec * pxPerSecond < dp(40)) tickIntervalSec *= 2;
+        int safety = 0;
+        while (tickIntervalSec * pxPerSecond < dp(40) && safety < 30) { tickIntervalSec *= 2; safety++; }
 
         float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
         float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
 
-        for (float sec = firstTickSecond; ; sec += tickIntervalSec) {
+        int tickSafety = 0;
+        for (float sec = firstTickSecond; tickSafety < 200; sec += tickIntervalSec, tickSafety++) {
             float x = (sec - startSecond) * pxPerSecond;
             if (x > w) break;
             canvas.drawLine(x, rulerHeight, x, canvas.getHeight(), gridLinePaint);
