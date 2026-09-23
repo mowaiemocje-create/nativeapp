@@ -220,6 +220,21 @@ public class BackgroundRecorderService extends Service {
                                 }
                             }
 
+                            // Bramka szumów — jesli wlaczona, wycisz caly bufor gdy jego
+                            // RMS jest ponizej ustawionego progu (tlumi szum tla w cichych
+                            // momentach).
+                            if (LiveAudioData.noiseGateEnabled) {
+                                float sumSq = 0;
+                                for (int i = 0; i < read; i++) {
+                                    float norm = buffer[i] / 32768f;
+                                    sumSq += norm * norm;
+                                }
+                                float bufRms = (float) Math.sqrt(sumSq / read);
+                                if (bufRms < LiveAudioData.noiseGateThreshold) {
+                                    for (int i = 0; i < read; i++) buffer[i] = 0;
+                                }
+                            }
+
                             try {
                                 writeAudioChunk(buffer, read);
                             } catch (IOException ioe) { /* kontynuuj */ }

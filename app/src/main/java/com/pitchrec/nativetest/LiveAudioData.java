@@ -42,6 +42,11 @@ public class LiveAudioData {
     // nigdy faktycznie nie wplywal na dzwiek — to byl prawdziwy blad.
     public static volatile float gainMultiplier = 1f;
 
+    // Bramka szumów — jeśli włączona, próbki o RMS poniżej progu są wyciszane (ustawiane
+    // na zero) przed zapisem/analizą. Domyślnie wyłączona.
+    public static volatile boolean noiseGateEnabled = false;
+    public static volatile float noiseGateThreshold = 0.02f; // RMS, 0.0-1.0
+
     public static void reset() {
         synchronized (lock) {
             envelope = new float[4096];

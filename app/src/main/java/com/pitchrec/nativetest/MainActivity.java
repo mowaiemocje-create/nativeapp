@@ -43,8 +43,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private Button playButton;
     private Button resetButton;
     private Button recordingsListButton;
-    private Button formatWavButton;
-    private Button formatMp3Button;
+    private Button settingsButton;
     private TextView statusText;
     private TextView timeText;
     private TextView gainValueText;
@@ -96,8 +95,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         playButton = findViewById(R.id.playButton);
         resetButton = findViewById(R.id.resetButton);
         recordingsListButton = findViewById(R.id.recordingsListButton);
-        formatWavButton = findViewById(R.id.formatWavButton);
-        formatMp3Button = findViewById(R.id.formatMp3Button);
+        settingsButton = findViewById(R.id.settingsButton);
         statusText = findViewById(R.id.statusText);
         timeText = findViewById(R.id.timeText);
         gainValueText = findViewById(R.id.gainValueText);
@@ -132,21 +130,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
         });
 
+        // Schemat jak w RecForge: jeden przycisk cykluje REC<->PAUZA (rozpoczyna nagranie,
+        // albo pauzuje/wznawia trwajace), drugi (STOP) finalizuje i zapisuje. Po Stop —
+        // tylko odtwarzanie, dopóki nie wcisnie się REC ponownie (co zaczyna NOWE nagranie).
         recordButton.setOnClickListener(v -> {
             if (!isRecording) {
                 startRecordingFlow();
-            } else {
-                stopRecordingFlow();
-            }
-        });
-
-        pauseButton.setOnClickListener(v -> {
-            if (!isPaused) {
+            } else if (!isPaused) {
                 pauseRecordingFlow();
             } else {
                 resumeRecordingFlow();
             }
         });
+
+        pauseButton.setOnClickListener(v -> stopRecordingFlow());
 
         playButton.setOnClickListener(v -> {
             String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
@@ -161,9 +158,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         resetButton.setOnClickListener(v -> resetRecording());
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
 
-        formatWavButton.setOnClickListener(v -> selectFormat("wav"));
-        formatMp3Button.setOnClickListener(v -> selectFormat("mp3"));
-        updateFormatButtonsUi();
+        settingsButton.setOnClickListener(v -> showSettingsDialog());
     }
 
     // Wyswietlanie wzmocnienia w dB (jak "Wzmocnienie programowe +7,00 dB" w RecForge),
@@ -182,17 +177,64 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             return;
         }
         selectedFormat = format;
-        updateFormatButtonsUi();
     }
 
-    private void updateFormatButtonsUi() {
-        boolean isWav = "wav".equals(selectedFormat);
-        formatWavButton.setTextColor(getColorCompat(isWav ? R.color.pr_accent : R.color.pr_muted));
-        formatMp3Button.setTextColor(getColorCompat(!isWav ? R.color.pr_accent : R.color.pr_muted));
+    // Ekran Ustawień — format nagrywania, bramka szumów, blokada wygaszania ekranu.
+    // Budowany programowo (bez osobnego pliku layoutu), podobnie jak lista nagrań.
+    private void showSettingsDialog() {
+        android.widget.LinearLayout container = new android.widget.LinearLayout(this);
+        container.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        container.setPadding(pad, pad, pad, pad);
+
+        TextView formatLabel = new TextView(this);
+        formatLabel.setText("Format nagrywania:");
+        container.addView(formatLabel);
+
+        android.widget.RadioGroup formatGroup = new android.widget.RadioGroup(this);
+        formatGroup.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.RadioButton wavRadio = new android.widget.RadioButton(this);
+        wavRadio.setText("WAV");
+        android.widget.RadioButton mp3Radio = new android.widget.RadioButton(this);
+        mp3Radio.setText("MP3");
+        formatGroup.addView(wavRadio);
+        formatGroup.addView(mp3Radio);
+        wavRadio.setChecked("wav".equals(selectedFormat));
+        mp3Radio.setChecked("mp3".equals(selectedFormat));
+        wavRadio.setOnClickListener(v -> selectFormat("wav"));
+        mp3Radio.setOnClickListener(v -> selectFormat("mp3"));
+        container.addView(formatGroup);
+
+        android.widget.CheckBox noiseGateCheck = new android.widget.CheckBox(this);
+        noiseGateCheck.setText("Bramka szumów (tłumi cichy szum tła)");
+        noiseGateCheck.setChecked(LiveAudioData.noiseGateEnabled);
+        noiseGateCheck.setOnCheckedChangeListener((btn, checked) -> LiveAudioData.noiseGateEnabled = checked);
+        container.addView(noiseGateCheck);
+
+        android.widget.CheckBox keepScreenOnCheck = new android.widget.CheckBox(this);
+        keepScreenOnCheck.setText("Nie wygaszaj ekranu podczas nagrywania");
+        keepScreenOnCheck.setChecked(keepScreenOnEnabled);
+        keepScreenOnCheck.setOnCheckedChangeListener((btn, checked) -> {
+            keepScreenOnEnabled = checked;
+            applyKeepScreenOnSetting();
+        });
+        container.addView(keepScreenOnCheck);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Ustawienia")
+                .setView(container)
+                .setPositiveButton("Zamknij", null)
+                .show();
     }
 
-    private int getColorCompat(int colorRes) {
-        return getResources().getColor(colorRes);
+    private boolean keepScreenOnEnabled = false;
+
+    private void applyKeepScreenOnSetting() {
+        if (keepScreenOnEnabled) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
     }
 
     private void startRecordingFlow() {
@@ -216,9 +258,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         recordingStartedAtMs = System.currentTimeMillis();
         pausedAccumMs = 0L;
         lastResumeAtMs = recordingStartedAtMs;
-        recordButton.setText("■ STOP");
+        recordButton.setText("⏸ PAUZA");
         pauseButton.setEnabled(true);
-        pauseButton.setText("⏸ PAUZA");
+        pauseButton.setText("■ STOP");
         playButton.setEnabled(false);
         pitchWaveView.setLiveMode(true);
         // Podczas nagrywania zoom zablokowany na 8s — zapobiega przypadkowej zmianie
@@ -249,7 +291,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startService(intent);
         isPaused = true;
         pausedAccumMs += System.currentTimeMillis() - lastResumeAtMs;
-        pauseButton.setText("▶ WZNÓW");
+        recordButton.setText("▶ WZNÓW");
         statusText.setText("Pauza — możesz przewinąć palcem");
         pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
     }
@@ -260,7 +302,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startService(intent);
         isPaused = false;
         lastResumeAtMs = System.currentTimeMillis();
-        pauseButton.setText("⏸ PAUZA");
+        recordButton.setText("⏸ PAUZA");
         statusText.setText("Nagrywanie…");
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
@@ -496,7 +538,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
         listView.setOnItemLongClickListener((parent, view, position, id) -> {
             File target = files[position];
-            String[] options = {"▶ Odtwórz", "📤 Udostępnij", "🗑 Usuń"};
+            String[] options = {"▶ Odtwórz", "📤 Udostępnij", "☁ Wyślij do NS", "🗑 Usuń"};
             new AlertDialog.Builder(this)
                     .setTitle(target.getName())
                     .setItems(options, (dialog, which) -> {
@@ -505,6 +547,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                             playFile(target.getAbsolutePath(), 0L);
                         } else if (which == 1) {
                             shareRecording(target);
+                        } else if (which == 2) {
+                            // Wymaga logowania — logowanie i integracja z serwerem NS to
+                            // kolejny, osobny etap prac (zgodnie z wczesniejsza decyzja).
+                            Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show();
                         } else {
                             new AlertDialog.Builder(this)
                                     .setTitle("Usunąć nagranie?")
