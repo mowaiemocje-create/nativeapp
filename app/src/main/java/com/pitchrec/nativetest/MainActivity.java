@@ -146,14 +146,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setOnClickListener(v -> stopRecordingFlow());
 
         playButton.setOnClickListener(v -> {
-            String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
-            if (path != null) playFile(path, pendingSeekSample);
+            if (isPaused) {
+                previewDuringPause(pendingSeekSample);
+            } else {
+                String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
+                if (path != null) playFile(path, pendingSeekSample);
+            }
         });
         pitchWaveView.setOnSeekListener(sample -> {
             pendingSeekSample = sample;
-            if (isPaused) {
-                previewDuringPause(sample);
-            }
         });
         resetButton.setOnClickListener(v -> resetRecording());
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
@@ -293,7 +294,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         isPaused = true;
         pausedAccumMs += System.currentTimeMillis() - lastResumeAtMs;
         recordButton.setText("▶ WZNÓW");
-        statusText.setText("Pauza — możesz przewinąć palcem");
+        statusText.setText("Pauza — dotknij wykresu, potem PLAY");
+        playButton.setEnabled(true);
         pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
     }
 
@@ -305,6 +307,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         lastResumeAtMs = System.currentTimeMillis();
         recordButton.setText("⏸ PAUZA");
         statusText.setText("Nagrywanie…");
+        playButton.setEnabled(false);
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
 
@@ -526,28 +529,34 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // Prosta lista zapisanych nagrań — kliknięcie wczytuje plik do wykresu i odtwarza od
     // początku. Pełny ekran (jak "NAGRANIA" w PitchRec, z wysyłką/pobieraniem) to kolejny etap.
+    private static final int REQUEST_IMPORT_FILE = 200;
+
     private void showRecordingsList() {
         File[] files = getFilesDir().listFiles((dir, name) -> name.startsWith("recording_"));
-        if (files == null || files.length == 0) {
-            Toast.makeText(this, "Brak zapisanych nagrań", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        if (files == null) files = new File[0];
         java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        final File[] finalFiles = files;
 
         ArrayList<String> labels = new ArrayList<>();
-        for (File f : files) {
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+        for (File f : finalFiles) {
             float sizeKb = f.length() / 1024f;
-            labels.add(f.getName() + String.format(Locale.getDefault(), " (%.0f KB)", sizeKb));
+            String ext = f.getName().endsWith(".mp3") ? "MP3" : "WAV";
+            labels.add(fmt.format(new java.util.Date(f.lastModified()))
+                    + String.format(Locale.getDefault(), "  •  %s  •  %.0f KB", ext, sizeKb));
         }
+        if (labels.isEmpty()) labels.add("Brak zapisanych nagrań");
 
         ListView listView = new ListView(this);
         listView.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels));
         listView.setOnItemClickListener((parent, view, position, id) -> {
-            loadAndDisplayFile(files[position]);
-            playFile(files[position].getAbsolutePath(), 0L);
+            if (position >= finalFiles.length) return;
+            loadAndDisplayFile(finalFiles[position]);
+            playFile(finalFiles[position].getAbsolutePath(), 0L);
         });
         listView.setOnItemLongClickListener((parent, view, position, id) -> {
-            File target = files[position];
+            if (position >= finalFiles.length) return false;
+            File target = finalFiles[position];
             String[] options = {"▶ Odtwórz", "📤 Udostępnij", "☁ Wyślij do NS", "🗑 Usuń"};
             new AlertDialog.Builder(this)
                     .setTitle(target.getName())
@@ -582,7 +591,41 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .setTitle("Nagrania")
                 .setView(listView)
                 .setNegativeButton("Zamknij", null)
+                .setNeutralButton("📁 Wgraj plik", (d, w) -> importExternalFile())
                 .show();
+    }
+
+    // Import zewnetrznego pliku audio (jak "Wgraj plik" w PitchRec) — otwiera systemowy
+    // wybornik plikow, kopiuje wybrany plik do folderu nagran.
+    private void importExternalFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("audio/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, REQUEST_IMPORT_FILE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_IMPORT_FILE && data != null && data.getData() != null) {
+            try {
+                android.net.Uri sourceUri = data.getData();
+                String ext = sourceUri.toString().toLowerCase(Locale.getDefault()).endsWith(".mp3") ? ".mp3" : ".wav";
+                File destFile = new File(getFilesDir(), "recording_" + System.currentTimeMillis() + ext);
+                try (java.io.InputStream in = getContentResolver().openInputStream(sourceUri);
+                     FileOutputStream out = new FileOutputStream(destFile)) {
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while (in != null && (read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+                Toast.makeText(this, "Zaimportowano: " + destFile.getName(), Toast.LENGTH_SHORT).show();
+                showRecordingsList();
+            } catch (Exception e) {
+                Toast.makeText(this, "Błąd importu: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     private void shareRecording(File file) {
