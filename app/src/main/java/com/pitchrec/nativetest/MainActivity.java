@@ -747,6 +747,26 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         listContainer.setOrientation(android.widget.LinearLayout.VERTICAL);
         int pad = (int) (8 * getResources().getDisplayMetrics().density);
         listContainer.setPadding(pad, pad, pad, pad);
+        float density = getResources().getDisplayMetrics().density;
+
+        // Wyslij wszystkie / Pobierz wszystkie — jak w PitchRec. Wyslij wszystkie wymaga
+        // logowania (kolejny etap); Pobierz wszystkie pakuje wszystkie nagrania do udostepnienia.
+        android.widget.LinearLayout topActionsRow = new android.widget.LinearLayout(this);
+        topActionsRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        Button sendAllBtn = makeOutlinedButton("☁ Wyślij wszystkie", R.color.pr_purple, density);
+        sendAllBtn.setOnClickListener(v -> Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show());
+        android.widget.LinearLayout.LayoutParams sendAllParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        sendAllParams.rightMargin = (int) (6 * density);
+        sendAllBtn.setLayoutParams(sendAllParams);
+        topActionsRow.addView(sendAllBtn);
+
+        Button downloadAllBtn = makeOutlinedButton("⬇ Pobierz wszystkie", R.color.pr_accent, density);
+        downloadAllBtn.setOnClickListener(v -> shareAllRecordings(finalFiles));
+        downloadAllBtn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        topActionsRow.addView(downloadAllBtn);
+
+        listContainer.addView(topActionsRow);
 
         Button importBtn = new Button(this);
         importBtn.setText("📁 Wgraj plik");
@@ -803,76 +823,88 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         card.setOrientation(android.widget.LinearLayout.VERTICAL);
         card.setPadding((int) (12 * density), pad, (int) (12 * density), pad);
 
-        // Zaokraglone rogi + obramowanie — dokladnie jak .rec-item w PitchRec
-        // (border-radius:10px; border:1px solid var(--bd)).
         android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
         cardBg.setColor(getResources().getColor(R.color.pr_card));
         cardBg.setCornerRadius(10 * density);
         cardBg.setStroke((int) density, getResources().getColor(R.color.pr_border));
         card.setBackground(cardBg);
 
-        // Wiersz gorny: nazwa + "kategoria" (placeholder) + ikona NS
+        // Wiersz gorny: nazwa + kategoria (pigulka) + chmurka + status
         android.widget.LinearLayout topRow = new android.widget.LinearLayout(this);
         topRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
         TextView nameView = new TextView(this);
         String displayName = file.getName().replaceAll("\\.(wav|mp3)$", "");
+        if (displayName.length() > 22) displayName = displayName.substring(0, 20) + "…";
         nameView.setText(displayName);
-        nameView.setTextColor(getResources().getColor(R.color.pr_accent));
+        nameView.setTextColor(getResources().getColor(R.color.pr_text));
         topRow.addView(nameView);
 
-        TextView formatBadge = new TextView(this);
-        String formatLabel = file.getName().endsWith(".mp3") ? " MP3 " : " WAV ";
-        formatBadge.setText(formatLabel);
-        formatBadge.setTextColor(getResources().getColor(R.color.pr_muted));
-        topRow.addView(formatBadge);
-
         TextView catBadge = new TextView(this);
-        catBadge.setText(" bez opisu ");
-        catBadge.setTextColor(getResources().getColor(R.color.pr_pause));
+        catBadge.setText("  Bez kategorii  ");
+        catBadge.setTextColor(getResources().getColor(R.color.pr_purple));
+        android.graphics.drawable.GradientDrawable catBg = new android.graphics.drawable.GradientDrawable();
+        catBg.setColor(0x335856D6);
+        catBg.setCornerRadius(12 * density);
+        catBadge.setBackground(catBg);
         topRow.addView(catBadge);
 
         TextView nsIcon = new TextView(this);
-        nsIcon.setText(" ☁"); // zwykla, nieaktywna chmurka — brak integracji NS na tym etapie
+        String fmtLabel = file.getName().endsWith(".mp3") ? "MP3" : "WAV";
+        nsIcon.setText("  ☁ " + fmtLabel);
         nsIcon.setTextColor(getResources().getColor(R.color.pr_muted));
         topRow.addView(nsIcon);
 
         card.addView(topRow);
 
-        // Wiersz daty
-        TextView dateView = new TextView(this);
-        dateView.setText(fmt.format(new java.util.Date(file.lastModified())));
-        dateView.setTextColor(getResources().getColor(R.color.pr_muted));
-        card.addView(dateView);
+        // Wiersz autor + data (na razie "Ja" jako placeholder — prawdziwy autor po
+        // zalogowaniu, kolejny etap).
+        android.widget.LinearLayout metaRow = new android.widget.LinearLayout(this);
+        metaRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
-        // Wiersz przyciskow — ikonki: Play / Udostepnij / Usun. "Opisz i wyslij" pojawi sie
-        // TYLKO po zalogowaniu (kolejny etap) — na razie w ogole nie pokazujemy tego
-        // przycisku (nie tylko wylaczony), zgodnie z tym jak bedzie w PitchRec.
+        TextView authorView = new TextView(this);
+        authorView.setText("Ja");
+        authorView.setTextColor(getResources().getColor(R.color.pr_muted));
+        metaRow.addView(authorView);
+
+        TextView dateView = new TextView(this);
+        dateView.setText("   " + fmt.format(new java.util.Date(file.lastModified())));
+        dateView.setTextColor(getResources().getColor(R.color.pr_muted));
+        metaRow.addView(dateView);
+
+        card.addView(metaRow);
+
+        // Wiersz przyciskow — 4, jak w PitchRec: Wyslij NS / DAW / pobierz / Usun.
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        int btnMarginEnd = (int) (6 * density);
 
-        Button playBtn = new Button(this);
-        playBtn.setText("▶");
-        playBtn.setTextColor(getResources().getColor(R.color.pr_accent));
-        playBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        Button sendBtn = makeOutlinedButton("☁ Wyślij NS", R.color.pr_purple, density);
+        sendBtn.setOnClickListener(v -> Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show());
+        android.widget.LinearLayout.LayoutParams sendParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        sendParams.rightMargin = btnMarginEnd;
+        sendBtn.setLayoutParams(sendParams);
+        btnRow.addView(sendBtn);
+
+        Button playBtn = makeOutlinedButton("▶ DAW", R.color.pr_accent, density);
         playBtn.setOnClickListener(v -> {
-            if (dialogRef[0] != null) dialogRef[0].dismiss(); // zamykamy liste, zeby wykres DAW byl widoczny
+            if (dialogRef[0] != null) dialogRef[0].dismiss();
             loadAndDisplayFile(file);
             playFile(file.getAbsolutePath(), 0L);
         });
+        android.widget.LinearLayout.LayoutParams playParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        playParams.rightMargin = btnMarginEnd;
+        playBtn.setLayoutParams(playParams);
         btnRow.addView(playBtn);
 
-        Button shareBtn = new Button(this);
-        shareBtn.setText("📤");
-        shareBtn.setTextColor(getResources().getColor(R.color.pr_accent));
-        shareBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        Button shareBtn = makeOutlinedButton("⬇", R.color.pr_accent, density);
         shareBtn.setOnClickListener(v -> shareRecording(file));
+        android.widget.LinearLayout.LayoutParams shareParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 0.5f);
+        shareParams.rightMargin = btnMarginEnd;
+        shareBtn.setLayoutParams(shareParams);
         btnRow.addView(shareBtn);
 
-        Button delBtn = new Button(this);
-        delBtn.setText("🗑");
-        delBtn.setTextColor(getResources().getColor(R.color.pr_warn));
-        delBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        Button delBtn = makeOutlinedButton("✕ Usuń", R.color.pr_warn, density);
         delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setTitle("Usunąć nagranie?")
                 .setMessage(file.getName())
@@ -883,6 +915,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 })
                 .setNegativeButton("Anuluj", null)
                 .show());
+        delBtn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         btnRow.addView(delBtn);
 
         card.addView(btnRow);
@@ -893,6 +926,21 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         card.setLayoutParams(cardParams);
 
         return card;
+    }
+
+    // Buduje przycisk z obramowaniem (bez wypelnienia) — dokladnie jak przyciski w karcie
+    // nagrania ze wzorca (Wyslij NS / DAW / Usun).
+    private Button makeOutlinedButton(String text, int colorRes, float density) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        int color = getResources().getColor(colorRes);
+        btn.setTextColor(color);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(0x00000000);
+        bg.setCornerRadius(8 * density);
+        bg.setStroke((int) density, color);
+        btn.setBackground(bg);
+        return btn;
     }
 
     // Import zewnetrznego pliku audio (jak "Wgraj plik" w PitchRec) — otwiera systemowy
@@ -949,6 +997,29 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             } catch (Exception e) {
                 Toast.makeText(this, "Błąd importu: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    // Udostepnia WSZYSTKIE nagrania naraz (odpowiednik "Pobierz wszystkie" z PitchRec) —
+    // otwiera systemowy wybornik z wieloma plikami do wyslania/zapisania.
+    private void shareAllRecordings(File[] files) {
+        if (files.length == 0) {
+            Toast.makeText(this, "Brak nagrań", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            java.util.ArrayList<android.net.Uri> uris = new java.util.ArrayList<>();
+            for (File f : files) {
+                uris.add(androidx.core.content.FileProvider.getUriForFile(
+                        this, "com.pitchrec.nativetest.fileprovider", f));
+            }
+            Intent shareIntent = new Intent(Intent.ACTION_SEND_MULTIPLE);
+            shareIntent.setType("audio/*");
+            shareIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(shareIntent, "Udostępnij wszystkie nagrania"));
+        } catch (Exception e) {
+            Toast.makeText(this, "Błąd: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 

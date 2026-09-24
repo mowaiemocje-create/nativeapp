@@ -24,8 +24,8 @@ public class SliderView extends View {
     private final Paint thumbPaint = new Paint();
     private final Paint thumbBorderPaint = new Paint();
 
-    private static final float THUMB_RADIUS_DP = 18f;
-    private static final float TRACK_HEIGHT_DP = 4f;
+    private static final float THUMB_RADIUS_DP = 24f;
+    private static final float TRACK_HEIGHT_DP = 6f;
 
     public SliderView(Context context) {
         super(context);
@@ -42,11 +42,11 @@ public class SliderView extends View {
         trackPaint.setAntiAlias(true);
         fillPaint.setColor(Color.parseColor("#F0973A"));
         fillPaint.setAntiAlias(true);
-        thumbPaint.setColor(Color.parseColor("#FF9500"));
+        thumbPaint.setColor(Color.parseColor("#FFFFFF")); // biala kulka, jak na wzorcu
         thumbPaint.setAntiAlias(true);
-        thumbBorderPaint.setColor(Color.parseColor("#40FF9500"));
+        thumbBorderPaint.setColor(Color.parseColor("#F0973A")); // pomaranczowa "poswiata"
         thumbBorderPaint.setStyle(Paint.Style.STROKE);
-        thumbBorderPaint.setStrokeWidth(dp(3));
+        thumbBorderPaint.setStrokeWidth(dp(4));
         thumbBorderPaint.setAntiAlias(true);
     }
 
@@ -86,8 +86,16 @@ public class SliderView extends View {
         canvas.drawCircle(thumbX, midY, thumbRadius, thumbPaint);
     }
 
+    private boolean enabled = true;
+
+    public void setEnabled(boolean e) {
+        enabled = e;
+        invalidate();
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (!enabled) return false;
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_MOVE: {
