@@ -189,7 +189,13 @@ public class PitchWaveView extends View {
 
                 float pxPerSecond = getWidth() / Math.max(0.001f, lastVisibleSeconds);
                 long sampleDelta = (long) (-dx / pxPerSecond * LiveAudioData.SAMPLE_RATE);
-                panOffsetSample = Math.max(0, panOffsetSample + sampleDelta);
+                long newPan = panOffsetSample + sampleDelta;
+                // OGRANICZENIE: nie pozwalamy przewijac dalej niz do konca faktycznie
+                // nagranych/wczytanych danych — bez tego, mozna bylo przewijac w
+                // nieskonczonosc nawet przy krotkim nagraniu.
+                long totalSamples = LiveAudioData.getTotalSamplesWritten();
+                long maxPan = Math.max(0, totalSamples - (long) (lastVisibleSeconds * 0.2f * LiveAudioData.SAMPLE_RATE));
+                panOffsetSample = Math.max(0, Math.min(newPan, maxPan));
                 invalidate();
                 return true;
             }
@@ -366,33 +372,41 @@ public class PitchWaveView extends View {
         float[] envelope = snap.envelope;
 
         if (envelope.length > 0) {
-            float xStep = (float) w / Math.max(1, envelope.length);
+            long tailSamples = (long) tailCount * 256;
+            // WAZNE: okno docelowe (visibleStartSample/Range) jest ZAWSZE STALEJ
+            // wielkosci (tailSamples), niezaleznie od tego, ile danych faktycznie juz
+            // jest nagranych — visibleStartSample MOZE wyjsc "przed" poczatek nagrania
+            // (ujemny wzgledem 0), co jest OK koncepcyjnie (po prostu jeszcze tam nie
+            // ma zadnych probek). Bez tego, przy krotszym nagraniu niz cale okno, zakres
+            // "rosl" przy kazdej przebudowie, przeliczajac WSZYSTKIE pozycje na nowo —
+            // to bylo prawdziwe zrodlo skakania fali (nie tylko na starcie nagrania, ale
+            // przy KAZDYM nagraniu krotszym niz pelne okno zoom).
+            long totalSamples = isLiveMode ? LiveAudioData.getExtrapolatedTotalSamples() : snap.totalSamples;
+            long visibleStartSample = isLiveMode ? (totalSamples - tailSamples) : snap.visibleStartSample;
+            float visibleSampleRange = tailSamples;
+            lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
+            lastVisibleStartSample = visibleStartSample;
+            lastVisibleSampleRange = visibleSampleRange;
 
+            // Slupki fali — pozycjonowane wg RZECZYWISTEJ pozycji probki (tak jak linia
+            // pitch), nie wg indeksu w tablicy — dzieki temu sa zawsze konsystentne z
+            // pitch/podzialka, i nie "sciskaja/rozciagaja sie" gdy przybywa danych.
             int neededSize = envelope.length * 4;
             if (envelopeLinePts.length != neededSize) envelopeLinePts = new float[neededSize];
+            int visiblePointCount = 0;
             for (int i = 0; i < envelope.length; i++) {
+                long samplePos = snap.visibleStartSample + (long) i * 256;
+                float x = ((samplePos - visibleStartSample) / visibleSampleRange) * w;
+                if (x < -10 || x > w + 10) continue; // poza widocznym zakresem, pomijamy
                 float barHeight = envelope[i] * mid;
-                float x = i * xStep;
-                int base = i * 4;
+                int base = visiblePointCount * 4;
                 envelopeLinePts[base] = x;
                 envelopeLinePts[base + 1] = rulerHeight + mid - barHeight;
                 envelopeLinePts[base + 2] = x;
                 envelopeLinePts[base + 3] = rulerHeight + mid + barHeight;
+                visiblePointCount++;
             }
-            canvas.drawLines(envelopeLinePts, 0, neededSize, envelopePaint);
-
-            long visibleStartSample = snap.visibleStartSample;
-            // WAZNE: uzywamy TEJ SAMEJ ekstrapolowanej wartosci co siatka/podzialka —
-            // wczesniej fala uzywala rzeczywistej (skokowej) wartosci, a siatka
-            // ekstrapolowanej (plynnej), co powodowalo ze te dwa elementy "rozjezdzaly
-            // sie" wzgledem siebie w kazdej klatce, wygladajac jak drganie/wibrowanie.
-            long totalSamples = isLiveMode ? LiveAudioData.getExtrapolatedTotalSamples() : snap.totalSamples;
-            float visibleSampleRange = Math.max(1, isLiveMode
-                    ? (totalSamples - visibleStartSample)
-                    : ((long) tailCount * 256));
-            lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
-            lastVisibleStartSample = visibleStartSample;
-            lastVisibleSampleRange = visibleSampleRange;
+            canvas.drawLines(envelopeLinePts, 0, visiblePointCount * 4, envelopePaint);
 
             List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
             pitchPath.reset();
