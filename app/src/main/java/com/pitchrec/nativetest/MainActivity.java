@@ -790,8 +790,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         android.widget.LinearLayout card = new android.widget.LinearLayout(this);
         card.setOrientation(android.widget.LinearLayout.VERTICAL);
-        card.setPadding(pad, pad, pad, pad);
-        card.setBackgroundColor(getResources().getColor(R.color.pr_card));
+        card.setPadding((int) (12 * density), pad, (int) (12 * density), pad);
+
+        // Zaokraglone rogi + obramowanie — dokladnie jak .rec-item w PitchRec
+        // (border-radius:10px; border:1px solid var(--bd)).
+        android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
+        cardBg.setColor(getResources().getColor(R.color.pr_card));
+        cardBg.setCornerRadius(10 * density);
+        cardBg.setStroke((int) density, getResources().getColor(R.color.pr_border));
+        card.setBackground(cardBg);
 
         // Wiersz gorny: nazwa + "kategoria" (placeholder) + ikona NS
         android.widget.LinearLayout topRow = new android.widget.LinearLayout(this);

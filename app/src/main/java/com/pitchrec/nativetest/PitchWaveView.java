@@ -133,6 +133,18 @@ public class PitchWaveView extends View {
 
     public void setPlayheadSample(long sample) {
         playheadSample = sample;
+        // Auto-przewijanie do przodu podczas odtwarzania wczytanego pliku (tryb
+        // statyczny) — bez tego, widok zostawal zablokowany na stalym oknie (np. 8s) i
+        // playhead po prostu "wychodzil" poza widoczny zakres podczas dluzszego
+        // odtwarzania, zamiast plynnie przewijac sie razem z odtwarzaniem.
+        if (!isLiveMode && lastVisibleSampleRange > 0) {
+            long visibleEnd = lastVisibleStartSample + (long) lastVisibleSampleRange;
+            if (sample > visibleEnd - lastVisibleSampleRange * 0.1f) {
+                // Playhead blisko prawej krawedzi — przesuwamy okno tak, zeby playhead
+                // byl blisko lewej krawedzi nowego okna (efekt plynnego przewijania).
+                panOffsetSample = Math.max(0, sample - (long) (lastVisibleSampleRange * 0.1f));
+            }
+        }
         invalidate();
     }
 
