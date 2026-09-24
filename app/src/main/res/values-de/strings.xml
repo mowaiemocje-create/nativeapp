@@ -12,7 +12,7 @@
     <string name="btn_pause_play">⏸ PLAY</string>
     <string name="btn_rec">● REC</string>
     <string name="btn_stop">■ STOP</string>
-    <string name="btn_resume">▶ FORTSETZEN</string>
+    <string name="btn_resume">● FORTSETZEN</string>
     <string name="btn_pause">⏸ PAUSE</string>
     <string name="label_mic">MIC</string>
     <string name="label_zoom">ZOOM</string>
