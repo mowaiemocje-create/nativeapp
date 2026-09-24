@@ -950,11 +950,23 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         btn.setPadding((int) (4 * density), (int) (8 * density), (int) (4 * density), (int) (8 * density));
         int color = getResources().getColor(colorRes);
         btn.setTextColor(color);
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(0x00000000);
-        bg.setCornerRadius(8 * density);
-        bg.setStroke((int) density, color);
-        btn.setBackground(bg);
+
+        android.graphics.drawable.GradientDrawable normalBg = new android.graphics.drawable.GradientDrawable();
+        normalBg.setColor(0x00000000);
+        normalBg.setCornerRadius(8 * density);
+        normalBg.setStroke((int) density, color);
+
+        // Stan "wcisniety" — wypelnienie kolorem przycisku (przezroczyste), jak prawdziwy,
+        // fizyczny przycisk reagujacy na dotyk.
+        android.graphics.drawable.GradientDrawable pressedBg = new android.graphics.drawable.GradientDrawable();
+        pressedBg.setColor((color & 0x00FFFFFF) | 0x40000000);
+        pressedBg.setCornerRadius(8 * density);
+        pressedBg.setStroke((int) density, color);
+
+        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed}, pressedBg);
+        states.addState(new int[]{}, normalBg);
+        btn.setBackground(states);
         return btn;
     }
 

@@ -129,7 +129,7 @@
                 android:text="▶ PLAY"
                 android:textSize="11sp"
                 android:textColor="@color/pr_purple"
-                android:backgroundTint="@color/pr_card"
+                android:background="@drawable/btn_neutral"
                 android:enabled="false" />
 
             <Button
@@ -142,7 +142,7 @@
                 android:text="● REC"
                 android:textSize="11sp"
                 android:textColor="@color/pr_warn"
-                android:backgroundTint="@color/pr_card" />
+                android:background="@drawable/btn_rec" />
 
             <Button
                 android:id="@+id/pauseButton"
@@ -154,7 +154,7 @@
                 android:text="■ STOP"
                 android:textSize="11sp"
                 android:textColor="@color/pr_pause"
-                android:backgroundTint="@color/pr_card"
+                android:background="@drawable/btn_pause"
                 android:enabled="false" />
 
             <TextView
@@ -178,7 +178,7 @@
                 android:layout_marginEnd="4dp"
                 android:text="↺"
                 android:textColor="@color/pr_text"
-                android:backgroundTint="@color/pr_card" />
+                android:background="@drawable/btn_neutral" />
 
             <Button
                 android:id="@+id/autoGainButton"
@@ -190,7 +190,7 @@
                 android:text="AG\nOFF"
                 android:textSize="9sp"
                 android:textColor="@color/pr_muted"
-                android:backgroundTint="@color/pr_card" />
+                android:background="@drawable/btn_neutral" />
 
             <Button
                 android:id="@+id/blackScreenButton"
@@ -201,7 +201,7 @@
                 android:text="⬛\nBS"
                 android:textSize="9sp"
                 android:textColor="@color/pr_muted"
-                android:backgroundTint="@color/pr_card" />
+                android:background="@drawable/btn_neutral" />
 
         </LinearLayout>
 
