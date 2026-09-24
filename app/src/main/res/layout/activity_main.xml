@@ -121,6 +121,7 @@
 
             <Button
                 android:id="@+id/playButton"
+                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
@@ -133,6 +134,7 @@
 
             <Button
                 android:id="@+id/recordButton"
+                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
@@ -144,6 +146,7 @@
 
             <Button
                 android:id="@+id/pauseButton"
+                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
@@ -167,6 +170,7 @@
 
             <Button
                 android:id="@+id/resetButton"
+                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="0.55"
@@ -178,6 +182,7 @@
 
             <Button
                 android:id="@+id/autoGainButton"
+                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="0.55"
@@ -189,6 +194,7 @@
 
             <Button
                 android:id="@+id/blackScreenButton"
+                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="0.55"

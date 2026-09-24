@@ -736,7 +736,17 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // początku. Pełny ekran (jak "NAGRANIA" w PitchRec, z wysyłką/pobieraniem) to kolejny etap.
     private static final int REQUEST_IMPORT_FILE = 200;
 
+    private android.app.AlertDialog[] recordingsDialogRef = new android.app.AlertDialog[1];
+
     private void showRecordingsList() {
+        // WAZNE: zamykamy PRZEDNIA instancje dialogu (jesli istnieje) przed pokazaniem
+        // nowej — bez tego, wywolanie showRecordingsList() po usunieciu/imporcie
+        // NAKLADALO nowy dialog NA STARY (ktory nadal byl otwarty, pokazujac NIEAKTUALNA
+        // liste), i klikniecie "Zamknij" na nowym ujawnialo stary, ze "usunietymi"
+        // wciaz widocznymi elementami.
+        if (recordingsDialogRef[0] != null) {
+            try { recordingsDialogRef[0].dismiss(); } catch (Exception e) { /* ignorowane */ }
+        }
         File[] files = getFilesDir().listFiles((dir, name) -> name.endsWith(".wav") || name.endsWith(".mp3"));
         if (files == null) files = new File[0];
         java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
@@ -770,12 +780,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         Button importBtn = new Button(this);
         importBtn.setText("📁 Wgraj plik");
+        importBtn.setMinWidth(0);
+        importBtn.setMinimumWidth(0);
         importBtn.setTextColor(getResources().getColor(R.color.pr_accent));
         importBtn.setBackgroundColor(getResources().getColor(R.color.pr_card));
         importBtn.setOnClickListener(v -> importExternalFile());
         listContainer.addView(importBtn);
 
-        android.app.AlertDialog[] dialogRef = new android.app.AlertDialog[1];
+        android.app.AlertDialog[] dialogRef = recordingsDialogRef;
 
         if (finalFiles.length == 0) {
             TextView empty = new TextView(this);
@@ -933,6 +945,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private Button makeOutlinedButton(String text, int colorRes, float density) {
         Button btn = new Button(this);
         btn.setText(text);
+        btn.setMinWidth(0);
+        btn.setMinimumWidth(0);
+        btn.setPadding((int) (4 * density), (int) (8 * density), (int) (4 * density), (int) (8 * density));
         int color = getResources().getColor(colorRes);
         btn.setTextColor(color);
         android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
