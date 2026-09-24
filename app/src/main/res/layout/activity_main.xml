@@ -119,43 +119,26 @@
             android:layout_height="46dp"
             android:orientation="horizontal">
 
-            <Button
+            <com.pitchrec.nativetest.NeonButton
                 android:id="@+id/playButton"
-                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="▶ PLAY"
-                android:textSize="11sp"
-                android:textColor="@color/pr_purple"
-                android:background="@drawable/btn_neutral"
-                android:enabled="false" />
+                android:layout_marginEnd="4dp" />
 
-            <Button
+            <com.pitchrec.nativetest.NeonButton
                 android:id="@+id/recordButton"
-                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="● REC"
-                android:textSize="11sp"
-                android:textColor="@color/pr_warn"
-                android:background="@drawable/btn_rec" />
+                android:layout_marginEnd="4dp" />
 
-            <Button
+            <com.pitchrec.nativetest.NeonButton
                 android:id="@+id/pauseButton"
-                android:minWidth="0dp"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_marginEnd="4dp"
-                android:text="■ STOP"
-                android:textSize="11sp"
-                android:textColor="@color/pr_pause"
-                android:background="@drawable/btn_pause"
-                android:enabled="false" />
+                android:layout_marginEnd="4dp" />
 
             <TextView
                 android:id="@+id/timeText"

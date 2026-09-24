@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
@@ -38,9 +39,9 @@ import java.util.Locale;
 // Bez logowania na razie (Faza 1) — menu NS to kolejny etap.
 public class MainActivity extends AppCompatActivity implements RecordingResultHolder.Listener {
 
-    private Button recordButton;
-    private Button pauseButton;
-    private Button playButton;
+    private NeonButton recordButton;
+    private NeonButton pauseButton;
+    private NeonButton playButton;
     private Button resetButton;
     private Button recordingsListButton;
     private Button settingsButton;
@@ -95,6 +96,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         recordButton = findViewById(R.id.recordButton);
         pauseButton = findViewById(R.id.pauseButton);
         playButton = findViewById(R.id.playButton);
+
+        // Kolory neonowe — jak w prawdziwym studio: PLAY zielony, REC czerwony, STOP bialy.
+        playButton.setNeonColor(Color.parseColor("#00FF66"));
+        playButton.setButtonText("▶ PLAY");
+        playButton.setButtonEnabled(false);
+        recordButton.setNeonColor(Color.parseColor("#FF1A1A"));
+        recordButton.setButtonText("● REC");
+        pauseButton.setNeonColor(Color.parseColor("#FFFFFF"));
+        pauseButton.setButtonText("■ STOP");
+        pauseButton.setButtonEnabled(false);
         resetButton = findViewById(R.id.resetButton);
         recordingsListButton = findViewById(R.id.recordingsListButton);
         settingsButton = findViewById(R.id.settingsButton);
@@ -138,7 +149,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // Schemat jak w RecForge: jeden przycisk cykluje REC<->PAUZA (rozpoczyna nagranie,
         // albo pauzuje/wznawia trwajace), drugi (STOP) finalizuje i zapisuje. Po Stop —
         // tylko odtwarzanie, dopóki nie wcisnie się REC ponownie (co zaczyna NOWE nagranie).
-        recordButton.setOnClickListener(v -> {
+        recordButton.setOnButtonClickListener(v -> {
             if (!isRecording) {
                 startRecordingFlow();
             } else if (!isPaused) {
@@ -148,18 +159,18 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
         });
 
-        pauseButton.setOnClickListener(v -> stopRecordingFlow());
+        pauseButton.setOnButtonClickListener(v -> stopRecordingFlow());
 
-        playButton.setOnClickListener(v -> {
+        playButton.setOnButtonClickListener(v -> {
             if (currentPlayer != null) {
                 // Jest juz odtwarzacz — przelacz play/pauza (nie zaczynaj od nowa).
                 try {
                     if (currentPlayer.isPlaying()) {
                         currentPlayer.pause();
-                        playButton.setText("▶ PLAY");
+                        playButton.setButtonText("▶ PLAY");
                     } else {
                         currentPlayer.start();
-                        playButton.setText("⏸ PLAY");
+                        playButton.setButtonText("⏸ PLAY");
                         startPlayheadUpdateLoop();
                     }
                 } catch (IllegalStateException e) { /* odtwarzacz w nietypowym stanie — ignorujemy */ }
@@ -357,18 +368,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // siatke 16 kolorow do wyboru.
         TextView pitchColorLabel = new TextView(this);
         pitchColorLabel.setText("Kolor linii pitch:");
-        container.addView(pitchColorLabel);
-
-        View pitchColorSwatch = new View(this);
-        pitchColorSwatch.setBackgroundColor(LiveAudioData.pitchLineColor);
-        android.widget.LinearLayout.LayoutParams swatchParams = new android.widget.LinearLayout.LayoutParams(
-                (int) (48 * getResources().getDisplayMetrics().density), (int) (48 * getResources().getDisplayMetrics().density));
-        pitchColorSwatch.setLayoutParams(swatchParams);
-        pitchColorSwatch.setOnClickListener(v -> showColorGridPicker(color -> {
-            LiveAudioData.pitchLineColor = color;
-            pitchColorSwatch.setBackgroundColor(color);
-        }));
-        container.addView(pitchColorSwatch);
+        addColorRow(container, pitchColorLabel, LiveAudioData.pitchLineColor, color -> LiveAudioData.pitchLineColor = color);
 
         // Grubosc siatki DAW
         TextView gridWidthLabel = new TextView(this);
@@ -381,25 +381,50 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         gridWidthSlider.setOnValueChangeListener(v -> LiveAudioData.gridLineWidthDp = 0.5f + v * 3.5f);
         container.addView(gridWidthSlider);
 
-        // Kolor siatki DAW — tak samo, kwadracik + siatka 16 kolorow
         TextView gridColorLabel = new TextView(this);
         gridColorLabel.setText("Kolor siatki:");
-        container.addView(gridColorLabel);
+        addColorRow(container, gridColorLabel, LiveAudioData.gridLineColor, color -> LiveAudioData.gridLineColor = color);
 
-        View gridColorSwatch = new View(this);
-        gridColorSwatch.setBackgroundColor(LiveAudioData.gridLineColor);
-        gridColorSwatch.setLayoutParams(swatchParams);
-        gridColorSwatch.setOnClickListener(v -> showColorGridPicker(color -> {
-            LiveAudioData.gridLineColor = color;
-            gridColorSwatch.setBackgroundColor(color);
-        }));
-        container.addView(gridColorSwatch);
+        TextView dawBgLabel = new TextView(this);
+        dawBgLabel.setText("Kolor tła DAW:");
+        addColorRow(container, dawBgLabel, LiveAudioData.dawBackgroundColor, color -> LiveAudioData.dawBackgroundColor = color);
 
         new AlertDialog.Builder(this)
                 .setTitle("Ustawienia")
                 .setView(container)
                 .setPositiveButton("Zamknij", null)
                 .show();
+    }
+
+    // Buduje jeden, estetyczny wiersz "Etykieta: [kwadrat koloru]" — zamiast etykiety i
+    // kwadratu na osobnych, pelnej-szerokosci wierszach (co wygladalo niechlujnie, z
+    // duza iloscia pustej przestrzeni). Kwadrat ma zaokraglone rogi + obramowanie.
+    private void addColorRow(android.widget.LinearLayout container, TextView label, int initialColor, java.util.function.IntConsumer onColorChange) {
+        float density = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row.setPadding(0, (int) (4 * density), 0, (int) (12 * density));
+
+        android.widget.LinearLayout.LayoutParams labelParams = new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        label.setLayoutParams(labelParams);
+        row.addView(label);
+
+        View swatch = new View(this);
+        android.graphics.drawable.GradientDrawable swatchBg = new android.graphics.drawable.GradientDrawable();
+        swatchBg.setColor(initialColor);
+        swatchBg.setCornerRadius(6 * density);
+        swatchBg.setStroke((int) density, getResources().getColor(R.color.pr_border));
+        swatch.setBackground(swatchBg);
+        int swatchSize = (int) (36 * density);
+        swatch.setLayoutParams(new android.widget.LinearLayout.LayoutParams(swatchSize, swatchSize));
+        swatch.setOnClickListener(v -> showColorGridPicker(color -> {
+            onColorChange.accept(color);
+            swatchBg.setColor(color);
+        }));
+        row.addView(swatch);
+
+        container.addView(row);
     }
 
     private boolean keepScreenOnEnabled = false;
@@ -442,10 +467,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         lastDisplayedSecond = -1L;
         pausedAccumMs = 0L;
         lastResumeAtMs = recordingStartedAtMs;
-        recordButton.setText("⏸ PAUZA");
-        pauseButton.setEnabled(true);
-        pauseButton.setText("■ STOP");
-        playButton.setEnabled(false);
+        recordButton.setButtonText("⏸ PAUZA");
+        pauseButton.setButtonEnabled(true);
+        pauseButton.setButtonText("■ STOP");
+        playButton.setButtonEnabled(false);
         pitchWaveView.setLiveMode(true);
         // Podczas nagrywania zoom zablokowany na 8s — zapobiega przypadkowej zmianie
         // widoku w trakcie mowienia.
@@ -463,8 +488,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startService(intent);
         isRecording = false;
         isPaused = false;
-        recordButton.setText("● REC");
-        pauseButton.setEnabled(false);
+        recordButton.setButtonText("● REC");
+        pauseButton.setButtonEnabled(false);
         zoomSlider.setEnabled(true);
         statusText.setText("Przetwarzanie…");
     }
@@ -477,9 +502,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startService(intent);
         isPaused = true;
         pauseStartedAtMs = System.currentTimeMillis(); // zapamiętujemy KIEDY zaczela sie pauza
-        recordButton.setText("▶ WZNÓW");
+        recordButton.setButtonText("▶ WZNÓW");
         statusText.setText("Pauza — dotknij wykresu, potem PLAY");
-        playButton.setEnabled(true);
+        playButton.setButtonEnabled(true);
         pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
     }
 
@@ -492,9 +517,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // minus kiedy pauza zaczela sie) — wczesniej blad dodawal tu czas AKTYWNEGO
         // nagrywania (od ostatniego wznowienia), co bylo odwrotnoscia tego co potrzebne.
         pausedAccumMs += System.currentTimeMillis() - pauseStartedAtMs;
-        recordButton.setText("⏸ PAUZA");
+        recordButton.setButtonText("⏸ PAUZA");
         statusText.setText("Nagrywanie…");
-        playButton.setEnabled(false);
+        playButton.setButtonEnabled(false);
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
 
@@ -557,7 +582,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pitchWaveView.setLiveMode(false); // pozwala przewijac/wskazac miejsce w tym co wlasnie nagrano
             pitchWaveView.resetPan();
             pitchWaveView.invalidate();
-            playButton.setEnabled(true);
+            playButton.setButtonEnabled(true);
         });
     }
 
@@ -686,7 +711,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             player.setOnCompletionListener(mp -> {
                 mp.release();
                 currentPlayer = null;
-                playButton.setText("▶ PLAY");
+                playButton.setButtonText("▶ PLAY");
             });
             player.prepare();
             int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
@@ -697,14 +722,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 player.setOnSeekCompleteListener(mp -> {
                     mp.start();
                     statusText.setText("Odtwarzanie…");
-                    playButton.setText("⏸ PLAY");
+                    playButton.setButtonText("⏸ PLAY");
                     startPlayheadUpdateLoop();
                 });
                 player.seekTo(startMs);
             } else {
                 player.start();
                 statusText.setText("Odtwarzanie…");
-                playButton.setText("⏸ PLAY");
+                playButton.setButtonText("⏸ PLAY");
                 startPlayheadUpdateLoop();
             }
         } catch (IOException e) {
