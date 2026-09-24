@@ -174,6 +174,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pendingSeekSample = sample;
             long ms = sample * 1000L / LiveAudioData.SAMPLE_RATE;
             statusText.setText("Wskazano: " + formatMs(ms));
+            // Jesli odtwarzacz jest AKTYWNIE odtwarzany, przewijamy go NAPRAWDE, nie tylko
+            // ustawiamy zmienna — bez tego, biala linia wracala natychmiast do
+            // rzeczywistej pozycji odtwarzacza przy nastepnej aktualizacji (petla
+            // playheadUpdateLoop nadpisywala dotkniecie).
+            if (currentPlayer != null) {
+                try {
+                    currentPlayer.seekTo((int) ms);
+                    timeText.setText(formatMs(ms) + " / " + formatMs(lastRecordingTotalDurationMs));
+                } catch (IllegalStateException e) { /* odtwarzacz w nietypowym stanie */ }
+            }
         });
         resetButton.setOnClickListener(v -> resetRecording());
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
@@ -279,15 +289,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private void showBlackScreen() {
         View overlay = new View(this);
         overlay.setBackgroundColor(0xFF000000);
-        android.widget.LinearLayout.LayoutParams params = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
+        android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT);
         overlay.setLayoutParams(params);
-        View root = findViewById(R.id.rootLayout);
-        if (root instanceof android.view.ViewGroup) {
-            android.view.ViewGroup rootGroup = (android.view.ViewGroup) root;
-            overlay.setOnClickListener(v -> rootGroup.removeView(overlay));
-            rootGroup.addView(overlay);
-        }
+        // Dodajemy do android.R.id.content (prawdziwy, PELNOEKRANOWY kontener aktywnosci,
+        // BEZ paddingu na belki systemowe) — wczesniej dodawalismy do rootLayout, ktory MA
+        // padding na te belki (dodany wczesniej dla poprawnego wyswietlania przycisku),
+        // przez co czarna naklada NIE zakrywala calego ekranu.
+        android.view.ViewGroup contentRoot = findViewById(android.R.id.content);
+        overlay.setOnClickListener(v -> contentRoot.removeView(overlay));
+        contentRoot.addView(overlay);
     }
 
     private void showSettingsDialog() {
