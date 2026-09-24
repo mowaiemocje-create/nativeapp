@@ -168,6 +168,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
         pitchWaveView.setOnSeekListener(sample -> {
             pendingSeekSample = sample;
+            long ms = sample * 1000L / LiveAudioData.SAMPLE_RATE;
+            statusText.setText("Wskazano: " + formatMs(ms));
         });
         resetButton.setOnClickListener(v -> resetRecording());
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
@@ -396,12 +398,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         statusText.setText("Przetwarzanie…");
     }
 
+    private long pauseStartedAtMs = 0L;
+
     private void pauseRecordingFlow() {
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_PAUSE);
         startService(intent);
         isPaused = true;
-        pausedAccumMs += System.currentTimeMillis() - lastResumeAtMs;
+        pauseStartedAtMs = System.currentTimeMillis(); // zapamiętujemy KIEDY zaczela sie pauza
         recordButton.setText("▶ WZNÓW");
         statusText.setText("Pauza — dotknij wykresu, potem PLAY");
         playButton.setEnabled(true);
@@ -413,7 +417,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         intent.setAction(BackgroundRecorderService.ACTION_RESUME);
         startService(intent);
         isPaused = false;
-        lastResumeAtMs = System.currentTimeMillis();
+        // POPRAWKA: dopisujemy do pausedAccumMs FAKTYCZNY czas spedzony w pauzie (teraz
+        // minus kiedy pauza zaczela sie) — wczesniej blad dodawal tu czas AKTYWNEGO
+        // nagrywania (od ostatniego wznowienia), co bylo odwrotnoscia tego co potrzebne.
+        pausedAccumMs += System.currentTimeMillis() - pauseStartedAtMs;
         recordButton.setText("⏸ PAUZA");
         statusText.setText("Nagrywanie…");
         playButton.setEnabled(false);
@@ -465,6 +472,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
     }
 
+    private long lastRecordingTotalDurationMs = 0L;
+
     @Override
     public void onSuccess(String base64, long durationMs, String mimeType) {
         runOnUiThread(() -> {
@@ -472,11 +481,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             saveRecordingForPlayback(base64, mimeType);
             loadedFilePath = null; // swiezo nagrany plik jest juz w LiveAudioData, nie trzeba wczytywac ponownie
             pendingSeekSample = 0L;
+            lastRecordingTotalDurationMs = durationMs;
+            timeText.setText("00:00 / " + formatMs(durationMs)); // jak odtwarzacz: pozycja/calkowita dlugosc
             pitchWaveView.setLiveMode(false); // pozwala przewijac/wskazac miejsce w tym co wlasnie nagrano
             pitchWaveView.resetPan();
             pitchWaveView.invalidate();
             playButton.setEnabled(true);
         });
+    }
+
+    private String formatMs(long ms) {
+        long totalSec = ms / 1000;
+        long h = totalSec / 3600, m = (totalSec % 3600) / 60, s = totalSec % 60;
+        return String.format(Locale.getDefault(), "%02d:%02d:%02d", h, m, s);
     }
 
     @Override
@@ -630,8 +647,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         public void run() {
             if (currentPlayer != null) {
                 try {
-                    long sample = (long) currentPlayer.getCurrentPosition() * LiveAudioData.SAMPLE_RATE / 1000L;
+                    int posMs = currentPlayer.getCurrentPosition();
+                    long sample = (long) posMs * LiveAudioData.SAMPLE_RATE / 1000L;
                     pitchWaveView.setPlayheadSample(sample);
+                    timeText.setText(formatMs(posMs) + " / " + formatMs(lastRecordingTotalDurationMs));
                 } catch (IllegalStateException e) { /* odtwarzacz mogl sie juz zwolnic */ }
                 redrawHandler.postDelayed(this, 50);
             }
@@ -665,6 +684,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         importBtn.setOnClickListener(v -> importExternalFile());
         listContainer.addView(importBtn);
 
+        android.app.AlertDialog[] dialogRef = new android.app.AlertDialog[1];
+
         if (finalFiles.length == 0) {
             TextView empty = new TextView(this);
             empty.setText("Brak nagrań");
@@ -673,7 +694,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         } else {
             java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d.M HH:mm", Locale.getDefault());
             for (File f : finalFiles) {
-                listContainer.addView(buildRecordingCard(f, fmt));
+                listContainer.addView(buildRecordingCard(f, fmt, dialogRef));
             }
         }
 
@@ -683,11 +704,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         listContainer.setBackgroundColor(getResources().getColor(R.color.pr_bg));
         scrollView.addView(listContainer);
 
-        android.app.AlertDialog recsDialog = new AlertDialog.Builder(this)
+        dialogRef[0] = new AlertDialog.Builder(this)
                 .setTitle("Nagrania")
                 .setView(scrollView)
                 .setNegativeButton("Zamknij", null)
                 .show();
+        android.app.AlertDialog recsDialog = dialogRef[0];
         // Pelny ekran (jak strona "NAGRANIA" w PitchRec) — domyslnie AlertDialog ma
         // marginesy i nie wypelnia calego ekranu, wiec wymuszamy wymiary okna.
         if (recsDialog.getWindow() != null) {
@@ -701,7 +723,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // "bez opisu", kategorie to kolejny etap) + ikona NS; wiersz daty; wiersz 4 przyciskow
     // (Opisz i wyslij / Otworz / Udostepnij / Usun) — dokladnie ta sama struktura, tylko
     // "Wyslij do NS" jest na razie zablokowane (wymaga logowania, kolejny etap).
-    private android.widget.LinearLayout buildRecordingCard(File file, java.text.SimpleDateFormat fmt) {
+    private android.widget.LinearLayout buildRecordingCard(File file, java.text.SimpleDateFormat fmt, android.app.AlertDialog[] dialogRef) {
         float density = getResources().getDisplayMetrics().density;
         int pad = (int) (10 * density);
         int marginBottom = (int) (8 * density);
@@ -756,6 +778,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         playBtn.setTextColor(getResources().getColor(R.color.pr_accent));
         playBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
         playBtn.setOnClickListener(v -> {
+            if (dialogRef[0] != null) dialogRef[0].dismiss(); // zamykamy liste, zeby wykres DAW byl widoczny
             loadAndDisplayFile(file);
             playFile(file.getAbsolutePath(), 0L);
         });

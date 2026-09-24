@@ -47,6 +47,7 @@ public class PitchWaveView extends View {
     private float lastCachedZoomSeconds = -999f;
     private boolean lastCachedLiveMode = true;
     private boolean cacheValid = false;
+    private boolean forceNextRebuild = false;
 
     public PitchWaveView(Context context) {
         super(context);
@@ -108,6 +109,10 @@ public class PitchWaveView extends View {
 
     public void setLiveMode(boolean live) {
         isLiveMode = live;
+        forceNextRebuild = true; // wymuszamy natychmiastowa przebudowe (nie throttled) —
+                                  // bez tego, lastVisibleSeconds/Start/Range mogly zostac
+                                  // NIEAKTUALNE (z trybu live), psujac liczenie pozycji
+                                  // dotyku zaraz po przelaczeniu na tryb statyczny.
         invalidate();
     }
 
@@ -118,6 +123,7 @@ public class PitchWaveView extends View {
         long tailSamples = (long) tailCount * 256;
         panOffsetSample = Math.max(0, totalSamples - tailSamples);
         isLiveMode = false;
+        forceNextRebuild = true;
         invalidate();
     }
 
@@ -232,7 +238,7 @@ public class PitchWaveView extends View {
         // MIN_REBUILD_INTERVAL_MS — audio dopisuje nowe probki czesciej niz warto
         // przerysowywac caly wykres, wiec bez tego ograniczenia cache przebudowywal sie
         // praktycznie przy kazdej klatce, negujac wiekszosc korzysci buforowania.
-        boolean needsRebuild = !cacheValid
+        boolean needsRebuild = !cacheValid || forceNextRebuild
                 || (dataChanged && (now - lastRebuildTimeMs >= MIN_REBUILD_INTERVAL_MS));
 
         if (needsRebuild) {
@@ -243,6 +249,7 @@ public class PitchWaveView extends View {
             lastCachedLiveMode = isLiveMode;
             lastRebuildTimeMs = now;
             cacheValid = true;
+            forceNextRebuild = false;
         }
 
         canvas.drawBitmap(cacheBitmap, 0, 0, null);
