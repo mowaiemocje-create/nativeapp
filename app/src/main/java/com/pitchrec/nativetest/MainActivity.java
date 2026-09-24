@@ -147,7 +147,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setOnClickListener(v -> stopRecordingFlow());
 
         playButton.setOnClickListener(v -> {
-            if (isPaused) {
+            if (currentPlayer != null) {
+                // Jest juz odtwarzacz — przelacz play/pauza (nie zaczynaj od nowa).
+                try {
+                    if (currentPlayer.isPlaying()) {
+                        currentPlayer.pause();
+                        playButton.setText("▶ PLAY");
+                    } else {
+                        currentPlayer.start();
+                        playButton.setText("⏸ PLAY");
+                        startPlayheadUpdateLoop();
+                    }
+                } catch (IllegalStateException e) { /* odtwarzacz w nietypowym stanie — ignorujemy */ }
+            } else if (isPaused) {
                 previewDuringPause(pendingSeekSample);
             } else {
                 String path = loadedFilePath != null ? loadedFilePath : lastSavedFilePath;
@@ -419,6 +431,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private long lastDisplayedSecond = -1L;
 
     private void updateTimeDisplay() {
+        if (isPaused) return; // ZAMROZONY czas podczas pauzy — bez tego elapsedMs rosl
+                               // dalej, bo pausedAccumMs byl dodawany tylko RAZ przy pauzie,
+                               // nie kompensowal biezaco upływajacego czasu w pauzie.
         long elapsedMs = System.currentTimeMillis() - recordingStartedAtMs - pausedAccumMs;
         long totalSec = elapsedMs / 1000;
         if (totalSec == lastDisplayedSecond) return; // bez zmiany — pomijamy String.format
@@ -583,6 +598,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             player.setOnCompletionListener(mp -> {
                 mp.release();
                 currentPlayer = null;
+                playButton.setText("▶ PLAY");
             });
             player.prepare();
             int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
@@ -593,12 +609,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 player.setOnSeekCompleteListener(mp -> {
                     mp.start();
                     statusText.setText("Odtwarzanie…");
+                    playButton.setText("⏸ PLAY");
                     startPlayheadUpdateLoop();
                 });
                 player.seekTo(startMs);
             } else {
                 player.start();
                 statusText.setText("Odtwarzanie…");
+                playButton.setText("⏸ PLAY");
                 startPlayheadUpdateLoop();
             }
         } catch (IOException e) {
@@ -640,6 +658,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         int pad = (int) (8 * getResources().getDisplayMetrics().density);
         listContainer.setPadding(pad, pad, pad, pad);
 
+        Button importBtn = new Button(this);
+        importBtn.setText("📁 Wgraj plik");
+        importBtn.setTextColor(getResources().getColor(R.color.pr_accent));
+        importBtn.setBackgroundColor(getResources().getColor(R.color.pr_card));
+        importBtn.setOnClickListener(v -> importExternalFile());
+        listContainer.addView(importBtn);
+
         if (finalFiles.length == 0) {
             TextView empty = new TextView(this);
             empty.setText("Brak nagrań");
@@ -652,13 +677,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
         }
 
+        // Naprawa "przezroczystosci" — bez jawnego, pelnego tla dialog w trybie
+        // pelnoekranowym mogl przepuszczac dotyk do ekranu pod nim.
+        scrollView.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        listContainer.setBackgroundColor(getResources().getColor(R.color.pr_bg));
         scrollView.addView(listContainer);
 
         android.app.AlertDialog recsDialog = new AlertDialog.Builder(this)
                 .setTitle("Nagrania")
                 .setView(scrollView)
                 .setNegativeButton("Zamknij", null)
-                .setNeutralButton("📁 Wgraj plik", (d, w) -> importExternalFile())
                 .show();
         // Pelny ekran (jak strona "NAGRANIA" w PitchRec) — domyslnie AlertDialog ma
         // marginesy i nie wypelnia calego ekranu, wiec wymuszamy wymiary okna.
@@ -717,36 +745,31 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         dateView.setTextColor(getResources().getColor(R.color.pr_muted));
         card.addView(dateView);
 
-        // Wiersz przyciskow — dokladnie 4, jak w PitchRec (nsB/open/dl/del)
+        // Wiersz przyciskow — ikonki: Play / Udostepnij / Usun. "Opisz i wyslij" pojawi sie
+        // TYLKO po zalogowaniu (kolejny etap) — na razie w ogole nie pokazujemy tego
+        // przycisku (nie tylko wylaczony), zgodnie z tym jak bedzie w PitchRec.
         android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
-        Button sendBtn = new Button(this);
-        sendBtn.setText("📝 Opisz i wyślij");
-        sendBtn.setTextColor(getResources().getColor(R.color.pr_pause));
-        sendBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
-        sendBtn.setOnClickListener(v -> Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show());
-        btnRow.addView(sendBtn);
-
-        Button openBtn = new Button(this);
-        openBtn.setText("DAW");
-        openBtn.setTextColor(getResources().getColor(R.color.pr_accent));
-        openBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
-        openBtn.setOnClickListener(v -> {
+        Button playBtn = new Button(this);
+        playBtn.setText("▶");
+        playBtn.setTextColor(getResources().getColor(R.color.pr_accent));
+        playBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+        playBtn.setOnClickListener(v -> {
             loadAndDisplayFile(file);
             playFile(file.getAbsolutePath(), 0L);
         });
-        btnRow.addView(openBtn);
+        btnRow.addView(playBtn);
 
         Button shareBtn = new Button(this);
-        shareBtn.setText("📤 Udostępnij");
+        shareBtn.setText("📤");
         shareBtn.setTextColor(getResources().getColor(R.color.pr_accent));
         shareBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
         shareBtn.setOnClickListener(v -> shareRecording(file));
         btnRow.addView(shareBtn);
 
         Button delBtn = new Button(this);
-        delBtn.setText("Usuń");
+        delBtn.setText("🗑");
         delBtn.setTextColor(getResources().getColor(R.color.pr_warn));
         delBtn.setBackgroundColor(getResources().getColor(R.color.pr_bg));
         delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)

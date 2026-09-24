@@ -34,6 +34,7 @@ public class LiveAudioData {
 
     private static final List<PitchPoint> pitchPts = new ArrayList<>();
     private static volatile long totalSamplesWritten = 0;
+    private static volatile long lastSampleUpdateWallClockMs = 0L;
 
     private static final Object lock = new Object();
 
@@ -85,6 +86,7 @@ public class LiveAudioData {
                 }
             }
             totalSamplesWritten += length;
+            lastSampleUpdateWallClockMs = System.currentTimeMillis();
         }
     }
 
@@ -181,4 +183,19 @@ public class LiveAudioData {
     public static long getTotalSamplesWritten() {
         return totalSamplesWritten;
     }
+
+    // Zwraca PRZEWIDYWANA (interpolowana) aktualna liczbe probek, zakladajac ciagle
+    // nagrywanie od czasu ostatniej faktycznej aktualizacji z wątku audio. Bez tego,
+    // podziałka/siatka "skakala" widocznie za każdym razem gdy nadchodzil nowy bufor
+    // audio (co dzieje sie rzadziej niz odswiezanie ekranu), bo rysowanie co klatke samo
+    // w sobie nie pomaga, jesli źrodlowa wartosc zmienia sie rzadziej.
+    public static long getExtrapolatedTotalSamples() {
+        if (!isRecordingActive) return totalSamplesWritten; // bez ekstrapolacji, gdy nic sie nie nagrywa
+        long elapsedMs = System.currentTimeMillis() - lastSampleUpdateWallClockMs;
+        if (elapsedMs <= 0 || elapsedMs > 500) return totalSamplesWritten; // zabezpieczenie przy dlugich przerwach
+        long extrapolatedSamples = (long) (elapsedMs * (SAMPLE_RATE / 1000.0));
+        return totalSamplesWritten + extrapolatedSamples;
+    }
+
+    public static volatile boolean isRecordingActive = false;
 }

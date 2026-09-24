@@ -181,6 +181,7 @@ public class BackgroundRecorderService extends Service {
             pausedAccumMs = 0L;
             lastResumeAt = recordingStartedAt;
             currentStatus = "RECORDING";
+            LiveAudioData.isRecordingActive = true;
 
             final int finalBufferSize = bufferSize;
             recordThread = new Thread(new Runnable() {
@@ -276,6 +277,7 @@ public class BackgroundRecorderService extends Service {
             recordThread.start();
         } catch (Exception e) {
             currentStatus = "NONE";
+            LiveAudioData.isRecordingActive = false;
             cleanupAudioResources();
             releaseWakeLock();
             releaseAudioFocus();
@@ -309,6 +311,7 @@ public class BackgroundRecorderService extends Service {
         paused = true;
         pausedAccumMs += System.currentTimeMillis() - lastResumeAt;
         currentStatus = "PAUSED";
+        LiveAudioData.isRecordingActive = false;
         updatePlaybackState(PlaybackState.STATE_PAUSED);
         updateNotification("Pauza");
         // Wymuszamy zapis na dysk — bez tego podglad/odtworzenie fragmentu podczas pauzy
@@ -323,6 +326,7 @@ public class BackgroundRecorderService extends Service {
         paused = false;
         lastResumeAt = System.currentTimeMillis();
         currentStatus = "RECORDING";
+        LiveAudioData.isRecordingActive = true;
         updatePlaybackState(PlaybackState.STATE_PLAYING);
         updateNotification("Nagrywanie…");
     }
@@ -367,6 +371,7 @@ public class BackgroundRecorderService extends Service {
             RecordingResultHolder.rejectStop("FAILED_TO_FETCH_RECORDING", e.getMessage());
         } finally {
             currentStatus = "NONE";
+            LiveAudioData.isRecordingActive = false;
             releaseWakeLock();
             releaseAudioFocus();
             releaseMediaSession();

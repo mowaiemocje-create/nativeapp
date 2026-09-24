@@ -275,7 +275,7 @@ public class PitchWaveView extends View {
         int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
         if (tailCount <= 0) tailCount = 1;
 
-        long totalSamples = LiveAudioData.getTotalSamplesWritten();
+        long totalSamples = LiveAudioData.getExtrapolatedTotalSamples();
         long visibleStartSample;
         float visibleSampleRange;
         if (isLiveMode) {
