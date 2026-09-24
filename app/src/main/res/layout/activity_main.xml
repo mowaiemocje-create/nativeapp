@@ -176,8 +176,8 @@
                 android:textColor="@color/pr_text"
                 android:backgroundTint="@color/pr_card" />
 
-            <!-- Nieaktywne na razie — jak w PitchRec, funkcja w kolejnym etapie -->
             <Button
+                android:id="@+id/autoGainButton"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="0.55"
@@ -185,18 +185,17 @@
                 android:text="AG\nOFF"
                 android:textSize="9sp"
                 android:textColor="@color/pr_muted"
-                android:backgroundTint="@color/pr_card"
-                android:enabled="false" />
+                android:backgroundTint="@color/pr_card" />
 
             <Button
+                android:id="@+id/blackScreenButton"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="0.55"
                 android:text="⬛\nBS"
                 android:textSize="9sp"
                 android:textColor="@color/pr_muted"
-                android:backgroundTint="@color/pr_card"
-                android:enabled="false" />
+                android:backgroundTint="@color/pr_card" />
 
         </LinearLayout>
 

@@ -370,7 +370,11 @@ public class PitchWaveView extends View {
             canvas.drawLines(envelopeLinePts, 0, neededSize, envelopePaint);
 
             long visibleStartSample = snap.visibleStartSample;
-            long totalSamples = snap.totalSamples;
+            // WAZNE: uzywamy TEJ SAMEJ ekstrapolowanej wartosci co siatka/podzialka —
+            // wczesniej fala uzywala rzeczywistej (skokowej) wartosci, a siatka
+            // ekstrapolowanej (plynnej), co powodowalo ze te dwa elementy "rozjezdzaly
+            // sie" wzgledem siebie w kazdej klatce, wygladajac jak drganie/wibrowanie.
+            long totalSamples = isLiveMode ? LiveAudioData.getExtrapolatedTotalSamples() : snap.totalSamples;
             float visibleSampleRange = Math.max(1, isLiveMode
                     ? (totalSamples - visibleStartSample)
                     : ((long) tailCount * 256));

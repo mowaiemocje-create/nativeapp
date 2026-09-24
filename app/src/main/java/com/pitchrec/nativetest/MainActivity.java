@@ -44,6 +44,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private Button resetButton;
     private Button recordingsListButton;
     private Button settingsButton;
+    private Button autoGainButton;
+    private Button blackScreenButton;
     private TextView statusText;
     private TextView timeText;
     private TextView gainValueText;
@@ -96,6 +98,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         resetButton = findViewById(R.id.resetButton);
         recordingsListButton = findViewById(R.id.recordingsListButton);
         settingsButton = findViewById(R.id.settingsButton);
+        autoGainButton = findViewById(R.id.autoGainButton);
+        blackScreenButton = findViewById(R.id.blackScreenButton);
         statusText = findViewById(R.id.statusText);
         timeText = findViewById(R.id.timeText);
         gainValueText = findViewById(R.id.gainValueText);
@@ -175,6 +179,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         recordingsListButton.setOnClickListener(v -> showRecordingsList());
 
         settingsButton.setOnClickListener(v -> showSettingsDialog());
+        autoGainButton.setOnClickListener(v -> toggleAutoGain());
+        blackScreenButton.setOnClickListener(v -> showBlackScreen());
     }
 
     // Wyswietlanie wzmocnienia w dB (jak "Wzmocnienie programowe +7,00 dB" w RecForge),
@@ -236,6 +242,52 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .setView(grid)
                 .setNegativeButton("Anuluj", null)
                 .show();
+    }
+
+    private boolean autoGainEnabled = false;
+    private final Runnable autoGainLoop = new Runnable() {
+        @Override
+        public void run() {
+            if (autoGainEnabled && isRecording && !isPaused) {
+                float[] recent = LiveAudioData.snapshotEnvelopeTail(10);
+                float maxLevel = 0f;
+                for (float v : recent) if (v > maxLevel) maxLevel = v;
+                // Cel: poziom okolo 0.5 (w polu skali 0-1). Delikatna korekta, nie skokowa.
+                float target = 0.5f;
+                if (maxLevel > 0.01f) {
+                    float error = target - maxLevel;
+                    float currentDb = (float) (20 * Math.log10(LiveAudioData.gainMultiplier));
+                    float newDb = currentDb + error * 2f; // delikatny wspolczynnik korekcji
+                    newDb = Math.max(-20f, Math.min(20f, newDb));
+                    LiveAudioData.gainMultiplier = (float) Math.pow(10.0, newDb / 20.0);
+                    gainSlider.setValue((newDb + 20f) / 40f);
+                    gainValueText.setText(String.format(Locale.getDefault(), "%+.1f dB", newDb));
+                }
+                redrawHandler.postDelayed(this, 500);
+            }
+        }
+    };
+
+    private void toggleAutoGain() {
+        autoGainEnabled = !autoGainEnabled;
+        autoGainButton.setText(autoGainEnabled ? "AG\nON" : "AG\nOFF");
+        autoGainButton.setTextColor(getResources().getColor(autoGainEnabled ? R.color.pr_accent : R.color.pr_muted));
+        if (autoGainEnabled) redrawHandler.post(autoGainLoop);
+    }
+
+    // Czarny ekran (jak w PitchRec) — pelnoekranowa czarna nakladka, dotkniecie wraca.
+    private void showBlackScreen() {
+        View overlay = new View(this);
+        overlay.setBackgroundColor(0xFF000000);
+        android.widget.LinearLayout.LayoutParams params = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
+        overlay.setLayoutParams(params);
+        View root = findViewById(R.id.rootLayout);
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup rootGroup = (android.view.ViewGroup) root;
+            overlay.setOnClickListener(v -> rootGroup.removeView(overlay));
+            rootGroup.addView(overlay);
+        }
     }
 
     private void showSettingsDialog() {
@@ -360,6 +412,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_START);
         intent.putExtra(BackgroundRecorderService.EXTRA_FORMAT, selectedFormat);
+
+        // Zatrzymujemy jakiekolwiek trwajace odtwarzanie — bez tego, stara petla
+        // aktualizujaca pozycje odtwarzacza mogla nadpisywac wyswietlacz czasu nowego
+        // nagrania (walka o ten sam TextView).
+        if (currentPlayer != null) {
+            try { currentPlayer.release(); } catch (Exception e) { /* ignorowane */ }
+            currentPlayer = null;
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
         } else {
