@@ -20,6 +20,7 @@ public class AudioFileLoader {
         float[] yinWindow = new float[YIN_WINDOW];
         int yinFillCount = 0;
         long samplePos = 0;
+        float lastSmoothedFreq = 0f;
 
         int chunkSize = 2048;
         for (int offset = 0; offset < samples.length; offset += chunkSize) {
@@ -32,10 +33,18 @@ public class AudioFileLoader {
                 yinWindow[yinFillCount] = chunk[i] / 32768f;
                 yinFillCount++;
                 if (yinFillCount >= YIN_WINDOW) {
+                    float sum = 0;
+                    for (int j = 0; j < YIN_WINDOW; j++) sum += yinWindow[j] * yinWindow[j];
+                    float rms = (float) Math.sqrt(sum / YIN_WINDOW);
+
                     float freq = YinPitchDetector.detect(yinWindow);
                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
-                    if (freq > 70 && freq < 1000) {
-                        LiveAudioData.appendPitch(windowStartSample, freq);
+                    if (freq > 70 && freq < 1000 && rms > 0.006f) {
+                        float smoothed = lastSmoothedFreq > 0
+                                ? lastSmoothedFreq * 0.88f + freq * 0.12f
+                                : freq;
+                        lastSmoothedFreq = smoothed;
+                        LiveAudioData.appendPitch(windowStartSample, smoothed);
                     } else {
                         LiveAudioData.appendPitch(windowStartSample, -1);
                     }
@@ -46,16 +55,39 @@ public class AudioFileLoader {
         }
     }
 
+    // Dekoduje WAV, wykrywajac liczbe kanalow z naglowka (offset 22-23) — importowane
+    // pliki (nie nasze wlasne nagrania) sa czesto STEREO, a wczesniejsza wersja zawsze
+    // zakladala mono, co przy stereo myliło kanaly L/R jako sekwencyjne probki mono,
+    // dajac zniekształcony, "przesterowany" wyglad wykresu.
     private static short[] decodeWav(File file) throws IOException {
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            byte[] headerBytes = new byte[44];
+            raf.readFully(headerBytes);
+            int channels = (headerBytes[22] & 0xff) | ((headerBytes[23] & 0xff) << 8);
+            if (channels <= 0) channels = 1; // zabezpieczenie przed nieprawidlowym naglowkiem
+
             long dataSize = raf.length() - 44;
-            raf.seek(44);
             byte[] bytes = new byte[(int) dataSize];
             raf.readFully(bytes);
-            short[] samples = new short[bytes.length / 2];
-            ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples);
-            return samples;
+            short[] rawSamples = new short[bytes.length / 2];
+            ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(rawSamples);
+
+            return downmixToMono(rawSamples, channels);
         }
+    }
+
+    // Usrednia kanaly stereo (albo wiecej) do mono — YIN i obwiednia analizuja jeden
+    // strumien, tak jak nasze wlasne nagrania (ktore sa mono od razu przy zapisie).
+    private static short[] downmixToMono(short[] samples, int channels) {
+        if (channels <= 1) return samples;
+        int monoLen = samples.length / channels;
+        short[] mono = new short[monoLen];
+        for (int i = 0; i < monoLen; i++) {
+            int sum = 0;
+            for (int c = 0; c < channels; c++) sum += samples[i * channels + c];
+            mono[i] = (short) (sum / channels);
+        }
+        return mono;
     }
 
     // Dekoduje MP3 przez wbudowany w Androida MediaExtractor/MediaCodec — Android wspiera
@@ -129,9 +161,10 @@ public class AudioFileLoader {
         codec.release();
         extractor.release();
 
+        int channels = format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT);
         byte[] pcmBytes = pcmOut.toByteArray();
         short[] samples = new short[pcmBytes.length / 2];
         ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples);
-        return samples;
+        return downmixToMono(samples, channels);
     }
 }

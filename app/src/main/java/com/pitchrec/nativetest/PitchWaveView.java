@@ -247,12 +247,70 @@ public class PitchWaveView extends View {
 
         canvas.drawBitmap(cacheBitmap, 0, 0, null);
 
+        // Siatka i podziałka rysowane co klatke (NIE throttled jak reszta wykresu) —
+        // to lekkie do narysowania (kilka linii + kilka etykiet), a inaczej "zamierałyby"
+        // na czas throttlingu (40ms) i skakały przy kazdej przebudowie cache, co bylo
+        // duzo bardziej widoczne niz dla fali (prosta, precyzyjna linia/tekst reaguje
+        // znacznie gorzej na dyskretne skoki niz organicznie "rosnaca" fala).
+        drawLiveRulerAndGrid(canvas, w, fullH);
+
         if (playheadSample >= 0 && lastVisibleSampleRange > 0) {
             float rulerHeight = dp(RULER_HEIGHT_DP);
             float px = ((playheadSample - lastVisibleStartSample) / lastVisibleSampleRange) * w;
             if (px >= 0 && px <= w) {
                 canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
             }
+        }
+    }
+
+    // Liczy AKTUALNY (nie throttled/cachowany) widoczny zakres i rysuje siatke+podzialke
+    // NA WIERZCHU cachowanej bitmapy — dzieki temu porusza sie plynnie, niezaleznie od
+    // throttlingu przebudowy samej fali/pitch.
+    private void drawLiveRulerAndGrid(Canvas canvas, int w, int fullH) {
+        float rulerHeight = dp(RULER_HEIGHT_DP);
+        int h = (int) (fullH - rulerHeight);
+        if (h <= 0) return;
+
+        int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
+        int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
+        if (tailCount <= 0) tailCount = 1;
+
+        long totalSamples = LiveAudioData.getTotalSamplesWritten();
+        long visibleStartSample;
+        float visibleSampleRange;
+        if (isLiveMode) {
+            long tailSamples = (long) tailCount * 256;
+            visibleStartSample = Math.max(0, totalSamples - tailSamples);
+            visibleSampleRange = Math.max(1, totalSamples - visibleStartSample);
+        } else {
+            visibleStartSample = panOffsetSample;
+            visibleSampleRange = (long) tailCount * 256;
+        }
+
+        // Zamalowujemy pas podzialki na wierzchu cache (tlo), zeby stare etykiety/linie z
+        // poprzedniej klatki nie przebijaly przez nowe.
+        canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
+
+        float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
+        float pxPerSecond = w / visibleSeconds;
+        if (pxPerSecond <= 0f || !Float.isFinite(pxPerSecond)) return;
+
+        float tickIntervalSec = 1f;
+        int safety = 0;
+        while (tickIntervalSec * pxPerSecond < dp(40) && safety < 30) { tickIntervalSec *= 2; safety++; }
+        if (tickIntervalSec <= 0f || !Float.isFinite(tickIntervalSec)) return;
+
+        float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
+        float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
+
+        int tickSafety = 0;
+        for (float sec = firstTickSecond; tickSafety < 200; sec += tickIntervalSec, tickSafety++) {
+            float x = (sec - startSecond) * pxPerSecond;
+            if (x > w) break;
+            canvas.drawLine(x, rulerHeight, x, fullH, gridLinePaint);
+            canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
+            String label = String.format(Locale.getDefault(), "%.0fs", sec);
+            canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);
         }
     }
 
@@ -333,39 +391,6 @@ public class PitchWaveView extends View {
                 }
             }
             canvas.drawPath(pitchPath, pitchPaint);
-
-            drawRuler(canvas, w, fullH, rulerHeight, visibleStartSample, visibleSampleRange);
-        } else {
-            canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
-        }
-    }
-
-    private void drawRuler(Canvas canvas, int w, int fullH, float rulerHeight, long visibleStartSample, float visibleSampleRange) {
-        canvas.drawRect(0, 0, w, rulerHeight, rulerBgPaint);
-        float visibleSeconds = Math.max(0.001f, visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE);
-        float pxPerSecond = w / visibleSeconds;
-
-        // ZABEZPIECZENIE: to byl glowny podejrzany poprzedniej regresji — zdegenerowana
-        // wartosc pxPerSecond (zero/NaN/nieskonczonosc) moglaby uwiezic petle nizej w
-        // nieskonczonosci, blokujac caly watek UI.
-        if (pxPerSecond <= 0f || !Float.isFinite(pxPerSecond)) return;
-
-        float tickIntervalSec = 1f;
-        int safety = 0;
-        while (tickIntervalSec * pxPerSecond < dp(40) && safety < 30) { tickIntervalSec *= 2; safety++; }
-        if (tickIntervalSec <= 0f || !Float.isFinite(tickIntervalSec)) return;
-
-        float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
-        float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
-
-        int tickSafety = 0;
-        for (float sec = firstTickSecond; tickSafety < 200; sec += tickIntervalSec, tickSafety++) {
-            float x = (sec - startSecond) * pxPerSecond;
-            if (x > w) break;
-            canvas.drawLine(x, rulerHeight, x, fullH, gridLinePaint);
-            canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
-            String label = String.format(Locale.getDefault(), "%.0fs", sec);
-            canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);
         }
     }
 }

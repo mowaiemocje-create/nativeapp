@@ -107,14 +107,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         RecordingResultHolder.setListener(this);
 
-        gainSlider.setValue(0.183f); // ~1.0x przy zakresie -10x do +50x
+        gainSlider.setValue(0.5f); // 0dB (bez zmiany) w srodku zakresu -20/+20
         gainSlider.setOnValueChangeListener(v -> {
-            float gain = -10f + v * 60f; // zakres -10x do +50x
-            LiveAudioData.gainMultiplier = gain;
-            gainValueText.setText(gainToDbString(gain));
+            float db = -20f + v * 40f; // zakres -20dB do +20dB
+            float linearGain = (float) Math.pow(10.0, db / 20.0);
+            LiveAudioData.gainMultiplier = linearGain;
+            gainValueText.setText(String.format(Locale.getDefault(), "%+.1f dB", db));
         });
-        LiveAudioData.gainMultiplier = -10f + 0.183f * 60f;
-        gainValueText.setText(gainToDbString(LiveAudioData.gainMultiplier));
+        LiveAudioData.gainMultiplier = 1f; // 0dB domyslnie
+        gainValueText.setText("+0.0 dB");
 
         zoomSlider.setValue(0.12f); // domyslnie ~8s
         zoomValueText.setText("8s");
@@ -182,6 +183,47 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // Ekran Ustawień — format nagrywania, bramka szumów, blokada wygaszania ekranu.
     // Budowany programowo (bez osobnego pliku layoutu), podobnie jak lista nagrań.
+    // Pokazuje okno z siatka 16 kolorow do wyboru (4x4) — uzywane dla koloru linii pitch i
+    // koloru siatki DAW.
+    private void showColorGridPicker(java.util.function.IntConsumer onColorSelected) {
+        int[] colors = {
+                0xFFFF3B30, 0xFFFF9500, 0xFFFFE600, 0xFF00E000,
+                0xFF00C7C7, 0xFF00A0FF, 0xFF7EC8E3, 0xFF5856D6,
+                0xFFAF52DE, 0xFFFF2D95, 0xFFFFFFFF, 0xFFB0B0B0,
+                0xFF808080, 0xFF3A3A3A, 0xFF8B5A2B, 0xFF000000
+        };
+        android.widget.LinearLayout grid = new android.widget.LinearLayout(this);
+        grid.setOrientation(android.widget.LinearLayout.VERTICAL);
+        float density = getResources().getDisplayMetrics().density;
+        int swatchSize = (int) (56 * density);
+
+        android.app.AlertDialog[] dialogHolder = new android.app.AlertDialog[1];
+
+        for (int row = 0; row < 4; row++) {
+            android.widget.LinearLayout rowLayout = new android.widget.LinearLayout(this);
+            rowLayout.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            for (int col = 0; col < 4; col++) {
+                final int color = colors[row * 4 + col];
+                View swatch = new View(this);
+                swatch.setBackgroundColor(color);
+                android.widget.LinearLayout.LayoutParams p = new android.widget.LinearLayout.LayoutParams(swatchSize, swatchSize);
+                swatch.setLayoutParams(p);
+                swatch.setOnClickListener(v -> {
+                    onColorSelected.accept(color);
+                    if (dialogHolder[0] != null) dialogHolder[0].dismiss();
+                });
+                rowLayout.addView(swatch);
+            }
+            grid.addView(rowLayout);
+        }
+
+        dialogHolder[0] = new AlertDialog.Builder(this)
+                .setTitle("Wybierz kolor")
+                .setView(grid)
+                .setNegativeButton("Anuluj", null)
+                .show();
+    }
+
     private void showSettingsDialog() {
         android.widget.LinearLayout container = new android.widget.LinearLayout(this);
         container.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -234,24 +276,22 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pitchWidthSlider.setOnValueChangeListener(v -> LiveAudioData.pitchLineWidthDp = 1f + v * 9f);
         container.addView(pitchWidthSlider);
 
-        // Kolor linii pitch — kilka gotowych opcji (prosciej niz pelny wybor koloru)
+        // Kolor linii pitch — kwadracik pokazujacy aktualny kolor, klikniecie otwiera
+        // siatke 16 kolorow do wyboru.
         TextView pitchColorLabel = new TextView(this);
         pitchColorLabel.setText("Kolor linii pitch:");
         container.addView(pitchColorLabel);
 
-        android.widget.LinearLayout colorRow = new android.widget.LinearLayout(this);
-        colorRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        int[] presetColors = {0xFFFF3B30, 0xFFFFE600, 0xFF00E000, 0xFFFFFFFF, 0xFF7EC8E3};
-        String[] presetNames = {"Czerwony", "Żółty", "Zielony", "Biały", "Niebieski"};
-        for (int idx = 0; idx < presetColors.length; idx++) {
-            final int colorValue = presetColors[idx];
-            Button colorBtn = new Button(this);
-            colorBtn.setText(presetNames[idx]);
-            colorBtn.setBackgroundColor(colorValue);
-            colorBtn.setOnClickListener(v -> LiveAudioData.pitchLineColor = colorValue);
-            colorRow.addView(colorBtn);
-        }
-        container.addView(colorRow);
+        View pitchColorSwatch = new View(this);
+        pitchColorSwatch.setBackgroundColor(LiveAudioData.pitchLineColor);
+        android.widget.LinearLayout.LayoutParams swatchParams = new android.widget.LinearLayout.LayoutParams(
+                (int) (48 * getResources().getDisplayMetrics().density), (int) (48 * getResources().getDisplayMetrics().density));
+        pitchColorSwatch.setLayoutParams(swatchParams);
+        pitchColorSwatch.setOnClickListener(v -> showColorGridPicker(color -> {
+            LiveAudioData.pitchLineColor = color;
+            pitchColorSwatch.setBackgroundColor(color);
+        }));
+        container.addView(pitchColorSwatch);
 
         // Grubosc siatki DAW
         TextView gridWidthLabel = new TextView(this);
@@ -264,23 +304,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         gridWidthSlider.setOnValueChangeListener(v -> LiveAudioData.gridLineWidthDp = 0.5f + v * 3.5f);
         container.addView(gridWidthSlider);
 
-        // Kolor siatki DAW
+        // Kolor siatki DAW — tak samo, kwadracik + siatka 16 kolorow
         TextView gridColorLabel = new TextView(this);
         gridColorLabel.setText("Kolor siatki:");
         container.addView(gridColorLabel);
 
-        android.widget.LinearLayout gridColorRow = new android.widget.LinearLayout(this);
-        gridColorRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        int[] gridPresetColors = {0x30FFFFFF, 0x50FFFFFF, 0x40F0973A, 0x400000FF, 0x30FF3B30};
-        String[] gridPresetNames = {"Subtelna", "Wyraźna", "Pomarańcz.", "Niebieska", "Czerwona"};
-        for (int idx = 0; idx < gridPresetColors.length; idx++) {
-            final int colorValue = gridPresetColors[idx];
-            Button gridColorBtn = new Button(this);
-            gridColorBtn.setText(gridPresetNames[idx]);
-            gridColorBtn.setOnClickListener(v -> LiveAudioData.gridLineColor = colorValue);
-            gridColorRow.addView(gridColorBtn);
-        }
-        container.addView(gridColorRow);
+        View gridColorSwatch = new View(this);
+        gridColorSwatch.setBackgroundColor(LiveAudioData.gridLineColor);
+        gridColorSwatch.setLayoutParams(swatchParams);
+        gridColorSwatch.setOnClickListener(v -> showColorGridPicker(color -> {
+            LiveAudioData.gridLineColor = color;
+            gridColorSwatch.setBackgroundColor(color);
+        }));
+        container.addView(gridColorSwatch);
 
         new AlertDialog.Builder(this)
                 .setTitle("Ustawienia")
@@ -593,7 +629,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private static final int REQUEST_IMPORT_FILE = 200;
 
     private void showRecordingsList() {
-        File[] files = getFilesDir().listFiles((dir, name) -> name.startsWith("recording_"));
+        File[] files = getFilesDir().listFiles((dir, name) -> name.endsWith(".wav") || name.endsWith(".mp3"));
         if (files == null) files = new File[0];
         java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
         final File[] finalFiles = files;
@@ -652,10 +688,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         topRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
         TextView nameView = new TextView(this);
-        String shortName = file.getName().replace("recording_", "").replaceAll("\\.(wav|mp3)$", "");
-        nameView.setText(shortName);
+        String displayName = file.getName().replaceAll("\\.(wav|mp3)$", "");
+        nameView.setText(displayName);
         nameView.setTextColor(getResources().getColor(R.color.pr_accent));
         topRow.addView(nameView);
+
+        TextView formatBadge = new TextView(this);
+        String formatLabel = file.getName().endsWith(".mp3") ? " MP3 " : " WAV ";
+        formatBadge.setText(formatLabel);
+        formatBadge.setTextColor(getResources().getColor(R.color.pr_muted));
+        topRow.addView(formatBadge);
 
         TextView catBadge = new TextView(this);
         catBadge.setText(" bez opisu ");
@@ -731,6 +773,18 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // Import zewnetrznego pliku audio (jak "Wgraj plik" w PitchRec) — otwiera systemowy
     // wybornik plikow, kopiuje wybrany plik do folderu nagran.
+    // Odczytuje prawdziwa nazwe pliku z content:// URI (standardowy sposob na Androidzie —
+    // sam URI zwykle nie zawiera czytelnej nazwy, trzeba zapytac ContentResolver).
+    private String getDisplayNameFromUri(android.net.Uri uri) {
+        try (android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) return cursor.getString(idx);
+            }
+        } catch (Exception e) { /* ignorowane, uzyjemy nazwy zastepczej */ }
+        return null;
+    }
+
     private void importExternalFile() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("audio/*");
@@ -744,8 +798,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (requestCode == REQUEST_IMPORT_FILE && data != null && data.getData() != null) {
             try {
                 android.net.Uri sourceUri = data.getData();
-                String ext = sourceUri.toString().toLowerCase(Locale.getDefault()).endsWith(".mp3") ? ".mp3" : ".wav";
-                File destFile = new File(getFilesDir(), "recording_" + System.currentTimeMillis() + ext);
+                String originalName = getDisplayNameFromUri(sourceUri);
+                if (originalName == null || originalName.trim().isEmpty()) {
+                    originalName = "import_" + System.currentTimeMillis() + ".wav";
+                }
+                // Zachowujemy oryginalna nazwe pliku (nie zmieniamy na "recording_...")
+                File destFile = new File(getFilesDir(), originalName);
+                // Jesli plik o tej nazwie juz istnieje, dopisz numer, zeby nie nadpisac.
+                int counter = 1;
+                while (destFile.exists()) {
+                    String base = originalName.replaceAll("\\.(wav|mp3)$", "");
+                    String ext = originalName.endsWith(".mp3") ? ".mp3" : ".wav";
+                    destFile = new File(getFilesDir(), base + "_" + counter + ext);
+                    counter++;
+                }
                 try (java.io.InputStream in = getContentResolver().openInputStream(sourceUri);
                      FileOutputStream out = new FileOutputStream(destFile)) {
                     byte[] buffer = new byte[8192];
