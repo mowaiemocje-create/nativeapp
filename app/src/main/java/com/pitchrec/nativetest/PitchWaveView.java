@@ -270,7 +270,21 @@ public class PitchWaveView extends View {
             forceNextRebuild = false;
         }
 
-        canvas.drawBitmap(cacheBitmap, 0, 0, null);
+        // KLUCZOWA POPRAWKA (na podstawie analizy nagrania): siatka/podzialka porusza sie
+        // plynnie (co klatke), ale cachowana bitmapa fali stoi w miejscu miedzy
+        // przebudowami (throttled, co 40ms) — to powodowalo, ze fala i siatka
+        // "rozjezdzaly sie" wzgledem siebie, wygladajac jak wibrowanie. Przesuwamy teraz
+        // cala bitmape o maly, plynny offset odpowiadajacy uplynetemu czasowi od
+        // ostatniej przebudowy — bitmapa "jedzie" razem z siatka, nie stoi w miejscu.
+        float offsetX = 0f;
+        if (isLiveMode && lastVisibleSeconds > 0) {
+            long elapsedMs = now - lastRebuildTimeMs;
+            if (elapsedMs > 0 && elapsedMs < 500) {
+                float pxPerMs = w / (lastVisibleSeconds * 1000f);
+                offsetX = -(elapsedMs * pxPerMs);
+            }
+        }
+        canvas.drawBitmap(cacheBitmap, offsetX, 0, null);
 
         // Siatka i podziałka rysowane co klatke (NIE throttled jak reszta wykresu) —
         // to lekkie do narysowania (kilka linii + kilka etykiet), a inaczej "zamierałyby"
