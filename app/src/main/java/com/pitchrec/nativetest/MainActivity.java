@@ -81,7 +81,30 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
     };
 
+    // Zmiana jezyka aplikacji — zapisujemy wybor w SharedPreferences, i nakladamy go TUTAJ
+    // (attachBaseContext wywolywane PRZED onCreate), zamiast dynamicznie w trakcie dzialania
+    // — to standardowy, niezawodny sposob na zmiane locale na Androidzie.
     @Override
+    protected void attachBaseContext(android.content.Context base) {
+        String lang = getSavedLanguage(base);
+        java.util.Locale locale = new java.util.Locale(lang);
+        java.util.Locale.setDefault(locale);
+        android.content.res.Configuration config = new android.content.res.Configuration(base.getResources().getConfiguration());
+        config.setLocale(locale);
+        super.attachBaseContext(base.createConfigurationContext(config));
+    }
+
+    private static String getSavedLanguage(android.content.Context ctx) {
+        android.content.SharedPreferences prefs = ctx.getSharedPreferences("app_settings", MODE_PRIVATE);
+        return prefs.getString("language", "en"); // domyslnie angielski
+    }
+
+    private void setLanguage(String langCode) {
+        android.content.SharedPreferences prefs = getSharedPreferences("app_settings", MODE_PRIVATE);
+        prefs.edit().putString("language", langCode).apply();
+        recreate(); // ponowne uruchomienie aktywnosci z nowym locale (attachBaseContext zadziala znowu)
+    }
+
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -99,12 +122,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         // Kolory neonowe — jak w prawdziwym studio: PLAY zielony, REC czerwony, STOP bialy.
         playButton.setNeonColor(Color.parseColor("#00FF66"));
-        playButton.setButtonText("▶ PLAY");
+        playButton.setButtonText(getString(R.string.btn_play));
         playButton.setButtonEnabled(false);
         recordButton.setNeonColor(Color.parseColor("#FF1A1A"));
-        recordButton.setButtonText("● REC");
+        recordButton.setButtonText(getString(R.string.btn_rec));
         pauseButton.setNeonColor(Color.parseColor("#FFFFFF"));
-        pauseButton.setButtonText("■ STOP");
+        pauseButton.setButtonText(getString(R.string.btn_stop));
         pauseButton.setButtonEnabled(false);
         resetButton = findViewById(R.id.resetButton);
         recordingsListButton = findViewById(R.id.recordingsListButton);
@@ -122,15 +145,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         RecordingResultHolder.setListener(this);
 
-        gainSlider.setValue(0.5f); // 0dB (bez zmiany) w srodku zakresu -20/+20
+        gainSlider.setValue(0.65f); // +6dB domyslnie w zakresie -20/+20
         gainSlider.setOnValueChangeListener(v -> {
             float db = -20f + v * 40f; // zakres -20dB do +20dB
             float linearGain = (float) Math.pow(10.0, db / 20.0);
             LiveAudioData.gainMultiplier = linearGain;
             gainValueText.setText(String.format(Locale.getDefault(), "%+.1f dB", db));
         });
-        LiveAudioData.gainMultiplier = 1f; // 0dB domyslnie
-        gainValueText.setText("+0.0 dB");
+        LiveAudioData.gainMultiplier = (float) Math.pow(10.0, 6.0 / 20.0); // +6dB domyslnie
+        gainValueText.setText("+6.0 dB");
 
         zoomSlider.setValue(0.12f); // domyslnie ~8s
         zoomValueText.setText("8s");
@@ -167,10 +190,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 try {
                     if (currentPlayer.isPlaying()) {
                         currentPlayer.pause();
-                        playButton.setButtonText("▶ PLAY");
+                        playButton.setButtonText(getString(R.string.btn_play));
                     } else {
                         currentPlayer.start();
-                        playButton.setButtonText("⏸ PLAY");
+                        playButton.setButtonText(getString(R.string.btn_pause_play));
                         startPlayheadUpdateLoop();
                     }
                 } catch (IllegalStateException e) { /* odtwarzacz w nietypowym stanie — ignorujemy */ }
@@ -184,7 +207,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pitchWaveView.setOnSeekListener(sample -> {
             pendingSeekSample = sample;
             long ms = sample * 1000L / LiveAudioData.SAMPLE_RATE;
-            statusText.setText("Wskazano: " + formatMs(ms));
+            statusText.setText(getString(R.string.status_indicated, formatMs(ms)));
             // Jesli odtwarzacz jest AKTYWNIE odtwarzany, przewijamy go NAPRAWDE, nie tylko
             // ustawiamy zmienna — bez tego, biala linia wracala natychmiast do
             // rzeczywistej pozycji odtwarzacza przy nastepnej aktualizacji (petla
@@ -259,9 +282,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
 
         dialogHolder[0] = new AlertDialog.Builder(this)
-                .setTitle("Wybierz kolor")
+                .setTitle(getString(R.string.pick_color_title))
                 .setView(grid)
-                .setNegativeButton("Anuluj", null)
+                .setNegativeButton(getString(R.string.btn_cancel), null)
                 .show();
     }
 
@@ -351,6 +374,27 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
         container.addView(keepScreenOnCheck);
 
+        // Wybor jezyka aplikacji
+        TextView langLabel = new TextView(this);
+        langLabel.setText("Język / Language:");
+        container.addView(langLabel);
+
+        android.widget.RadioGroup langGroup = new android.widget.RadioGroup(this);
+        langGroup.setOrientation(android.widget.LinearLayout.VERTICAL);
+        String currentLang = getSavedLanguage(this);
+        String[][] languages = {
+                {"en", "English"}, {"pl", "Polski"}, {"sk", "Slovenčina"},
+                {"cs", "Čeština"}, {"de", "Deutsch"}, {"es", "Español"}
+        };
+        for (String[] lang : languages) {
+            android.widget.RadioButton rb = new android.widget.RadioButton(this);
+            rb.setText(lang[1]);
+            rb.setChecked(lang[0].equals(currentLang));
+            rb.setOnClickListener(v -> setLanguage(lang[0]));
+            langGroup.addView(rb);
+        }
+        container.addView(langGroup);
+
         // Grubosc linii pitch
         TextView pitchWidthLabel = new TextView(this);
         pitchWidthLabel.setText("Grubość linii pitch:");
@@ -389,10 +433,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         dawBgLabel.setText("Kolor tła DAW:");
         addColorRow(container, dawBgLabel, LiveAudioData.dawBackgroundColor, color -> LiveAudioData.dawBackgroundColor = color);
 
+        TextView waveColorLabel = new TextView(this);
+        waveColorLabel.setText("Kolor fali:");
+        addColorRow(container, waveColorLabel, LiveAudioData.waveColor, color -> LiveAudioData.waveColor = color);
+
         new AlertDialog.Builder(this)
-                .setTitle("Ustawienia")
+                .setTitle(getString(R.string.settings_title))
                 .setView(container)
-                .setPositiveButton("Zamknij", null)
+                .setPositiveButton(getString(R.string.btn_close), null)
                 .show();
     }
 
@@ -467,9 +515,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         lastDisplayedSecond = -1L;
         pausedAccumMs = 0L;
         lastResumeAtMs = recordingStartedAtMs;
-        recordButton.setButtonText("⏸ PAUZA");
+        recordButton.setButtonText(getString(R.string.btn_pause));
         pauseButton.setButtonEnabled(true);
-        pauseButton.setButtonText("■ STOP");
+        pauseButton.setButtonText(getString(R.string.btn_stop));
         playButton.setButtonEnabled(false);
         pitchWaveView.setLiveMode(true);
         // Podczas nagrywania zoom zablokowany na 8s — zapobiega przypadkowej zmianie
@@ -478,7 +526,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         zoomSlider.setValue(0.12f);
         zoomValueText.setText("8s");
         pitchWaveView.setZoomSeconds(8f);
-        statusText.setText("Nagrywanie… (możesz zablokować ekran)");
+        statusText.setText(getString(R.string.status_recording));
         pitchWaveView.postOnAnimation(redrawLoop);
     }
 
@@ -488,10 +536,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startService(intent);
         isRecording = false;
         isPaused = false;
-        recordButton.setButtonText("● REC");
+        recordButton.setButtonText(getString(R.string.btn_rec));
         pauseButton.setButtonEnabled(false);
         zoomSlider.setEnabled(true);
-        statusText.setText("Przetwarzanie…");
+        statusText.setText(getString(R.string.status_processing));
     }
 
     private long pauseStartedAtMs = 0L;
@@ -502,8 +550,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startService(intent);
         isPaused = true;
         pauseStartedAtMs = System.currentTimeMillis(); // zapamiętujemy KIEDY zaczela sie pauza
-        recordButton.setButtonText("▶ WZNÓW");
-        statusText.setText("Pauza — dotknij wykresu, potem PLAY");
+        recordButton.setButtonText(getString(R.string.btn_resume));
+        statusText.setText(getString(R.string.status_paused));
         playButton.setButtonEnabled(true);
         pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
     }
@@ -517,8 +565,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // minus kiedy pauza zaczela sie) — wczesniej blad dodawal tu czas AKTYWNEGO
         // nagrywania (od ostatniego wznowienia), co bylo odwrotnoscia tego co potrzebne.
         pausedAccumMs += System.currentTimeMillis() - pauseStartedAtMs;
-        recordButton.setButtonText("⏸ PAUZA");
-        statusText.setText("Nagrywanie…");
+        recordButton.setButtonText(getString(R.string.btn_pause));
+        statusText.setText(getString(R.string.status_recording));
         playButton.setButtonEnabled(false);
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
@@ -528,7 +576,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.reset();
         pitchWaveView.invalidate();
         timeText.setText("00:00:00");
-        statusText.setText("Gotowy");
+        statusText.setText(getString(R.string.status_ready));
     }
 
     private long lastDisplayedSecond = -1L;
@@ -711,7 +759,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             player.setOnCompletionListener(mp -> {
                 mp.release();
                 currentPlayer = null;
-                playButton.setButtonText("▶ PLAY");
+                playButton.setButtonText(getString(R.string.btn_play));
             });
             player.prepare();
             int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
@@ -721,15 +769,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 // natychmiast po seekTo() — czekamy na potwierdzenie zakończenia przewijania.
                 player.setOnSeekCompleteListener(mp -> {
                     mp.start();
-                    statusText.setText("Odtwarzanie…");
-                    playButton.setButtonText("⏸ PLAY");
+                    statusText.setText(getString(R.string.status_playing));
+                    playButton.setButtonText(getString(R.string.btn_pause_play));
                     startPlayheadUpdateLoop();
                 });
                 player.seekTo(startMs);
             } else {
                 player.start();
-                statusText.setText("Odtwarzanie…");
-                playButton.setButtonText("⏸ PLAY");
+                statusText.setText(getString(R.string.status_playing));
+                playButton.setButtonText(getString(R.string.btn_pause_play));
                 startPlayheadUpdateLoop();
             }
         } catch (IOException e) {
@@ -789,14 +837,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         android.widget.LinearLayout topActionsRow = new android.widget.LinearLayout(this);
         topActionsRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
-        Button sendAllBtn = makeOutlinedButton("☁ Wyślij wszystkie", R.color.pr_purple, density);
-        sendAllBtn.setOnClickListener(v -> Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show());
+        Button sendAllBtn = makeOutlinedButton(getString(R.string.btn_send_all), R.color.pr_purple, density);
+        sendAllBtn.setOnClickListener(v -> Toast.makeText(this, getString(R.string.requires_login), Toast.LENGTH_LONG).show());
         android.widget.LinearLayout.LayoutParams sendAllParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         sendAllParams.rightMargin = (int) (6 * density);
         sendAllBtn.setLayoutParams(sendAllParams);
         topActionsRow.addView(sendAllBtn);
 
-        Button downloadAllBtn = makeOutlinedButton("⬇ Pobierz wszystkie", R.color.pr_accent, density);
+        Button downloadAllBtn = makeOutlinedButton(getString(R.string.btn_download_all), R.color.pr_accent, density);
         downloadAllBtn.setOnClickListener(v -> shareAllRecordings(finalFiles));
         downloadAllBtn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         topActionsRow.addView(downloadAllBtn);
@@ -804,7 +852,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         listContainer.addView(topActionsRow);
 
         Button importBtn = new Button(this);
-        importBtn.setText("📁 Wgraj plik");
+        importBtn.setText(getString(R.string.btn_import_file));
         importBtn.setMinWidth(0);
         importBtn.setMinimumWidth(0);
         importBtn.setTextColor(getResources().getColor(R.color.pr_accent));
@@ -816,7 +864,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         if (finalFiles.length == 0) {
             TextView empty = new TextView(this);
-            empty.setText("Brak nagrań");
+            empty.setText(getString(R.string.recordings_empty));
             empty.setTextColor(getResources().getColor(R.color.pr_muted));
             listContainer.addView(empty);
         } else {
@@ -833,9 +881,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         scrollView.addView(listContainer);
 
         dialogRef[0] = new AlertDialog.Builder(this)
-                .setTitle("Nagrania")
+                .setTitle(getString(R.string.recordings_title))
                 .setView(scrollView)
-                .setNegativeButton("Zamknij", null)
+                .setNegativeButton(getString(R.string.btn_close), null)
                 .show();
         android.app.AlertDialog recsDialog = dialogRef[0];
         // Pelny ekran (jak strona "NAGRANIA" w PitchRec) — domyslnie AlertDialog ma
@@ -879,7 +927,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         topRow.addView(nameView);
 
         TextView catBadge = new TextView(this);
-        catBadge.setText("  Bez kategorii  ");
+        catBadge.setText("  " + getString(R.string.no_category) + "  ");
         catBadge.setTextSize(11f);
         catBadge.setTextColor(getResources().getColor(R.color.pr_purple));
         android.graphics.drawable.GradientDrawable catBg = new android.graphics.drawable.GradientDrawable();
@@ -903,7 +951,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         metaRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
         TextView authorView = new TextView(this);
-        authorView.setText("Ja");
+        authorView.setText(getString(R.string.author_placeholder));
         authorView.setTextColor(getResources().getColor(R.color.pr_muted));
         authorView.setTextSize(12f);
         metaRow.addView(authorView);
@@ -921,14 +969,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         int btnMarginEnd = (int) (6 * density);
 
-        Button sendBtn = makeOutlinedButton("☁ Wyślij NS", R.color.pr_purple, density);
-        sendBtn.setOnClickListener(v -> Toast.makeText(this, "Wymaga zalogowania — logowanie w kolejnym etapie", Toast.LENGTH_LONG).show());
+        Button sendBtn = makeOutlinedButton(getString(R.string.btn_send_ns), R.color.pr_purple, density);
+        sendBtn.setOnClickListener(v -> Toast.makeText(this, getString(R.string.requires_login), Toast.LENGTH_LONG).show());
         android.widget.LinearLayout.LayoutParams sendParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         sendParams.rightMargin = btnMarginEnd;
         sendBtn.setLayoutParams(sendParams);
         btnRow.addView(sendBtn);
 
-        Button playBtn = makeOutlinedButton("▶ DAW", R.color.pr_accent, density);
+        Button playBtn = makeOutlinedButton(getString(R.string.btn_daw_short), R.color.pr_accent, density);
         playBtn.setOnClickListener(v -> {
             if (dialogRef[0] != null) dialogRef[0].dismiss();
             loadAndDisplayFile(file);
@@ -946,16 +994,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         shareBtn.setLayoutParams(shareParams);
         btnRow.addView(shareBtn);
 
-        Button delBtn = makeOutlinedButton("✕ Usuń", R.color.pr_warn, density);
+        Button delBtn = makeOutlinedButton(getString(R.string.btn_delete_short), R.color.pr_warn, density);
         delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("Usunąć nagranie?")
+                .setTitle(getString(R.string.delete_confirm_title))
                 .setMessage(file.getName())
-                .setPositiveButton("Usuń", (d2, w2) -> {
+                .setPositiveButton(getString(R.string.btn_delete), (d2, w2) -> {
                     file.delete();
-                    Toast.makeText(this, "Usunięto", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, getString(R.string.deleted_toast), Toast.LENGTH_SHORT).show();
                     showRecordingsList();
                 })
-                .setNegativeButton("Anuluj", null)
+                .setNegativeButton(getString(R.string.btn_cancel), null)
                 .show());
         delBtn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         btnRow.addView(delBtn);
@@ -1050,10 +1098,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                         out.write(buffer, 0, read);
                     }
                 }
-                Toast.makeText(this, "Zaimportowano: " + destFile.getName(), Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, getString(R.string.imported_toast, destFile.getName()), Toast.LENGTH_SHORT).show();
                 showRecordingsList();
             } catch (Exception e) {
-                Toast.makeText(this, "Błąd importu: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                Toast.makeText(this, getString(R.string.import_error_toast, e.getMessage()), Toast.LENGTH_LONG).show();
             }
         }
     }

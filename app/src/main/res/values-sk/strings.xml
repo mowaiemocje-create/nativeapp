@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">New Speech Mp3 REC</string>
+
+    <string name="status_ready">Pripravené</string>
+    <string name="status_recording">Nahrávanie… (môžete zablokovať obrazovku)</string>
+    <string name="status_paused">Pauza — dotknite sa grafu, potom PLAY</string>
+    <string name="status_processing">Spracovanie…</string>
+    <string name="status_playing">Prehrávanie…</string>
+    <string name="status_indicated">Označené: %1$s</string>
+    <string name="btn_play">▶ PLAY</string>
+    <string name="btn_pause_play">⏸ PLAY</string>
+    <string name="btn_rec">● REC</string>
+    <string name="btn_stop">■ STOP</string>
+    <string name="btn_resume">▶ OBNOVIŤ</string>
+    <string name="btn_pause">⏸ PAUZA</string>
+    <string name="label_mic">MIC</string>
+    <string name="label_zoom">ZOOM</string>
+    <string name="label_level">ÚROVEŇ</string>
+
+    <string name="nav_daw">DAW</string>
+    <string name="nav_recordings">NAHRÁVKY</string>
+    <string name="nav_correction">KOREKCIA</string>
+    <string name="nav_diary">DENNÍK</string>
+    <string name="nav_stats">ŠTATISTIKY</string>
+    <string name="nav_settings">NASTAVENIA</string>
+
+    <string name="settings_title">Nastavenia</string>
+    <string name="settings_format">Formát nahrávania:</string>
+    <string name="settings_noise_gate">Brána šumu (tlmí tichý šum na pozadí)</string>
+    <string name="settings_keep_screen_on">Nevypínať obrazovku počas nahrávania</string>
+    <string name="settings_pitch_width">Hrúbka čiary pitch:</string>
+    <string name="settings_pitch_color">Farba čiary pitch:</string>
+    <string name="settings_grid_width">Hrúbka mriežky:</string>
+    <string name="settings_grid_color">Farba mriežky:</string>
+    <string name="settings_daw_bg_color">Farba pozadia DAW:</string>
+    <string name="settings_wave_color">Farba vlny:</string>
+    <string name="settings_language">Jazyk:</string>
+    <string name="btn_close">Zavrieť</string>
+    <string name="pick_color_title">Vyberte farbu</string>
+
+    <string name="recordings_title">Nahrávky</string>
+    <string name="recordings_empty">Žiadne nahrávky</string>
+    <string name="btn_send_all">☁ Odoslať všetko</string>
+    <string name="btn_download_all">⬇ Stiahnuť všetko</string>
+    <string name="btn_import_file">📁 Importovať súbor</string>
+    <string name="no_category">Bez kategórie</string>
+    <string name="author_placeholder">Ja</string>
+    <string name="btn_send_ns">☁ Odoslať NS</string>
+    <string name="btn_daw_short">▶ DAW</string>
+    <string name="btn_delete_short">✕ Odstrániť</string>
+    <string name="delete_confirm_title">Odstrániť nahrávku?</string>
+    <string name="btn_delete">Odstrániť</string>
+    <string name="btn_cancel">Zrušiť</string>
+    <string name="requires_login">Vyžaduje prihlásenie — prihlásenie v ďalšej aktualizácii</string>
+    <string name="deleted_toast">Odstránené</string>
+    <string name="imported_toast">Importované: %1$s</string>
+    <string name="import_error_toast">Chyba importu: %1$s</string>
+    <string name="nav_recordings_full">📁\nNahrávky</string>
+    <string name="nav_correction_full">✓\nKorekcia</string>
+    <string name="nav_diary_full">📖\nDenník</string>
+    <string name="nav_stats_full">📊\nŠtatistiky</string>
+    <string name="nav_settings_full">⚙\nNastavenia</string>
+</resources>

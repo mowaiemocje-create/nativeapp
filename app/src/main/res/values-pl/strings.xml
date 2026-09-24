@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">New Speech Mp3 REC</string>
+
+    <string name="status_ready">Gotowy</string>
+    <string name="status_recording">Nagrywanie… (możesz zablokować ekran)</string>
+    <string name="status_paused">Pauza — dotknij wykresu, potem PLAY</string>
+    <string name="status_processing">Przetwarzanie…</string>
+    <string name="status_playing">Odtwarzanie…</string>
+    <string name="status_indicated">Wskazano: %1$s</string>
+    <string name="btn_play">▶ PLAY</string>
+    <string name="btn_pause_play">⏸ PLAY</string>
+    <string name="btn_rec">● REC</string>
+    <string name="btn_stop">■ STOP</string>
+    <string name="btn_resume">▶ WZNÓW</string>
+    <string name="btn_pause">⏸ PAUZA</string>
+    <string name="label_mic">MIC</string>
+    <string name="label_zoom">ZOOM</string>
+    <string name="label_level">POZIOM</string>
+
+    <string name="nav_daw">DAW</string>
+    <string name="nav_recordings">NAGRANIA</string>
+    <string name="nav_correction">KOREKTA</string>
+    <string name="nav_diary">DZIENNIK</string>
+    <string name="nav_stats">STATS</string>
+    <string name="nav_settings">USTAWIENIA</string>
+
+    <string name="settings_title">Ustawienia</string>
+    <string name="settings_format">Format nagrywania:</string>
+    <string name="settings_noise_gate">Bramka szumów (tłumi cichy szum tła)</string>
+    <string name="settings_keep_screen_on">Nie wygaszaj ekranu podczas nagrywania</string>
+    <string name="settings_pitch_width">Grubość linii pitch:</string>
+    <string name="settings_pitch_color">Kolor linii pitch:</string>
+    <string name="settings_grid_width">Grubość siatki:</string>
+    <string name="settings_grid_color">Kolor siatki:</string>
+    <string name="settings_daw_bg_color">Kolor tła DAW:</string>
+    <string name="settings_wave_color">Kolor fali:</string>
+    <string name="settings_language">Język:</string>
+    <string name="btn_close">Zamknij</string>
+    <string name="pick_color_title">Wybierz kolor</string>
+
+    <string name="recordings_title">Nagrania</string>
+    <string name="recordings_empty">Brak nagrań</string>
+    <string name="btn_send_all">☁ Wyślij wszystkie</string>
+    <string name="btn_download_all">⬇ Pobierz wszystkie</string>
+    <string name="btn_import_file">📁 Wgraj plik</string>
+    <string name="no_category">Bez kategorii</string>
+    <string name="author_placeholder">Ja</string>
+    <string name="btn_send_ns">☁ Wyślij NS</string>
+    <string name="btn_daw_short">▶ DAW</string>
+    <string name="btn_delete_short">✕ Usuń</string>
+    <string name="delete_confirm_title">Usunąć nagranie?</string>
+    <string name="btn_delete">Usuń</string>
+    <string name="btn_cancel">Anuluj</string>
+    <string name="requires_login">Wymaga zalogowania — logowanie w kolejnym etapie</string>
+    <string name="deleted_toast">Usunięto</string>
+    <string name="imported_toast">Zaimportowano: %1$s</string>
+    <string name="import_error_toast">Błąd importu: %1$s</string>
+    <string name="nav_recordings_full">📁\nNagrania</string>
+    <string name="nav_correction_full">✓\nKorekta</string>
+    <string name="nav_diary_full">📖\nDziennik</string>
+    <string name="nav_stats_full">📊\nStatystyki</string>
+    <string name="nav_settings_full">⚙\nUstawienia</string>
+</resources>

@@ -366,6 +366,8 @@ public class PitchWaveView extends View {
         if (h <= 0) return; // zabezpieczenie — widok za maly, nic sensownego do rysowania
         int mid = h / 2;
 
+        bgPaint.setColor(LiveAudioData.dawBackgroundColor);
+        envelopePaint.setColor(LiveAudioData.waveColor);
         canvas.drawRect(0, 0, w, fullH, bgPaint);
 
         int horizontalLines = 8;

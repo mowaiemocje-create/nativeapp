@@ -1,4 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">New Speech Mp3 REC</string>
+
+    <!-- Main screen -->
+    <string name="status_ready">Ready</string>
+    <string name="status_recording">Recording… (you can lock the screen)</string>
+    <string name="status_paused">Paused — tap the chart, then PLAY</string>
+    <string name="status_processing">Processing…</string>
+    <string name="status_playing">Playing…</string>
+    <string name="status_indicated">Indicated: %1$s</string>
+    <string name="btn_play">▶ PLAY</string>
+    <string name="btn_pause_play">⏸ PLAY</string>
+    <string name="btn_rec">● REC</string>
+    <string name="btn_stop">■ STOP</string>
+    <string name="btn_resume">▶ RESUME</string>
+    <string name="btn_pause">⏸ PAUSE</string>
+    <string name="label_mic">MIC</string>
+    <string name="label_zoom">ZOOM</string>
+    <string name="label_level">LEVEL</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_daw">DAW</string>
+    <string name="nav_recordings">RECORDINGS</string>
+    <string name="nav_correction">CORRECTION</string>
+    <string name="nav_diary">DIARY</string>
+    <string name="nav_stats">STATS</string>
+    <string name="nav_settings">SETTINGS</string>
+
+    <!-- Settings dialog -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_format">Recording format:</string>
+    <string name="settings_noise_gate">Noise gate (suppresses quiet background noise)</string>
+    <string name="settings_keep_screen_on">Keep screen on while recording</string>
+    <string name="settings_pitch_width">Pitch line thickness:</string>
+    <string name="settings_pitch_color">Pitch line color:</string>
+    <string name="settings_grid_width">Grid thickness:</string>
+    <string name="settings_grid_color">Grid color:</string>
+    <string name="settings_daw_bg_color">DAW background color:</string>
+    <string name="settings_wave_color">Wave color:</string>
+    <string name="settings_language">Language:</string>
+    <string name="btn_close">Close</string>
+    <string name="pick_color_title">Pick a color</string>
+
+    <!-- Recordings section -->
+    <string name="recordings_title">Recordings</string>
+    <string name="recordings_empty">No recordings</string>
+    <string name="btn_send_all">☁ Send all</string>
+    <string name="btn_download_all">⬇ Download all</string>
+    <string name="btn_import_file">📁 Import file</string>
+    <string name="no_category">No category</string>
+    <string name="author_placeholder">Me</string>
+    <string name="btn_send_ns">☁ Send NS</string>
+    <string name="btn_daw_short">▶ DAW</string>
+    <string name="btn_delete_short">✕ Delete</string>
+    <string name="delete_confirm_title">Delete this recording?</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="requires_login">Requires login — login coming in a future update</string>
+    <string name="deleted_toast">Deleted</string>
+    <string name="imported_toast">Imported: %1$s</string>
+    <string name="import_error_toast">Import error: %1$s</string>
+    <string name="nav_recordings_full">📁\nRecordings</string>
+    <string name="nav_correction_full">✓\nCorrection</string>
+    <string name="nav_diary_full">📖\nDiary</string>
+    <string name="nav_stats_full">📊\nStats</string>
+    <string name="nav_settings_full">⚙\nSettings</string>
 </resources>

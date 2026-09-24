@@ -47,6 +47,7 @@ public class LiveAudioData {
     public static volatile float gridLineWidthDp = 1f;
     public static volatile int gridLineColor = 0x20FFFFFF; // ARGB, domyslnie subtelny
     public static volatile int dawBackgroundColor = 0xFF1A1A1A; // ARGB, tlo wykresu DAW
+    public static volatile int waveColor = 0xFF00E000; // ARGB, kolor fali (obwiedni amplitudy)
 
     // Bramka szumów — jeśli włączona, próbki o RMS poniżej progu są wyciszane (ustawiane
     // na zero) przed zapisem/analizą. Domyślnie wyłączona.
