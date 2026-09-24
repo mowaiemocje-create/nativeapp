@@ -11,4 +11,5 @@
     <color name="pr_text">#FFFFFF</color>
     <color name="pr_muted">#8A8A94</color>
     <color name="pr_thumb">#FF9500</color>
+    <color name="ic_launcher_background">#000000</color>
 </resources>

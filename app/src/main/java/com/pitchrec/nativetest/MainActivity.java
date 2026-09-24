@@ -829,7 +829,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private android.widget.LinearLayout buildRecordingCard(File file, java.text.SimpleDateFormat fmt, android.app.AlertDialog[] dialogRef) {
         float density = getResources().getDisplayMetrics().density;
         int pad = (int) (10 * density);
-        int marginBottom = (int) (8 * density);
+        int marginBottom = (int) (12 * density);
 
         android.widget.LinearLayout card = new android.widget.LinearLayout(this);
         card.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -850,10 +850,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (displayName.length() > 22) displayName = displayName.substring(0, 20) + "…";
         nameView.setText(displayName);
         nameView.setTextColor(getResources().getColor(R.color.pr_text));
+        nameView.setTextSize(15f);
         topRow.addView(nameView);
 
         TextView catBadge = new TextView(this);
         catBadge.setText("  Bez kategorii  ");
+        catBadge.setTextSize(11f);
         catBadge.setTextColor(getResources().getColor(R.color.pr_purple));
         android.graphics.drawable.GradientDrawable catBg = new android.graphics.drawable.GradientDrawable();
         catBg.setColor(0x335856D6);
@@ -865,6 +867,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String fmtLabel = file.getName().endsWith(".mp3") ? "MP3" : "WAV";
         nsIcon.setText("  ☁ " + fmtLabel);
         nsIcon.setTextColor(getResources().getColor(R.color.pr_muted));
+        nsIcon.setTextSize(11f);
         topRow.addView(nsIcon);
 
         card.addView(topRow);
@@ -877,11 +880,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         TextView authorView = new TextView(this);
         authorView.setText("Ja");
         authorView.setTextColor(getResources().getColor(R.color.pr_muted));
+        authorView.setTextSize(12f);
         metaRow.addView(authorView);
 
         TextView dateView = new TextView(this);
         dateView.setText("   " + fmt.format(new java.util.Date(file.lastModified())));
         dateView.setTextColor(getResources().getColor(R.color.pr_muted));
+        dateView.setTextSize(12f);
         metaRow.addView(dateView);
 
         card.addView(metaRow);
@@ -947,7 +952,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         btn.setText(text);
         btn.setMinWidth(0);
         btn.setMinimumWidth(0);
-        btn.setPadding((int) (4 * density), (int) (8 * density), (int) (4 * density), (int) (8 * density));
+        btn.setTextSize(12f);
+        btn.setPadding((int) (4 * density), (int) (12 * density), (int) (4 * density), (int) (12 * density));
         int color = getResources().getColor(colorRes);
         btn.setTextColor(color);
 
