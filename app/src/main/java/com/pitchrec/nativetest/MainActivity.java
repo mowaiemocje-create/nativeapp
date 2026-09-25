@@ -568,6 +568,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         recordButton.setButtonText(getString(R.string.btn_pause));
         statusText.setText(getString(R.string.status_recording));
         playButton.setButtonEnabled(false);
+        pitchWaveView.resetPan(); // czysci biala linie (playhead) — niepotrzebna podczas nagrywania na zywo
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
 
