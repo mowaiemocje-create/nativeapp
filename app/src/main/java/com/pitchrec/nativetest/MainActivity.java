@@ -149,7 +149,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (isLoggedIn()) {
             NsClient.loadCategories(nsToken(), nsEmail());
             verifySession(null);
+            loadMapNameFromNs();
         }
+        checkAvailabilityExpiry();
 
         gainSlider.setValue(0.65f); // +6dB domyslnie w zakresie -20/+20
         gainSlider.setOnValueChangeListener(v -> {
@@ -533,6 +535,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 nsAuthState = "ok";
                 nsAuthCheckedAt = System.currentTimeMillis();
                 NsClient.loadCategories(r.token, r.email);
+                prefs().edit().remove("map_name").apply();
+                loadMapNameFromNs();
                 updateNavForLogin();
                 refreshAccountSection();
                 Toast.makeText(this, "✓ Zalogowano do NewSpeech", Toast.LENGTH_SHORT).show();
@@ -755,6 +759,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         final boolean isFix = fix != null;
         DescribeSheet.show(this, init, true, isFix ? "ZAPISZ POPRAWKĘ" : "ZAPISZ NAGRANIE", banner, meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
+            afterDescribed(meta, file.lastModified());
             if (file.getAbsolutePath().equals(lastSavedFilePath)) lastSavedFilePath = renamed.getAbsolutePath();
             if (isFix) {
                 clearFixTarget();
@@ -775,9 +780,99 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         RecMeta existing = RecMeta.load(this, file.getName());
         DescribeSheet.show(this, existing, false, "OPISZ NAGRANIE", meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
+            afterDescribed(meta, file.lastModified());
             if ("recs".equals(currentPage)) renderRecsPage();
             if (sendAfter && isLoggedIn()) sendToNs(renamed);
         });
+    }
+
+    // Po opisaniu nagrania — jak w PitchRec: kwestionariusz (Google Forms) + punkt na MAPIE
+    // (historia zawsze, gdy jest GPS; "na zywo" dla Sklepow i Przechodniow, gdy wlaczone).
+    private void afterDescribed(RecMeta m, long timeMs) {
+        try {
+            java.text.SimpleDateFormat hf = new java.text.SimpleDateFormat("d.M.yyyy HH:mm", Locale.getDefault());
+            StringBuilder f = new StringBuilder();
+            formAdd(f, "entry.702109481", m.name);
+            formAdd(f, "entry.157752890", m.cat);
+            formAdd(f, "entry.815782810", m.hasGps() ? String.format(Locale.US, "%.5f, %.5f", m.lat, m.lon) : "");
+            formAdd(f, "entry.1804891302", String.valueOf(m.emotion));
+            formAdd(f, "entry.528183348", m.sys);
+            formAdd(f, "entry.242728015", hf.format(new java.util.Date(timeMs)));
+            formAdd(f, "entry.1345317394", m.note);
+            NsClient.postForm("https://docs.google.com/forms/d/e/1FAIpQLSfTippGzWsqV6vX9ZovUTqsGYW-GQyqcvmTiJkIsvpoRysJ9g/formResponse", f.toString());
+        } catch (Exception e) { /* nieblokujace */ }
+        if (!m.hasGps() || m.cat.isEmpty()) return;
+        String name = mapName(m.name);
+        String uid = nsUserId().isEmpty() ? name : nsUserId();
+        try {
+            org.json.JSONObject h = new org.json.JSONObject();
+            h.put("lat", m.lat); h.put("lon", m.lon); h.put("cat", m.cat); h.put("name", name);
+            h.put("userId", uid); h.put("city", ""); h.put("ts", timeMs); h.put("sys", m.sys);
+            NsClient.request("POST", "/map/hist", null, null, "application/json", h.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> { });
+            if (prefs().getBoolean("map_share", true) && ("Sklepy".equals(m.cat) || "Przechodzień".equals(m.cat))) {
+                NsClient.request("POST", "/map/ping", null, null, "application/json", h.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> { });
+            }
+        } catch (Exception e) { /* nieblokujace */ }
+    }
+
+    private static void formAdd(StringBuilder f, String k, String v) {
+        if (f.length() > 0) f.append('&');
+        f.append(NsClient.enc(k)).append('=').append(NsClient.enc(v == null ? "" : v));
+    }
+
+    // Imie na mapie — jak w PWA: imie z profilu NS, potem imie kursanta, potem email
+    private String mapName(String fallback) {
+        String n = prefs().getString("map_name", "");
+        if (n.isEmpty()) n = fallback == null ? "" : fallback;
+        if (n.isEmpty()) n = nsEmail();
+        return n.isEmpty() ? "Kursant" : n;
+    }
+
+    private void loadMapNameFromNs() {
+        if (!isLoggedIn() || !prefs().getString("map_name", "").isEmpty()) return;
+        NsClient.request("GET", "/users/me", nsToken(), nsEmail(), null, null, r -> {
+            if (!r.ok) return;
+            try {
+                org.json.JSONObject d = new org.json.JSONObject(r.body);
+                String n = d.optString("name", "");
+                if (n.isEmpty()) n = d.optString("first_name", "");
+                if (!n.isEmpty()) prefs().edit().putString("map_name", n).apply();
+            } catch (Exception e) { }
+        });
+    }
+
+    // ── DOSTEPNY DO ROZMOWY (mapa) — jak "Chętnie porozmawiam" w PitchRec, wylacza sie po 2 h ──
+    private void setAvailability(boolean on, String phone) {
+        long until = on ? System.currentTimeMillis() + 2 * 60 * 60 * 1000L : 0L;
+        prefs().edit().putBoolean("map_avail", on).putLong("map_avail_until", until).putString("map_phone", phone == null ? "" : phone).apply();
+        try {
+            org.json.JSONObject b = new org.json.JSONObject();
+            String name = mapName(prefs().getString("student_name", ""));
+            b.put("userId", nsUserId().isEmpty() ? (nsEmail().isEmpty() ? name : nsEmail()) : nsUserId());
+            b.put("name", name);
+            b.put("phone", phone == null || phone.isEmpty() ? org.json.JSONObject.NULL : phone);
+            b.put("available", on);
+            b.put("city", "");
+            NsClient.request("POST", "/map/avail", null, null, "application/json", b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> {
+                if (!r.ok) Toast.makeText(this, "Nie udało się zmienić dostępności: " + r.err, Toast.LENGTH_LONG).show();
+            });
+        } catch (Exception e) { }
+    }
+
+    private void checkAvailabilityExpiry() {
+        if (prefs().getBoolean("map_avail", false) && System.currentTimeMillis() > prefs().getLong("map_avail_until", 0L)) {
+            setAvailability(false, prefs().getString("map_phone", ""));
+        }
+    }
+
+    private void openMap() {
+        if (!isLoggedIn()) { promptLogin("Mapa nagrań jest dostępna po zalogowaniu do NewSpeech."); return; }
+        Intent i = new Intent(this, MapActivity.class);
+        i.putExtra("token", nsToken());
+        i.putExtra("email", nsEmail());
+        i.putExtra("userId", nsUserId());
+        i.putExtra("name", mapName(prefs().getString("student_name", "")));
+        startActivity(i);
     }
 
     private void askSendAfterSave(File file) {
@@ -848,7 +943,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         // Kafelki MAPA NAGRAN / NORMY
         android.widget.LinearLayout tiles = Ui.row(this);
-        tiles.addView(tile("🗺", "MAPA NAGRAŃ", R.color.pr_accent, v -> comingSoon("Mapa nagrań")), Ui.weight(1f, 8 * d));
+        tiles.addView(tile("🗺", "MAPA NAGRAŃ", R.color.pr_accent, v -> openMap()), Ui.weight(1f, 8 * d));
         tiles.addView(tile("🎯", "NORMY", R.color.pr_text, v -> comingSoon("Normy")), Ui.weight(1f, 0));
         c.addView(tiles);
 
@@ -953,6 +1048,32 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         gpsRow.setOnClickListener(v -> requestLocationPermission(this));
         opt.addView(gpsRow);
         c.addView(opt);
+
+        // Mapa i dostepnosc do rozmowy (jak w PitchRec)
+        android.widget.LinearLayout mp = Ui.card(this);
+        mp.addView(Ui.label(this, "📞 MAPA I DOSTĘPNOŚĆ"));
+        mp.addView(toggleRow("Pokazuj mnie na mapie na żywo (Sklepy, Przechodzień)", prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
+        TextView nm = Ui.text(this, "Na mapie jako: " + mapName(prefs().getString("student_name", "")), 12f, R.color.pr_muted);
+        nm.setPadding(0, (int) (6 * d), 0, (int) (6 * d));
+        mp.addView(nm);
+        android.widget.EditText phone = new android.widget.EditText(this);
+        phone.setHint("Telefon (opcjonalnie, widoczny dla kursantów)");
+        phone.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+        phone.setText(prefs().getString("map_phone", ""));
+        phone.setTextSize(14f);
+        mp.addView(phone);
+        boolean avail = prefs().getBoolean("map_avail", false) && System.currentTimeMillis() < prefs().getLong("map_avail_until", 0L);
+        Button av = Ui.button(this, "📞 Chętnie porozmawiam: " + (avail ? "WŁ" : "WYŁ"), avail ? R.color.pr_accent : R.color.pr_muted, false);
+        av.setOnClickListener(v -> {
+            if (!isLoggedIn()) { promptLogin("Dostępność do rozmowy wymaga zalogowania do NewSpeech."); return; }
+            setAvailability(!avail, phone.getText().toString().trim());
+            renderSettingsPage();
+        });
+        mp.addView(av, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        TextView avInfo = Ui.text(this, avail ? "Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach." : "Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).", 10f, R.color.pr_muted);
+        avInfo.setPadding(0, (int) (6 * d), 0, 0);
+        mp.addView(avInfo);
+        c.addView(mp);
         c.addView(Ui.spacer(this, 20));
     }
 
@@ -1000,25 +1121,38 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         refresh.setOnClickListener(v -> renderFixPage(true));
         head.addView(refresh);
         c.addView(head);
-        if (!force && fixListCache != null && System.currentTimeMillis() - fixListCacheAt < 120000) {
-            fillFixList(c, fixListCache);
-            return;
-        }
-        TextView loading = Ui.text(this, "⏳ Wczytywanie…", 14f, R.color.pr_muted);
+        // Najpierw (jesli jest) poprzednia lista — od razu widoczna — a w tle ZAWSZE swieze dane
+        // z serwera (force), zeby nowe oceny trenera pojawialy sie bez czekania na cache.
+        TextView loading = Ui.text(this, fixListCache != null ? "⟳ Odświeżanie…" : "⏳ Wczytywanie…", 12f, R.color.pr_muted);
         c.addView(loading);
-        NsClient.fetchNeedsCorrection(nsToken(), nsEmail(), force, (list, err) -> {
+        if (fixListCache != null) fillFixList(c, fixListCache);
+        scheduleFixAutoRefresh();
+        NsClient.fetchNeedsCorrection(nsToken(), nsEmail(), true, (list, err) -> {
             if (!"fix".equals(currentPage)) return;
+            c.removeAllViews();
+            c.addView(head);
             if ("AUTH".equals(err)) { markSessionExpired(); showPage("daw"); promptLogin("Twoja sesja NewSpeech wygasła. Zaloguj się ponownie."); return; }
             if (err != null && list.isEmpty()) {
-                loading.setText("📡 " + err + "\nSprawdź internet i spróbuj ponownie (↻).");
-                loading.setTextColor(getResources().getColor(R.color.pr_warn));
+                if (fixListCache != null) fillFixList(c, fixListCache);
+                TextView er = Ui.text(this, "📡 " + err + " — sprawdź internet (↻ odśwież)", 12f, R.color.pr_warn);
+                c.addView(er, 1);
                 return;
             }
             fixListCache = list;
             fixListCacheAt = System.currentTimeMillis();
-            c.removeView(loading);
             fillFixList(c, list);
+            TextView upd = Ui.text(this, "Zaktualizowano " + new java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new java.util.Date()) + " · odświeża się co minutę", 10f, R.color.pr_muted);
+            upd.setGravity(android.view.Gravity.CENTER);
+            c.addView(upd);
         });
+    }
+
+    // Automatyczne odswiezanie listy KOREKTA co 60 s, dopoki zakladka jest otwarta
+    private final Runnable fixAutoRefresh = () -> { if ("fix".equals(currentPage) && isLoggedIn()) renderFixPage(true); };
+
+    private void scheduleFixAutoRefresh() {
+        redrawHandler.removeCallbacks(fixAutoRefresh);
+        redrawHandler.postDelayed(fixAutoRefresh, 60000);
     }
 
     private void fillFixList(android.widget.LinearLayout c, java.util.List<NsClient.FixEntry> list) {
@@ -1651,9 +1785,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         Button daw = Ui.button(this, "▶ DAW", R.color.pr_purple, false);
         daw.setOnClickListener(v -> {
+            // Tylko wczytanie do DAW (bez automatycznego odtwarzania) — PLAY uruchamia recznie
             showPage("daw");
             loadAndDisplayFile(file);
-            playFile(file.getAbsolutePath(), 0L);
+            pendingSeekSample = 0L;
+            playButton.setButtonEnabled(true);
         });
         btns.addView(daw, Ui.weight(1f, 6 * d));
         Button dl = Ui.button(this, "⬇", R.color.pr_accent, false);

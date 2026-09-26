@@ -29,6 +29,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Mapa (WebView) w OSOBNYM procesie — nie wplywa na nagrywanie w tle -->
+        <activity
+            android:name=".MapActivity"
+            android:process=":map"
+            android:exported="false"
+            android:configChanges="orientation|screenSize" />
+
         <service
             android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService"
             android:foregroundServiceType="microphone|mediaPlayback"

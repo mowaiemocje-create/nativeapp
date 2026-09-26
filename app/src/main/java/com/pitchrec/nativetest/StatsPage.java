@@ -52,6 +52,9 @@ public class StatsPage {
         File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
         if (files != null) for (File f : files) { Rec r = new Rec(); r.time = f.lastModified(); r.cat = RecMeta.load(a, f.getName()).cat; local.add(r); }
 
+        LinearLayout harm = Ui.card(a);
+        root.addView(harm);
+        loadHarmonogram(harm);
         LinearLayout summary = Ui.card(a);
         root.addView(summary);
         LinearLayout activity = Ui.card(a);
@@ -101,6 +104,143 @@ public class StatsPage {
                 if (ov != null) fillReview(review, ov.optInt("reviewed", 0), ov.optInt("correct", 0));
             } catch (Exception e) { /* zostaja dane lokalne */ }
         });
+    }
+
+    // ── HARMONOGRAM (jak panel wizyty w PitchRec): najblizsza wizyta z wymaganiami, postep per
+    // kategoria w biezacym okresie (od poprzedniej wizyty do terminu), tempo realizacji. ──
+    private void loadHarmonogram(LinearLayout card) {
+        card.addView(Ui.label(a, "📅 HARMONOGRAM"));
+        TextView loading = Ui.text(a, "⏳ Wczytywanie harmonogramu…", 12f, R.color.pr_muted);
+        card.addView(loading);
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date());
+        NsClient.request("GET", "/visit_dates?page=1&page_size=5&sort_by=date&sort_order=asc&date_from=" + today, host.token(), host.email(), null, null, r1 -> {
+            JSONObject next = firstWithReqs(r1);
+            if (next != null) { loadPrev(card, loading, next); return; }
+            NsClient.request("GET", "/visit_dates?page=1&page_size=5&sort_by=date&sort_order=desc", host.token(), host.email(), null, null, r2 -> {
+                JSONObject last = firstWithReqs(r2);
+                if (last == null) { loading.setText(r1.ok ? "Brak harmonogramu — trener nie ustalił jeszcze wymagań." : "Nie udało się wczytać harmonogramu."); return; }
+                loadPrev(card, loading, last);
+            });
+        });
+    }
+
+    private static org.json.JSONArray coll(NsClient.Result r) {
+        if (!r.ok) return null;
+        try {
+            String b = r.body.trim();
+            if (b.startsWith("[")) return new org.json.JSONArray(b);
+            return new JSONObject(b).optJSONArray("collection");
+        } catch (Exception e) { return null; }
+    }
+
+    private static JSONObject firstWithReqs(NsClient.Result r) {
+        org.json.JSONArray arr = coll(r);
+        if (arr == null) return null;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject v = arr.optJSONObject(i);
+            if (v == null) continue;
+            org.json.JSONArray reqs = v.optJSONArray("visit_record_requirements");
+            if (reqs != null && reqs.length() > 0) return v;
+        }
+        return null;
+    }
+
+    private void loadPrev(LinearLayout card, TextView loading, JSONObject visit) {
+        String vDate = visit.optString("date", "");
+        String vId = visit.optString("id", "");
+        NsClient.request("GET", "/visit_dates?page=1&page_size=10&sort_by=date&sort_order=desc", host.token(), host.email(), null, null, r -> {
+            String start = null;
+            org.json.JSONArray arr = coll(r);
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject v = arr.optJSONObject(i);
+                    if (v == null || vId.equals(v.optString("id", ""))) continue;
+                    String dd = v.optString("date", "");
+                    if (!dd.isEmpty() && dd.compareTo(vDate) < 0) { start = dd; break; }
+                }
+            }
+            if (start == null) start = visit.optString("created_at", "1970-01-01");
+            String from = start.length() >= 10 ? start.substring(0, 10) : start;
+            String to = vDate.length() >= 10 ? vDate.substring(0, 10) : vDate;
+            String q = "/harmonogram-stats/from-ns?ns_token=" + NsClient.enc(host.token()) + "&ns_email=" + NsClient.enc(host.email())
+                    + "&ns_server=new&date_from=" + from + "&date_to=" + to;
+            final String fromF = from;
+            NsClient.backend("GET", q, null, rs -> {
+                if (!host.isCurrent()) return;
+                JSONObject by = null;
+                try { JSONObject dj = new JSONObject(rs.body); if (dj.optBoolean("ok", false)) by = dj.optJSONObject("byCategory"); } catch (Exception e) { }
+                fillHarmonogram(card, visit, by, fromF, to);
+            });
+        });
+    }
+
+    private void fillHarmonogram(LinearLayout card, JSONObject visit, JSONObject by, String from, String to) {
+        card.removeAllViews();
+        card.addView(Ui.label(a, "📅 HARMONOGRAM"));
+        long deadline = parseDay(to);
+        long now = System.currentTimeMillis();
+        int daysLeft = (int) Math.max(0, Math.ceil((deadline + 86400000L - now) / 86400000.0));
+        String dl = to.length() >= 10 ? to.substring(8, 10) + "." + to.substring(5, 7) + "." + to.substring(0, 4) : to;
+        TextView head = Ui.text(a, (deadline + 86400000L > now ? "Do wizyty " + dl + " — zostało " + daysLeft + " dni" : "Termin wizyty minął (" + dl + ")"), 13f, R.color.pr_text);
+        head.setTypeface(Typeface.DEFAULT_BOLD);
+        card.addView(head);
+        org.json.JSONArray reqs = visit.optJSONArray("visit_record_requirements");
+        int totReq = 0, totCorrect = 0, totSent = 0;
+        List<Object[]> rows = new ArrayList<>();
+        for (int i = 0; reqs != null && i < reqs.length(); i++) {
+            JSONObject rq = reqs.optJSONObject(i);
+            if (rq == null) continue;
+            JSONObject cat = rq.optJSONObject("record_category");
+            String cid = cat != null ? cat.optString("id", "") : "";
+            String cname = cat != null ? (cat.optString("name_pl", "").isEmpty() ? cat.optString("name", "") : cat.optString("name_pl", "")) : "?";
+            int need = rq.optInt("records_count", 0);
+            int sent = 0, correct = 0, reviewed = 0;
+            if (by != null && by.optJSONObject(cid) != null) {
+                JSONObject b = by.optJSONObject(cid);
+                sent = b.optInt("sent", 0); correct = b.optInt("correct", 0); reviewed = b.optInt("reviewed", 0);
+            }
+            totReq += need; totCorrect += Math.min(correct, need); totSent += sent;
+            rows.add(new Object[]{cname, need, sent, correct, reviewed});
+        }
+        int pct = totReq > 0 ? Math.min(100, Math.round(totCorrect * 100f / totReq)) : 0;
+        TextView sum = Ui.text(a, "Zaliczone: " + totCorrect + " z " + totReq + " (" + pct + "%) · wysłane w okresie: " + totSent, 12f, R.color.pr_muted);
+        sum.setPadding(0, (int) (4 * d), 0, (int) (8 * d));
+        card.addView(sum);
+        // Tempo (czysto motywacyjne — jak w PWA)
+        if (totReq > 0 && deadline + 86400000L > now) {
+            long start = parseDay(from);
+            int elapsed = (int) Math.max(1, Math.ceil((now - start) / 86400000.0));
+            int remaining = Math.max(0, totReq - totSent);
+            double needed = daysLeft > 0 ? remaining / (double) daysLeft : remaining;
+            double actual = totSent / (double) elapsed;
+            boolean onTrack = actual >= needed - 0.01;
+            TextView pace = Ui.text(a, onTrack ? "⚡ Świetnie! W tym tempie zdążysz przed końcem terminu (" + daysLeft + " dni zostało)."
+                    : "⚡ Aby zdążyć na czas, potrzebujesz ok. " + (int) Math.ceil(needed) + " nagrań dziennie.", 12f, onTrack ? R.color.pr_accent : R.color.pr_warn);
+            pace.setTypeface(Typeface.DEFAULT_BOLD);
+            pace.setPadding(0, 0, 0, (int) (8 * d));
+            card.addView(pace);
+        }
+        for (Object[] rw : rows) {
+            int need = (Integer) rw[1], sent = (Integer) rw[2], correct = (Integer) rw[3];
+            LinearLayout row = Ui.row(a);
+            row.setPadding(0, (int) (3 * d), 0, (int) (3 * d));
+            row.addView(Ui.text(a, (String) rw[0], 12f, R.color.pr_text), new LinearLayout.LayoutParams((int) (120 * d), LinearLayout.LayoutParams.WRAP_CONTENT));
+            LinearLayout track = new LinearLayout(a);
+            track.setBackground(Ui.rounded(Ui.col(a, R.color.pr_border), 0, 0, 4 * d));
+            float w = need > 0 ? Math.min(1f, Math.max(0.03f, correct / (float) need)) : 0.03f;
+            View fill = new View(a);
+            fill.setBackground(Ui.rounded(correct >= need ? 0xFF00C853 : 0xFFE8820C, 0, 0, 4 * d));
+            track.addView(fill, new LinearLayout.LayoutParams(0, (int) (9 * d), w));
+            track.addView(new View(a), new LinearLayout.LayoutParams(0, (int) (9 * d), 1f - w + 0.0001f));
+            row.addView(track, Ui.weight(1f, 8 * d));
+            row.addView(Ui.text(a, "✓" + correct + "/" + need + (sent > correct ? " (wysł. " + sent + ")" : ""), 11f, correct >= need ? R.color.pr_accent : R.color.pr_muted));
+            card.addView(row);
+        }
+    }
+
+    private static long parseDay(String s) {
+        try { return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(s.substring(0, 10)).getTime(); }
+        catch (Exception e) { return System.currentTimeMillis(); }
     }
 
     private static String dayKey(long t) {

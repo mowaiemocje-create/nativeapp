@@ -76,6 +76,12 @@ public class DescribeSheet {
 
         android.content.SharedPreferences prefs = a.getSharedPreferences("app_settings", Context.MODE_PRIVATE);
 
+        // ZAMKNIJ bez opisu — NA SAMEJ GORZE (od razu widoczny). Nagranie zostaje w NAGRANIACH
+        // jako "bez opisu"; opisac i wyslac mozna je pozniej ("📝 Opisz i wyślij").
+        Button closeBtn = Ui.button(a, newRecording ? "✕ ZAMKNIJ — zapisz bez opisu" : "✕ ZAMKNIJ", R.color.pr_warn, false);
+        body.addView(closeBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        body.addView(Ui.spacer(a, 12));
+
         if (banner != null) {
             TextView bn = Ui.text(a, banner, 13f, R.color.pr_accent);
             bn.setTypeface(Typeface.DEFAULT_BOLD);
@@ -185,8 +191,6 @@ public class DescribeSheet {
 
         // ZAMKNIJ bez opisu — nagranie zostaje w NAGRANIACH jako "bez opisu"; opisac i wyslac
         // mozna je pozniej przyciskiem "📝 Opisz i wyślij" (tak jak w PitchRec).
-        Button closeBtn = Ui.button(a, newRecording ? "ZAMKNIJ — zapisz bez opisu" : "ZAMKNIJ", R.color.pr_muted, false);
-        body.addView(closeBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         body.addView(Ui.spacer(a, 24));
 
         Runnable dismiss = () -> { try { root.removeView(overlay); } catch (Exception e) { } };
