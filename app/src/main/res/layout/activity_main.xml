@@ -8,6 +8,59 @@
     android:fitsSystemWindows="true"
     android:clipToPadding="false">
 
+    <!-- Naglowek jak w PitchRec: "new speech REC" + status -->
+    <LinearLayout
+        android:id="@+id/appHeader"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:background="@color/pr_card">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="new "
+            android:textSize="18sp"
+            android:textColor="@color/pr_text" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="speech"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/pr_accent" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="  REC"
+            android:letterSpacing="0.2"
+            android:textSize="11sp"
+            android:textColor="@color/pr_muted" />
+        <TextView
+            android:id="@+id/headerStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="● GOTOWY"
+            android:textSize="13sp"
+            android:textColor="@color/pr_muted" />
+    </LinearLayout>
+
+    <!-- Kontener stron (jak .pages w PitchRec): DAW / Nagrania / Ustawienia / sekcje NS -->
+    <FrameLayout
+        android:id="@+id/pageContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+    <LinearLayout
+        android:id="@+id/dawPage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
     <!-- Obszar wykresu (DAW) -->
     <com.pitchrec.nativetest.PitchWaveView
         android:id="@+id/pitchWaveView"
@@ -190,70 +243,213 @@
 
     </LinearLayout>
 
-    <!-- Dolne menu nawigacji. Korekta / Dziennik / Statystyki sa UKRYTE bez zalogowania do
-         NewSpeech (MainActivity.updateNavForLogin) — logowanie to kolejny etap prac. -->
-    <LinearLayout
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/recsPage"
         android:layout_width="match_parent"
-        android:layout_height="72dp"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:background="@color/pr_bg">
+        <LinearLayout
+            android:id="@+id/recsContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp" />
+    </ScrollView>
+
+    <ScrollView
+        android:id="@+id/setPage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:background="@color/pr_bg">
+        <LinearLayout
+            android:id="@+id/setContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="10dp" />
+    </ScrollView>
+
+    <ScrollView
+        android:id="@+id/nsPage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:background="@color/pr_bg">
+        <LinearLayout
+            android:id="@+id/nsContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="14dp" />
+    </ScrollView>
+
+    </FrameLayout>
+
+    <!-- Dolne menu jak w PitchRec: DAW / NAGRANIA / KOREKTA / DZIENNIK / STATS / USTAWIENIA.
+         KOREKTA, DZIENNIK i STATS sa UKRYTE bez zalogowania do NewSpeech. -->
+    <LinearLayout
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
         android:orientation="horizontal"
         android:background="@color/pr_card">
-
-        <Button
-            android:id="@+id/recordingsListButton"
+        <LinearLayout
+            android:id="@+id/navDaw"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="@string/nav_recordings_full"
-            android:textSize="13sp"
-            android:textColor="@color/pr_accent"
-            android:background="@android:color/transparent" />
-
-        <Button
-            android:id="@+id/correctionNavButton"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/navDawIcon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_nav_daw" />
+            <TextView
+                android:id="@+id/navDawLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="DAW"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/pr_muted" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/navRecs"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/navRecsIcon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_nav_recs" />
+            <TextView
+                android:id="@+id/navRecsLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="NAGRANIA"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/pr_muted" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/navFix"
             android:visibility="gone"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="@string/nav_correction_full"
-            android:textSize="13sp"
-            android:textColor="@color/pr_muted"
-            android:background="@android:color/transparent"
-            android:enabled="false" />
-
-        <Button
-            android:id="@+id/diaryNavButton"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/navFixIcon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_nav_fix" />
+            <TextView
+                android:id="@+id/navFixLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="KOREKTA"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/pr_muted" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/navDiary"
             android:visibility="gone"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="@string/nav_diary_full"
-            android:textSize="13sp"
-            android:textColor="@color/pr_muted"
-            android:background="@android:color/transparent"
-            android:enabled="false" />
-
-        <Button
-            android:id="@+id/statsNavButton"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/navDiaryIcon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_nav_diary" />
+            <TextView
+                android:id="@+id/navDiaryLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="DZIENNIK"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/pr_muted" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/navStats"
             android:visibility="gone"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="@string/nav_stats_full"
-            android:textSize="13sp"
-            android:textColor="@color/pr_muted"
-            android:background="@android:color/transparent"
-            android:enabled="false" />
-
-        <Button
-            android:id="@+id/settingsButton"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/navStatsIcon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_nav_stats" />
+            <TextView
+                android:id="@+id/navStatsLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="STATS"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/pr_muted" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/navSet"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:text="@string/nav_settings_full"
-            android:textSize="13sp"
-            android:textColor="@color/pr_accent"
-            android:background="@android:color/transparent" />
-
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/navSetIcon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_nav_set" />
+            <TextView
+                android:id="@+id/navSetLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="USTAWIENIA"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="@color/pr_muted" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>

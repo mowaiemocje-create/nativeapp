@@ -43,8 +43,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private NeonButton pauseButton;
     private NeonButton playButton;
     private Button resetButton;
-    private Button recordingsListButton;
-    private Button settingsButton;
+    private TextView headerStatus;
+    private String currentPage = "daw";
     private Button autoGainButton;
     private Button blackScreenButton;
     private TextView statusText;
@@ -130,8 +130,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setButtonText(getString(R.string.btn_stop));
         pauseButton.setButtonEnabled(false);
         resetButton = findViewById(R.id.resetButton);
-        recordingsListButton = findViewById(R.id.recordingsListButton);
-        settingsButton = findViewById(R.id.settingsButton);
+        headerStatus = findViewById(R.id.headerStatus);
         autoGainButton = findViewById(R.id.autoGainButton);
         blackScreenButton = findViewById(R.id.blackScreenButton);
         statusText = findViewById(R.id.statusText);
@@ -147,7 +146,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         loadDawSettings();
         updateNavForLogin();
-        setupLoginOnlyNav();
         if (isLoggedIn()) {
             NsClient.loadCategories(nsToken(), nsEmail());
             verifySession(null);
@@ -228,9 +226,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
         });
         resetButton.setOnClickListener(v -> resetRecording());
-        recordingsListButton.setOnClickListener(v -> showRecordingsList());
 
-        settingsButton.setOnClickListener(v -> showSettingsDialog());
+        setupBottomNav();
+        showPage("daw");
         autoGainButton.setOnClickListener(v -> toggleAutoGain());
         blackScreenButton.setOnClickListener(v -> showBlackScreen());
     }
@@ -365,55 +363,85 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private void updateNavForLogin() {
         boolean logged = isLoggedIn();
         int vis = logged ? View.VISIBLE : View.GONE;
-        int[] ids = {R.id.correctionNavButton, R.id.diaryNavButton, R.id.statsNavButton};
+        int[] ids = {R.id.navFix, R.id.navDiary, R.id.navStats};
         for (int id : ids) {
             View b = findViewById(id);
-            if (b != null) {
-                b.setVisibility(vis);
-                b.setEnabled(logged);
-                if (b instanceof TextView) ((TextView) b).setTextColor(getResources().getColor(R.color.pr_accent));
-            }
+            if (b != null) b.setVisibility(vis);
         }
         if (!logged && !"expired".equals(nsAuthState)) nsAuthState = "none";
+        // Bez logowania nie mozna zostac na stronie sekcji NS
+        if (!logged && ("fix".equals(currentPage) || "diary".equals(currentPage) || "stats".equals(currentPage))) showPage("daw");
     }
 
-    private void setupLoginOnlyNav() {
-        View corr = findViewById(R.id.correctionNavButton);
-        View diary = findViewById(R.id.diaryNavButton);
-        View stats = findViewById(R.id.statsNavButton);
-        if (corr != null) corr.setOnClickListener(v -> openLoginOnlySection("Korekta"));
-        if (diary != null) diary.setOnClickListener(v -> openLoginOnlySection("Dziennik"));
-        if (stats != null) stats.setOnClickListener(v -> openLoginOnlySection("Statystyki"));
+    // ── DOLNE MENU I STRONY (jak showPage w PitchRec) ──
+    private void setupBottomNav() {
+        findViewById(R.id.navDaw).setOnClickListener(v -> showPage("daw"));
+        findViewById(R.id.navRecs).setOnClickListener(v -> showPage("recs"));
+        findViewById(R.id.navSet).setOnClickListener(v -> showPage("set"));
+        findViewById(R.id.navFix).setOnClickListener(v -> openLoginOnlySection("fix", "KOREKTA"));
+        findViewById(R.id.navDiary).setOnClickListener(v -> openLoginOnlySection("diary", "DZIENNIK"));
+        findViewById(R.id.navStats).setOnClickListener(v -> openLoginOnlySection("stats", "STATYSTYKI"));
+    }
+
+    private void showPage(String page) {
+        currentPage = page;
+        findViewById(R.id.dawPage).setVisibility("daw".equals(page) ? View.VISIBLE : View.GONE);
+        findViewById(R.id.recsPage).setVisibility("recs".equals(page) ? View.VISIBLE : View.GONE);
+        findViewById(R.id.setPage).setVisibility("set".equals(page) ? View.VISIBLE : View.GONE);
+        boolean ns = "fix".equals(page) || "diary".equals(page) || "stats".equals(page);
+        findViewById(R.id.nsPage).setVisibility(ns ? View.VISIBLE : View.GONE);
+        String[][] nav = {{"daw", "navDaw"}, {"recs", "navRecs"}, {"fix", "navFix"}, {"diary", "navDiary"}, {"stats", "navStats"}, {"set", "navSet"}};
+        int[] icons = {R.id.navDawIcon, R.id.navRecsIcon, R.id.navFixIcon, R.id.navDiaryIcon, R.id.navStatsIcon, R.id.navSetIcon};
+        int[] labels = {R.id.navDawLabel, R.id.navRecsLabel, R.id.navFixLabel, R.id.navDiaryLabel, R.id.navStatsLabel, R.id.navSetLabel};
+        for (int i = 0; i < nav.length; i++) {
+            int c = getResources().getColor(nav[i][0].equals(page) ? R.color.pr_accent : R.color.pr_muted);
+            android.widget.ImageView ic = findViewById(icons[i]);
+            if (ic != null) ic.setColorFilter(c);
+            TextView lb = findViewById(labels[i]);
+            if (lb != null) lb.setTextColor(c);
+        }
+        if ("recs".equals(page)) renderRecsPage();
+        if ("set".equals(page)) renderSettingsPage();
     }
 
     // Wejscie do sekcji wymagajacej konta: najpierw sprawdzamy sesje (jak w PWA) —
     // wygasla sesja = czytelny komunikat i przejscie do logowania, nie pusty ekran.
-    private void openLoginOnlySection(String name) {
-        if (!isLoggedIn()) { promptLogin("Aby otworzyć sekcję " + name + ", zaloguj się do NewSpeech."); return; }
+    private void openLoginOnlySection(String page, String title) {
+        if (!isLoggedIn()) { promptLogin("Aby otworzyć sekcję " + title + ", zaloguj się do NewSpeech."); return; }
+        showPage(page);
+        android.widget.LinearLayout c = findViewById(R.id.nsContent);
+        c.removeAllViews();
+        c.addView(pageTitle(title));
+        TextView msg = Ui.text(this, "⏳ Sprawdzam logowanie…", 14f, R.color.pr_muted);
+        c.addView(msg);
         verifySession(state -> {
+            if (!page.equals(currentPage)) return;
             if ("ok".equals(state)) {
-                new AlertDialog.Builder(this)
-                        .setTitle(name)
-                        .setMessage("Jesteś zalogowany ✓\n\nSekcja " + name + " jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.")
-                        .setPositiveButton(getString(R.string.btn_close), null)
-                        .show();
+                msg.setText("Jesteś zalogowany ✓\n\nSekcja " + title + " jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.");
+                msg.setTextColor(getResources().getColor(R.color.pr_text));
             } else if ("expired".equals(state)) {
+                showPage("daw");
                 promptLogin("Twoja sesja NewSpeech wygasła. Zaloguj się ponownie.");
             } else {
-                new AlertDialog.Builder(this)
-                        .setTitle("Brak połączenia z NewSpeech")
-                        .setMessage("Nie udało się połączyć z serwerem NewSpeech. Sprawdź internet i spróbuj ponownie.")
-                        .setPositiveButton(getString(R.string.btn_close), null)
-                        .show();
+                msg.setText("📡 Brak połączenia z NewSpeech.\nSprawdź internet i spróbuj ponownie.");
+                msg.setTextColor(getResources().getColor(R.color.pr_warn));
             }
         });
+    }
+
+    private TextView pageTitle(String t) {
+        TextView tv = Ui.text(this, t, 18f, R.color.pr_muted);
+        tv.setLetterSpacing(0.3f);
+        tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        tv.setPadding((int) Ui.dp(this, 4), (int) Ui.dp(this, 4), 0, (int) Ui.dp(this, 12));
+        return tv;
     }
 
     private void promptLogin(String message) {
         new AlertDialog.Builder(this)
                 .setTitle("Wymagane logowanie")
                 .setMessage(message)
-                .setPositiveButton("Przejdź do logowania", (d, w) -> showSettingsDialog())
+                .setPositiveButton("Przejdź do logowania", (d, w) -> showPage("set"))
                 .setNegativeButton(getString(R.string.btn_cancel), null)
                 .show();
     }
@@ -560,14 +588,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     // ── WYSYLKA DO NS ──
-    private java.util.Set<String> sentFiles() {
-        return new java.util.HashSet<>(prefs().getStringSet("ns_sent_files", new java.util.HashSet<>()));
-    }
-
-    private void markSent(File f) {
-        java.util.Set<String> s = sentFiles();
-        s.add(f.getName());
-        prefs().edit().putStringSet("ns_sent_files", s).apply();
+    private void markNs(File f, String status) {
+        RecMeta m = RecMeta.load(this, f.getName());
+        m.ns = status;
+        m.save(this, f.getName());
     }
 
     private void pickCategory(java.util.function.Consumer<String> onPicked) {
@@ -578,70 +602,122 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .show();
     }
 
+    // Wysyla nagranie w kategorii z jego OPISU (jak w PitchRec). Bez opisu -> najpierw ekran opisu.
     private void sendToNs(File file) {
         if (!isLoggedIn()) { promptLogin("Aby wysłać nagranie do NewSpeech, zaloguj się."); return; }
-        pickCategory(cat -> {
-            String catId = NsClient.categoryId(cat);
-            if (catId == null) { Toast.makeText(this, "Nieznana kategoria: " + cat, Toast.LENGTH_LONG).show(); return; }
-            statusText.setText("☁ Wysyłanie do NS: " + file.getName() + "…");
-            NsClient.uploadRecording(nsToken(), nsEmail(), file, catId, r -> {
-                if (r.ok) {
-                    markSent(file);
-                    statusText.setText("☁✓ Wysłano do NS (" + cat + ")");
-                    Toast.makeText(this, "☁✓ Wysłano do NS", Toast.LENGTH_SHORT).show();
-                    showRecordingsList();
-                } else if (r.isAuthError()) {
-                    markSessionExpired();
-                    statusText.setText("⚠ Sesja wygasła — zaloguj się ponownie");
-                } else if (r.isLimitError()) {
-                    statusText.setText("⛔ Dzienny limit NOWYCH nagrań wyczerpany");
-                    new AlertDialog.Builder(this).setTitle("Limit nagrań")
-                            .setMessage("Serwer NS: " + r.err + "\n\nDzienny limit dotyczy tylko nowych nagrań. Poprawki odrzuconych nagrań nie mają limitu (sekcja Korekta).")
-                            .setPositiveButton(getString(R.string.btn_close), null).show();
-                } else {
-                    statusText.setText("☁✗ NS: " + r.err);
-                    Toast.makeText(this, "Błąd wysyłki: " + r.err, Toast.LENGTH_LONG).show();
-                }
-            });
+        RecMeta meta = RecMeta.load(this, file.getName());
+        if (meta.cat.isEmpty()) {
+            describeExisting(file, true);
+            return;
+        }
+        String catId = NsClient.categoryId(meta.cat);
+        if (catId == null) { Toast.makeText(this, "Nieznana kategoria: " + meta.cat, Toast.LENGTH_LONG).show(); return; }
+        setStatus("☁ Wysyłanie do NS…");
+        NsClient.uploadRecording(nsToken(), nsEmail(), file, catId, r -> {
+            if (r.ok) {
+                markNs(file, "sent");
+                setStatus("☁✓ NS: wysłano (" + meta.cat + ")");
+                Toast.makeText(this, "☁✓ Wysłano do NS", Toast.LENGTH_SHORT).show();
+            } else if (r.isAuthError()) {
+                markSessionExpired();
+                setStatus("⚠ Sesja wygasła — zaloguj się ponownie");
+            } else if (r.isLimitError()) {
+                markNs(file, "error");
+                setStatus("⛔ Dzienny limit NOWYCH nagrań wyczerpany");
+                new AlertDialog.Builder(this).setTitle("Limit nagrań")
+                        .setMessage("Serwer NS: " + r.err + "\n\nDzienny limit dotyczy tylko nowych nagrań. Poprawki odrzuconych nagrań nie mają limitu (sekcja Korekta).")
+                        .setPositiveButton(getString(R.string.btn_close), null).show();
+            } else {
+                markNs(file, "error");
+                setStatus("☁✗ NS: " + r.err);
+                Toast.makeText(this, "Błąd wysyłki: " + r.err, Toast.LENGTH_LONG).show();
+            }
+            if ("recs".equals(currentPage)) renderRecsPage();
         });
     }
 
-    // "Wyslij wszystkie" — wszystkie JESZCZE NIEWYSLANE nagrania, w jednej wybranej
+    // "Wyslij wszystkie" — wszystkie OPISANE i jeszcze niewyslane nagrania, kazde w swojej
     // kategorii, po kolei. Zatrzymuje sie na pierwszym bledzie (np. limit dzienny).
     private void sendAllToNs(File[] files) {
         if (!isLoggedIn()) { promptLogin("Aby wysłać nagrania do NewSpeech, zaloguj się."); return; }
-        java.util.Set<String> sent = sentFiles();
         java.util.List<File> todo = new java.util.ArrayList<>();
-        for (File f : files) if (!sent.contains(f.getName())) todo.add(f);
-        if (todo.isEmpty()) { Toast.makeText(this, "Wszystkie nagrania są już wysłane", Toast.LENGTH_SHORT).show(); return; }
-        pickCategory(cat -> new AlertDialog.Builder(this)
-                .setTitle("Wysłać " + todo.size() + " nagrań?")
-                .setMessage("Wszystkie niewysłane nagrania (" + todo.size() + ") trafią do NS w kategorii: " + cat)
-                .setPositiveButton("Wyślij", (d, w) -> sendNext(todo, 0, NsClient.categoryId(cat), 0))
+        int undescribed = 0;
+        for (File f : files) {
+            RecMeta m = RecMeta.load(this, f.getName());
+            if ("sent".equals(m.ns)) continue;
+            if (m.cat.isEmpty()) { undescribed++; continue; }
+            todo.add(f);
+        }
+        if (todo.isEmpty()) {
+            Toast.makeText(this, undescribed > 0 ? "Najpierw opisz nagrania (📝 Opisz)" : "Wszystkie nagrania są już wysłane", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String extra = undescribed > 0 ? "\n\n" + undescribed + " nagrań bez opisu zostanie pominiętych." : "";
+        new AlertDialog.Builder(this)
+                .setTitle("Wysłać " + todo.size() + " nagrań do NS?")
+                .setMessage("Każde nagranie trafi do NS w kategorii ze swojego opisu." + extra)
+                .setPositiveButton("Wyślij", (d, w) -> sendNext(todo, 0, 0))
                 .setNegativeButton(getString(R.string.btn_cancel), null)
-                .show());
+                .show();
     }
 
-    private void sendNext(java.util.List<File> todo, int idx, String catId, int okCount) {
-        if (catId == null) { Toast.makeText(this, "Nieznana kategoria", Toast.LENGTH_LONG).show(); return; }
+    private void sendNext(java.util.List<File> todo, int idx, int okCount) {
         if (idx >= todo.size()) {
-            statusText.setText("☁✓ Wysłano " + okCount + " nagrań do NS");
-            showRecordingsList();
+            setStatus("☁✓ Wysłano " + okCount + " nagrań do NS");
+            if ("recs".equals(currentPage)) renderRecsPage();
             return;
         }
         File f = todo.get(idx);
-        statusText.setText("☁ Wysyłanie " + (idx + 1) + "/" + todo.size() + "…");
+        String catId = NsClient.categoryId(RecMeta.load(this, f.getName()).cat);
+        if (catId == null) { sendNext(todo, idx + 1, okCount); return; }
+        setStatus("☁ Wysyłanie " + (idx + 1) + "/" + todo.size() + "…");
         NsClient.uploadRecording(nsToken(), nsEmail(), f, catId, r -> {
             if (r.ok) {
-                markSent(f);
-                sendNext(todo, idx + 1, catId, okCount + 1);
+                markNs(f, "sent");
+                sendNext(todo, idx + 1, okCount + 1);
             } else {
-                if (r.isAuthError()) markSessionExpired();
-                statusText.setText("☁✗ Wysłano " + okCount + "/" + todo.size() + " — zatrzymano: " + r.err);
+                if (r.isAuthError()) markSessionExpired(); else markNs(f, "error");
+                setStatus("☁✗ Wysłano " + okCount + "/" + todo.size() + " — zatrzymano: " + r.err);
                 Toast.makeText(this, "Zatrzymano wysyłkę: " + r.err, Toast.LENGTH_LONG).show();
-                showRecordingsList();
+                if ("recs".equals(currentPage)) renderRecsPage();
             }
         });
+    }
+
+    private void setStatus(String s) {
+        statusText.setText(s);
+    }
+
+    // ── OPIS NAGRANIA (ekran "ZAPISZ NAGRANIE") ──
+    // Po STOP: nowe nagranie -> pelny opis (wymagane: imie, kategoria, emocje, GPS),
+    // potem zmiana nazwy pliku jak w PitchRec i pytanie o wyslanie do NS.
+    private void describeNewRecording(File file) {
+        DescribeSheet.show(this, null, true, "ZAPISZ NAGRANIE", meta -> {
+            File renamed = RecMeta.renameWithMeta(this, file, meta);
+            if (file.getAbsolutePath().equals(lastSavedFilePath)) lastSavedFilePath = renamed.getAbsolutePath();
+            setStatus("💾 Zapisano: " + renamed.getName());
+            askSendAfterSave(renamed);
+        });
+    }
+
+    // Opisywanie istniejacego pliku z listy (przycisk "📝 Opisz") — wymagana tylko kategoria.
+    private void describeExisting(File file, boolean sendAfter) {
+        RecMeta existing = RecMeta.load(this, file.getName());
+        DescribeSheet.show(this, existing, false, "OPISZ NAGRANIE", meta -> {
+            File renamed = RecMeta.renameWithMeta(this, file, meta);
+            if ("recs".equals(currentPage)) renderRecsPage();
+            if (sendAfter && isLoggedIn()) sendToNs(renamed);
+        });
+    }
+
+    private void askSendAfterSave(File file) {
+        if (!isLoggedIn()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Wysłać do NewSpeech?")
+                .setMessage("Nagranie zostało zapisane. Wysłać je teraz do NS?")
+                .setPositiveButton("☁ Wyślij", (d, w) -> sendToNs(file))
+                .setNegativeButton("Później", null)
+                .show();
     }
 
     // ── ZAPIS USTAWIEN WYGLADU/DZWIEKU (przetrwaja zamkniecie aplikacji) ──
@@ -655,7 +731,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.waveColor = p.getInt("wave_color", LiveAudioData.waveColor);
         LiveAudioData.autoNormalize = p.getBoolean("auto_normalize", true);
         LiveAudioData.noiseGateEnabled = p.getBoolean("noise_gate", LiveAudioData.noiseGateEnabled);
-        keepScreenOnEnabled = p.getBoolean("keep_screen_on", false);
+        keepScreenOnEnabled = p.getBoolean("keep_screen_on", true); // domyslnie ekran NIE gasnie
+        selectedFormat = p.getString("format", "wav");
         applyKeepScreenOnSetting();
     }
 
@@ -670,138 +747,177 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putBoolean("auto_normalize", LiveAudioData.autoNormalize)
                 .putBoolean("noise_gate", LiveAudioData.noiseGateEnabled)
                 .putBoolean("keep_screen_on", keepScreenOnEnabled)
+                .putString("format", selectedFormat)
                 .apply();
         if (pitchWaveView != null) pitchWaveView.refreshStyle();
     }
 
-    private void showSettingsDialog() {
-        android.widget.LinearLayout container = new android.widget.LinearLayout(this);
-        container.setOrientation(android.widget.LinearLayout.VERTICAL);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
-        container.setPadding(pad, pad, pad, pad);
+    // ── STRONA USTAWIEN (jak #pg-set w PitchRec: karty .scard) ──
+    private void renderSettingsPage() {
+        android.widget.LinearLayout c = findViewById(R.id.setContent);
+        c.removeAllViews();
+        float d = getResources().getDisplayMetrics().density;
 
+        android.widget.LinearLayout titleRow = Ui.row(this);
+        titleRow.addView(pageTitle("USTAWIENIA"), new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        titleRow.addView(Ui.text(this, "v" + appVersion(), 11f, R.color.pr_muted));
+        c.addView(titleRow);
+
+        // Konto NewSpeech
+        android.widget.LinearLayout acc = Ui.card(this);
         accountSection = new android.widget.LinearLayout(this);
         accountSection.setOrientation(android.widget.LinearLayout.VERTICAL);
-        container.addView(accountSection);
+        acc.addView(accountSection);
+        c.addView(acc);
         refreshAccountSection();
         if (isLoggedIn()) verifySession(null);
 
-        TextView formatLabel = new TextView(this);
-        formatLabel.setText("Format nagrywania:");
-        container.addView(formatLabel);
+        // Kafelki MAPA NAGRAN / NORMY
+        android.widget.LinearLayout tiles = Ui.row(this);
+        tiles.addView(tile("🗺", "MAPA NAGRAŃ", R.color.pr_accent, v -> comingSoon("Mapa nagrań")), Ui.weight(1f, 8 * d));
+        tiles.addView(tile("🎯", "NORMY", R.color.pr_text, v -> comingSoon("Normy")), Ui.weight(1f, 0));
+        c.addView(tiles);
 
-        android.widget.RadioGroup formatGroup = new android.widget.RadioGroup(this);
-        formatGroup.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        android.widget.RadioButton wavRadio = new android.widget.RadioButton(this);
-        wavRadio.setText("WAV");
-        android.widget.RadioButton mp3Radio = new android.widget.RadioButton(this);
-        mp3Radio.setText("MP3");
-        formatGroup.addView(wavRadio);
-        formatGroup.addView(mp3Radio);
-        wavRadio.setChecked("wav".equals(selectedFormat));
-        mp3Radio.setChecked("mp3".equals(selectedFormat));
-        wavRadio.setOnClickListener(v -> selectFormat("wav"));
-        mp3Radio.setOnClickListener(v -> selectFormat("mp3"));
-        container.addView(formatGroup);
-
-        android.widget.CheckBox noiseGateCheck = new android.widget.CheckBox(this);
-        noiseGateCheck.setText("Bramka szumów (tłumi cichy szum tła)");
-        noiseGateCheck.setChecked(LiveAudioData.noiseGateEnabled);
-        noiseGateCheck.setOnCheckedChangeListener((btn, checked) -> { LiveAudioData.noiseGateEnabled = checked; saveDawSettings(); });
-        container.addView(noiseGateCheck);
-
-        android.widget.CheckBox autoNormCheck = new android.widget.CheckBox(this);
-        autoNormCheck.setText("AUTO głośność 0 dB (po zapisie podgłaśnia ciche nagrania)");
-        autoNormCheck.setChecked(LiveAudioData.autoNormalize);
-        autoNormCheck.setOnCheckedChangeListener((btn, checked) -> { LiveAudioData.autoNormalize = checked; saveDawSettings(); });
-        container.addView(autoNormCheck);
-
-        android.widget.CheckBox keepScreenOnCheck = new android.widget.CheckBox(this);
-        keepScreenOnCheck.setText("Nie wygaszaj ekranu podczas nagrywania");
-        keepScreenOnCheck.setChecked(keepScreenOnEnabled);
-        keepScreenOnCheck.setOnCheckedChangeListener((btn, checked) -> {
-            keepScreenOnEnabled = checked;
-            applyKeepScreenOnSetting();
-            saveDawSettings();
-        });
-        container.addView(keepScreenOnCheck);
-
-        // Wybor jezyka aplikacji
-        TextView langLabel = new TextView(this);
-        langLabel.setText("Język / Language:");
-        container.addView(langLabel);
-
-        android.widget.RadioGroup langGroup = new android.widget.RadioGroup(this);
-        langGroup.setOrientation(android.widget.LinearLayout.VERTICAL);
-        String currentLang = getSavedLanguage(this);
-        String[][] languages = {
-                {"en", "English"}, {"pl", "Polski"}, {"sk", "Slovenčina"},
-                {"cs", "Čeština"}, {"de", "Deutsch"}, {"es", "Español"}
-        };
-        for (String[] lang : languages) {
-            android.widget.RadioButton rb = new android.widget.RadioButton(this);
-            rb.setText(lang[1]);
-            rb.setChecked(lang[0].equals(currentLang));
-            rb.setOnClickListener(v -> setLanguage(lang[0]));
-            langGroup.addView(rb);
+        // Jezyk
+        android.widget.LinearLayout lang = Ui.card(this);
+        lang.addView(Ui.label(this, "🌍 JĘZYK"));
+        String cur = getSavedLanguage(this);
+        String[][] langs = {{"pl", "🇵🇱 PL"}, {"en", "🇬🇧 EN"}, {"cs", "🇨🇿 CS"}, {"sk", "🇸🇰 SK"}, {"de", "🇩🇪 DE"}, {"es", "🇪🇸 ES"}};
+        android.widget.LinearLayout lr1 = Ui.row(this), lr2 = Ui.row(this);
+        for (int i = 0; i < langs.length; i++) {
+            String code = langs[i][0];
+            Button b = Ui.button(this, langs[i][1], code.equals(cur) ? R.color.pr_accent : R.color.pr_muted, false);
+            b.setOnClickListener(v -> { if (!code.equals(getSavedLanguage(this))) setLanguage(code); });
+            (i < 3 ? lr1 : lr2).addView(b, Ui.weight(1f, (i % 3 == 2) ? 0 : 6 * d));
         }
-        container.addView(langGroup);
+        lang.addView(lr1);
+        lang.addView(Ui.spacer(this, 6));
+        lang.addView(lr2);
+        c.addView(lang);
 
-        // Grubosc linii pitch
-        TextView pitchWidthLabel = new TextView(this);
-        pitchWidthLabel.setText("Grubość linii pitch:");
-        container.addView(pitchWidthLabel);
+        // Format + Glosnosc (dwie male karty obok siebie)
+        android.widget.LinearLayout fg = Ui.row(this);
+        fg.setGravity(android.view.Gravity.TOP);
+        android.widget.LinearLayout fmt = Ui.card(this);
+        fmt.addView(Ui.label(this, "FORMAT NAGRANIA"));
+        android.widget.LinearLayout fr = Ui.row(this);
+        Button wav = Ui.button(this, "WAV", "wav".equals(selectedFormat) ? R.color.pr_accent : R.color.pr_muted, false);
+        Button mp3 = Ui.button(this, "MP3", "mp3".equals(selectedFormat) ? R.color.pr_accent : R.color.pr_muted, false);
+        wav.setOnClickListener(v -> { selectFormat("wav"); saveDawSettings(); renderSettingsPage(); });
+        mp3.setOnClickListener(v -> { selectFormat("mp3"); saveDawSettings(); renderSettingsPage(); });
+        fr.addView(wav, Ui.weight(1f, 6 * d));
+        fr.addView(mp3, Ui.weight(1f, 0));
+        fmt.addView(fr);
+        fg.addView(fmt, Ui.weight(1f, 8 * d));
 
+        android.widget.LinearLayout vol = Ui.card(this);
+        vol.addView(Ui.label(this, "GŁOŚNOŚĆ WYNIKOWA"));
+        Button auto = Ui.button(this, LiveAudioData.autoNormalize ? "AUTO 0 dB ✓" : "AUTO 0 dB", LiveAudioData.autoNormalize ? R.color.pr_accent : R.color.pr_muted, false);
+        auto.setOnClickListener(v -> { LiveAudioData.autoNormalize = !LiveAudioData.autoNormalize; saveDawSettings(); renderSettingsPage(); });
+        vol.addView(auto);
+        TextView vi = Ui.text(this, LiveAudioData.autoNormalize ? "Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)" : "Wyłączone — nagranie zostaje bez zmian", 10f, R.color.pr_muted);
+        vi.setPadding(0, (int) (4 * d), 0, 0);
+        vol.addView(vi);
+        fg.addView(vol, Ui.weight(1f, 0));
+        c.addView(fg);
+
+        // Wyglad DAW
+        android.widget.LinearLayout daw = Ui.card(this);
+        daw.addView(Ui.label(this, "🎨 WYGLĄD DAW"));
+        TextView pitchWidthLabel = Ui.text(this, String.format(Locale.getDefault(), "Grubość linii pitch: %.0f", LiveAudioData.pitchLineWidthDp), 13f, R.color.pr_text);
+        daw.addView(pitchWidthLabel);
         SliderView pitchWidthSlider = new SliderView(this);
         android.widget.LinearLayout.LayoutParams sliderParams = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * getResources().getDisplayMetrics().density));
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * d));
         pitchWidthSlider.setLayoutParams(sliderParams);
-        pitchWidthSlider.setValue((LiveAudioData.pitchLineWidthDp - 1f) / 9f); // zakres 1-10dp
-        pitchWidthSlider.setOnValueChangeListener(v -> { LiveAudioData.pitchLineWidthDp = 1f + v * 9f; saveDawSettings(); });
-        container.addView(pitchWidthSlider);
+        pitchWidthSlider.setValue((LiveAudioData.pitchLineWidthDp - 1f) / 9f);
+        pitchWidthSlider.setOnValueChangeListener(v -> {
+            LiveAudioData.pitchLineWidthDp = Math.round(1f + v * 9f);
+            pitchWidthLabel.setText(String.format(Locale.getDefault(), "Grubość linii pitch: %.0f", LiveAudioData.pitchLineWidthDp));
+            saveDawSettings();
+        });
+        daw.addView(pitchWidthSlider);
+        addColorRow(daw, Ui.text(this, "Kolor linii pitch", 13f, R.color.pr_text), LiveAudioData.pitchLineColor, color -> { LiveAudioData.pitchLineColor = color; saveDawSettings(); });
 
-        // Kolor linii pitch — kwadracik pokazujacy aktualny kolor, klikniecie otwiera
-        // siatke 16 kolorow do wyboru.
-        TextView pitchColorLabel = new TextView(this);
-        pitchColorLabel.setText("Kolor linii pitch:");
-        addColorRow(container, pitchColorLabel, LiveAudioData.pitchLineColor, color -> { LiveAudioData.pitchLineColor = color; saveDawSettings(); });
-
-        // Grubosc siatki DAW
-        TextView gridWidthLabel = new TextView(this);
-        gridWidthLabel.setText(String.format(Locale.getDefault(), "Grubość siatki (poziome i pionowe): ×%.1f", LiveAudioData.gridLineWidthDp));
-        container.addView(gridWidthLabel);
-
-        // Jedna wspolna grubosc dla linii poziomych i pionowych, zakres 0.5 - 10
+        TextView gridWidthLabel = Ui.text(this, String.format(Locale.getDefault(), "Grubość siatki (poziome i pionowe): ×%.1f", LiveAudioData.gridLineWidthDp), 13f, R.color.pr_text);
+        daw.addView(gridWidthLabel);
         SliderView gridWidthSlider = new SliderView(this);
-        gridWidthSlider.setLayoutParams(sliderParams);
+        gridWidthSlider.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * d)));
         gridWidthSlider.setValue((LiveAudioData.gridLineWidthDp - 0.5f) / 9.5f);
         gridWidthSlider.setOnValueChangeListener(v -> {
             LiveAudioData.gridLineWidthDp = Math.round((0.5f + v * 9.5f) * 2f) / 2f; // krok 0,5
             gridWidthLabel.setText(String.format(Locale.getDefault(), "Grubość siatki (poziome i pionowe): ×%.1f", LiveAudioData.gridLineWidthDp));
             saveDawSettings();
         });
-        container.addView(gridWidthSlider);
+        daw.addView(gridWidthSlider);
+        addColorRow(daw, Ui.text(this, "Kolor siatki", 13f, R.color.pr_text), LiveAudioData.gridLineColor, color -> { LiveAudioData.gridLineColor = color; saveDawSettings(); });
+        addColorRow(daw, Ui.text(this, "Kolor tła DAW", 13f, R.color.pr_text), LiveAudioData.dawBackgroundColor, color -> { LiveAudioData.dawBackgroundColor = color; saveDawSettings(); });
+        addColorRow(daw, Ui.text(this, "Kolor fali", 13f, R.color.pr_text), LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
+        c.addView(daw);
 
-        TextView gridColorLabel = new TextView(this);
-        gridColorLabel.setText("Kolor siatki:");
-        addColorRow(container, gridColorLabel, LiveAudioData.gridLineColor, color -> { LiveAudioData.gridLineColor = color; saveDawSettings(); });
+        // Opcje nagrywania
+        android.widget.LinearLayout opt = Ui.card(this);
+        opt.addView(Ui.label(this, "⚙ NAGRYWANIE"));
+        opt.addView(toggleRow("Ekran nie gaśnie (wyłączony wygaszacz)", keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
+        opt.addView(toggleRow("Bramka szumów (tłumi cichy szum tła)", LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); }));
+        String gpsTxt = GpsHelper.hasPermission(this) ? "📍 Lokalizacja: zezwolono ✓" : "📍 Lokalizacja: brak zgody — dotknij, aby zezwolić";
+        TextView gpsRow = Ui.text(this, gpsTxt, 13f, GpsHelper.hasPermission(this) ? R.color.pr_text : R.color.pr_warn);
+        gpsRow.setPadding(0, (int) (10 * d), 0, (int) (6 * d));
+        gpsRow.setOnClickListener(v -> requestLocationPermission(this));
+        opt.addView(gpsRow);
+        c.addView(opt);
+        c.addView(Ui.spacer(this, 20));
+    }
 
-        TextView dawBgLabel = new TextView(this);
-        dawBgLabel.setText("Kolor tła DAW:");
-        addColorRow(container, dawBgLabel, LiveAudioData.dawBackgroundColor, color -> { LiveAudioData.dawBackgroundColor = color; saveDawSettings(); });
+    private android.widget.LinearLayout tile(String icon, String label, int colorRes, View.OnClickListener l) {
+        android.widget.LinearLayout t = Ui.card(this);
+        t.setGravity(android.view.Gravity.CENTER);
+        TextView i = Ui.text(this, icon, 26f, R.color.pr_text);
+        i.setGravity(android.view.Gravity.CENTER);
+        t.addView(i);
+        TextView lb = Ui.text(this, label, 11f, colorRes);
+        lb.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        lb.setGravity(android.view.Gravity.CENTER);
+        t.addView(lb);
+        t.setOnClickListener(l);
+        return t;
+    }
 
-        TextView waveColorLabel = new TextView(this);
-        waveColorLabel.setText("Kolor fali:");
-        addColorRow(container, waveColorLabel, LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
+    public interface BoolConsumer { void accept(boolean b); }
 
-        // Przewijane — ustawien (z kontem NS) jest wiecej niz miesci sie na ekranie
-        android.widget.ScrollView settingsScroll = new android.widget.ScrollView(this);
-        settingsScroll.addView(container);
-        new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.settings_title))
-                .setView(settingsScroll)
-                .setPositiveButton(getString(R.string.btn_close), null)
-                .show();
+    private android.widget.LinearLayout toggleRow(String text, boolean initial, BoolConsumer onChange) {
+        android.widget.LinearLayout r = Ui.row(this);
+        r.setPadding(0, (int) Ui.dp(this, 6), 0, (int) Ui.dp(this, 6));
+        TextView t = Ui.text(this, text, 13f, R.color.pr_text);
+        r.addView(t, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        final boolean[] state = {initial};
+        Button b = Ui.button(this, initial ? "ON" : "OFF", initial ? R.color.pr_accent : R.color.pr_muted, false);
+        b.setOnClickListener(v -> {
+            state[0] = !state[0];
+            onChange.accept(state[0]);
+            renderSettingsPage();
+        });
+        r.addView(b);
+        return r;
+    }
+
+    private void comingSoon(String name) {
+        new AlertDialog.Builder(this).setTitle(name)
+                .setMessage(name + " — w przygotowaniu, pojawi się w kolejnej wersji aplikacji.")
+                .setPositiveButton(getString(R.string.btn_close), null).show();
+    }
+
+    private String appVersion() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
+        catch (Exception e) { return "?"; }
+    }
+
+    // ── ZGODA NA LOKALIZACJE (GPS jak w PitchRec) ──
+    private static final int REQUEST_LOCATION_PERMISSION = 101;
+
+    public static void requestLocationPermission(android.app.Activity a) {
+        ActivityCompat.requestPermissions(a, new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_LOCATION_PERMISSION);
     }
 
     // Buduje jeden, estetyczny wiersz "Etykieta: [kwadrat koloru]" — zamiast etykiety i
@@ -835,7 +951,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         container.addView(row);
     }
 
-    private boolean keepScreenOnEnabled = false;
+    private boolean keepScreenOnEnabled = true;
 
     private void applyKeepScreenOnSetting() {
         if (keepScreenOnEnabled) {
@@ -851,6 +967,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             ActivityCompat.requestPermissions(this,
                     new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
             return;
+        }
+
+        // GPS jak w PitchRec: pozycja z czasu NAGRYWANIA (zapisywana w opisie i nazwie pliku)
+        GpsHelper.recordingFix = null;
+        if (GpsHelper.hasPermission(this)) {
+            GpsHelper.requestFix(this, loc -> { if (loc != null) GpsHelper.recordingFix = loc; });
+        } else if (!prefs().getBoolean("location_asked", false)) {
+            prefs().edit().putBoolean("location_asked", true).apply();
+            requestLocationPermission(this);
         }
 
         Intent intent = new Intent(this, BackgroundRecorderService.class);
@@ -887,6 +1012,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         zoomValueText.setText("8s");
         pitchWaveView.setZoomSeconds(8f);
         statusText.setText(getString(R.string.status_recording));
+        headerStatus.setText("● NAGRYWA");
+        headerStatus.setTextColor(getResources().getColor(R.color.pr_warn));
         pitchWaveView.postOnAnimation(redrawLoop);
     }
 
@@ -900,6 +1027,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setButtonEnabled(false);
         zoomSlider.setEnabled(true);
         statusText.setText(getString(R.string.status_processing));
+        headerStatus.setText("● ZAPIS…");
+        headerStatus.setTextColor(getResources().getColor(R.color.pr_accent));
     }
 
     private long pauseStartedAtMs = 0L;
@@ -912,6 +1041,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseStartedAtMs = System.currentTimeMillis(); // zapamiętujemy KIEDY zaczela sie pauza
         recordButton.setButtonText(getString(R.string.btn_resume));
         statusText.setText(getString(R.string.status_paused));
+        headerStatus.setText("● PAUZA");
+        headerStatus.setTextColor(getResources().getColor(R.color.pr_pause));
         playButton.setButtonEnabled(true);
         pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
     }
@@ -927,6 +1058,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pausedAccumMs += System.currentTimeMillis() - pauseStartedAtMs;
         recordButton.setButtonText(getString(R.string.btn_pause));
         statusText.setText(getString(R.string.status_recording));
+        headerStatus.setText("● NAGRYWA");
+        headerStatus.setTextColor(getResources().getColor(R.color.pr_warn));
         playButton.setButtonEnabled(false);
         pitchWaveView.resetPan(); // czysci biala linie (playhead) — niepotrzebna podczas nagrywania na zywo
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
@@ -969,6 +1102,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_LOCATION_PERMISSION) {
+            if (GpsHelper.hasPermission(this)) GpsHelper.requestFix(this, null);
+            if ("set".equals(currentPage)) renderSettingsPage();
+            return;
+        }
         if (requestCode == REQUEST_MIC_PERMISSION && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             startRecordingFlow();
@@ -992,6 +1130,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pitchWaveView.resetPan();
             pitchWaveView.invalidate();
             playButton.setButtonEnabled(true);
+            headerStatus.setText("● GOTOWY");
+            headerStatus.setTextColor(getResources().getColor(R.color.pr_muted));
+            // Jak w PitchRec: po STOP od razu ekran "ZAPISZ NAGRANIE" (opis nagrania)
+            if (lastSavedFilePath != null) describeNewRecording(new File(lastSavedFilePath));
         });
     }
 
@@ -1166,217 +1308,143 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         redrawHandler.post(playheadUpdateLoop);
     }
 
-    // Prosta lista zapisanych nagrań — kliknięcie wczytuje plik do wykresu i odtwarza od
-    // początku. Pełny ekran (jak "NAGRANIA" w PitchRec, z wysyłką/pobieraniem) to kolejny etap.
+    // ── STRONA NAGRANIA (jak #pg-recs w PitchRec) ──
     private static final int REQUEST_IMPORT_FILE = 200;
 
-    private android.app.AlertDialog[] recordingsDialogRef = new android.app.AlertDialog[1];
-
     private void showRecordingsList() {
-        // WAZNE: zamykamy PRZEDNIA instancje dialogu (jesli istnieje) przed pokazaniem
-        // nowej — bez tego, wywolanie showRecordingsList() po usunieciu/imporcie
-        // NAKLADALO nowy dialog NA STARY (ktory nadal byl otwarty, pokazujac NIEAKTUALNA
-        // liste), i klikniecie "Zamknij" na nowym ujawnialo stary, ze "usunietymi"
-        // wciaz widocznymi elementami.
-        if (recordingsDialogRef[0] != null) {
-            try { recordingsDialogRef[0].dismiss(); } catch (Exception e) { /* ignorowane */ }
-        }
-        File[] files = getFilesDir().listFiles((dir, name) -> name.endsWith(".wav") || name.endsWith(".mp3"));
-        if (files == null) files = new File[0];
-        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-        final File[] finalFiles = files;
-
-        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
-        android.widget.LinearLayout listContainer = new android.widget.LinearLayout(this);
-        listContainer.setOrientation(android.widget.LinearLayout.VERTICAL);
-        int pad = (int) (8 * getResources().getDisplayMetrics().density);
-        listContainer.setPadding(pad, pad, pad, pad);
-        float density = getResources().getDisplayMetrics().density;
-
-        // Wyslij wszystkie / Pobierz wszystkie — jak w PitchRec. Wyslij wszystkie wymaga
-        // logowania (kolejny etap); Pobierz wszystkie pakuje wszystkie nagrania do udostepnienia.
-        android.widget.LinearLayout topActionsRow = new android.widget.LinearLayout(this);
-        topActionsRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-
-        Button sendAllBtn = makeOutlinedButton(getString(R.string.btn_send_all), R.color.pr_purple, density);
-        sendAllBtn.setOnClickListener(v -> sendAllToNs(finalFiles));
-        android.widget.LinearLayout.LayoutParams sendAllParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        sendAllParams.rightMargin = (int) (6 * density);
-        sendAllBtn.setLayoutParams(sendAllParams);
-        topActionsRow.addView(sendAllBtn);
-
-        Button downloadAllBtn = makeOutlinedButton(getString(R.string.btn_download_all), R.color.pr_accent, density);
-        downloadAllBtn.setOnClickListener(v -> shareAllRecordings(finalFiles));
-        downloadAllBtn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        topActionsRow.addView(downloadAllBtn);
-
-        listContainer.addView(topActionsRow);
-
-        Button importBtn = new Button(this);
-        importBtn.setText(getString(R.string.btn_import_file));
-        importBtn.setMinWidth(0);
-        importBtn.setMinimumWidth(0);
-        importBtn.setTextColor(getResources().getColor(R.color.pr_accent));
-        importBtn.setBackgroundColor(getResources().getColor(R.color.pr_card));
-        importBtn.setOnClickListener(v -> importExternalFile());
-        listContainer.addView(importBtn);
-
-        android.app.AlertDialog[] dialogRef = recordingsDialogRef;
-
-        if (finalFiles.length == 0) {
-            TextView empty = new TextView(this);
-            empty.setText(getString(R.string.recordings_empty));
-            empty.setTextColor(getResources().getColor(R.color.pr_muted));
-            listContainer.addView(empty);
-        } else {
-            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d.M HH:mm", Locale.getDefault());
-            for (File f : finalFiles) {
-                listContainer.addView(buildRecordingCard(f, fmt, dialogRef));
-            }
-        }
-
-        // Naprawa "przezroczystosci" — bez jawnego, pelnego tla dialog w trybie
-        // pelnoekranowym mogl przepuszczac dotyk do ekranu pod nim.
-        scrollView.setBackgroundColor(getResources().getColor(R.color.pr_bg));
-        listContainer.setBackgroundColor(getResources().getColor(R.color.pr_bg));
-        scrollView.addView(listContainer);
-
-        dialogRef[0] = new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.recordings_title))
-                .setView(scrollView)
-                .setNegativeButton(getString(R.string.btn_close), null)
-                .show();
-        android.app.AlertDialog recsDialog = dialogRef[0];
-        // Pelny ekran (jak strona "NAGRANIA" w PitchRec) — domyslnie AlertDialog ma
-        // marginesy i nie wypelnia calego ekranu, wiec wymuszamy wymiary okna.
-        if (recsDialog.getWindow() != null) {
-            recsDialog.getWindow().setLayout(
-                    android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                    android.view.WindowManager.LayoutParams.MATCH_PARENT);
-        }
+        if ("recs".equals(currentPage)) renderRecsPage(); else showPage("recs");
     }
 
-    // Odpowiednik ".rec-item" z PitchRec (JS) — gorny wiersz: nazwa + kategoria (placeholder
-    // "bez opisu", kategorie to kolejny etap) + ikona NS; wiersz daty; wiersz 4 przyciskow
-    // (Opisz i wyslij / Otworz / Udostepnij / Usun) — dokladnie ta sama struktura, tylko
-    // "Wyslij do NS" jest na razie zablokowane (wymaga logowania, kolejny etap).
-    private android.widget.LinearLayout buildRecordingCard(File file, java.text.SimpleDateFormat fmt, android.app.AlertDialog[] dialogRef) {
-        float density = getResources().getDisplayMetrics().density;
-        int pad = (int) (10 * density);
-        int marginBottom = (int) (12 * density);
+    private void renderRecsPage() {
+        android.widget.LinearLayout c = findViewById(R.id.recsContent);
+        if (c == null) return;
+        c.removeAllViews();
+        float d = getResources().getDisplayMetrics().density;
+        File[] files = getFilesDir().listFiles((dir, name) -> name.endsWith(".wav") || name.endsWith(".mp3"));
+        if (files == null) files = new File[0];
+        java.util.Arrays.sort(files, (x, y) -> Long.compare(y.lastModified(), x.lastModified()));
+        final File[] finalFiles = files;
 
-        android.widget.LinearLayout card = new android.widget.LinearLayout(this);
-        card.setOrientation(android.widget.LinearLayout.VERTICAL);
-        card.setPadding((int) (12 * density), pad, (int) (12 * density), pad);
+        // Naglowek: ← NAGRANIA + ☁ Wyslij wszystkie
+        android.widget.LinearLayout head = Ui.row(this);
+        TextView back = Ui.text(this, "←", 22f, R.color.pr_muted);
+        back.setPadding(0, 0, (int) (12 * d), 0);
+        back.setOnClickListener(v -> showPage("daw"));
+        head.addView(back);
+        TextView title = pageTitle("NAGRANIA");
+        title.setPadding(0, 0, 0, 0);
+        head.addView(title, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (isLoggedIn()) {
+            Button sendAll = Ui.button(this, "☁ Wyślij wszystkie", R.color.pr_purple, false);
+            sendAll.setOnClickListener(v -> sendAllToNs(finalFiles));
+            head.addView(sendAll);
+        }
+        c.addView(head);
+        c.addView(Ui.spacer(this, 10));
 
-        android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
-        cardBg.setColor(getResources().getColor(R.color.pr_card));
-        cardBg.setCornerRadius(10 * density);
-        cardBg.setStroke((int) density, getResources().getColor(R.color.pr_border));
-        card.setBackground(cardBg);
+        android.widget.LinearLayout actions = Ui.row(this);
+        Button dlAll = Ui.button(this, "⬇ Pobierz wszystkie", R.color.pr_accent, false);
+        dlAll.setOnClickListener(v -> shareAllRecordings(finalFiles));
+        actions.addView(dlAll, Ui.weight(1f, 8 * d));
+        Button imp = Ui.button(this, "📁 Wgraj plik", R.color.pr_warn, false);
+        imp.setOnClickListener(v -> importExternalFile());
+        actions.addView(imp, Ui.weight(1f, 0));
+        c.addView(actions);
+        c.addView(Ui.spacer(this, 14));
 
-        // Wiersz gorny: nazwa + kategoria (pigulka) + chmurka + status
-        android.widget.LinearLayout topRow = new android.widget.LinearLayout(this);
-        topRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        if (finalFiles.length == 0) {
+            TextView empty = Ui.text(this, getString(R.string.recordings_empty), 13f, R.color.pr_muted);
+            empty.setGravity(android.view.Gravity.CENTER);
+            empty.setPadding(0, (int) (30 * d), 0, 0);
+            c.addView(empty);
+            return;
+        }
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d.M HH:mm", Locale.getDefault());
+        for (File f : finalFiles) c.addView(buildRecordingCard(f, fmt));
+    }
 
-        TextView nameView = new TextView(this);
-        String displayName = file.getName().replaceAll("\\.(wav|mp3)$", "");
-        if (displayName.length() > 22) displayName = displayName.substring(0, 20) + "…";
-        nameView.setText(displayName);
-        nameView.setTextColor(getResources().getColor(R.color.pr_text));
-        nameView.setTextSize(15f);
-        topRow.addView(nameView);
+    // Karta nagrania = .rec-item z PitchRec: nazwa + kategoria (albo "bez opisu") + chmurka NS,
+    // notatka + data, przyciski: [📝 Opisz (i wyslij) | ☁ Wyslij NS] [▶ DAW] [⬇] [✕ Usun].
+    private android.widget.LinearLayout buildRecordingCard(File file, java.text.SimpleDateFormat fmt) {
+        float d = getResources().getDisplayMetrics().density;
+        RecMeta meta = RecMeta.load(this, file.getName());
+        boolean described = !meta.cat.isEmpty();
+        boolean logged = isLoggedIn();
 
-        TextView catBadge = new TextView(this);
-        catBadge.setText("  " + getString(R.string.no_category) + "  ");
-        catBadge.setTextSize(11f);
-        catBadge.setTextColor(getResources().getColor(R.color.pr_purple));
-        android.graphics.drawable.GradientDrawable catBg = new android.graphics.drawable.GradientDrawable();
-        catBg.setColor(0x335856D6);
-        catBg.setCornerRadius(12 * density);
-        catBadge.setBackground(catBg);
-        topRow.addView(catBadge);
+        android.widget.LinearLayout card = Ui.card(this);
 
-        TextView nsIcon = new TextView(this);
-        String fmtLabel = file.getName().endsWith(".mp3") ? "MP3" : "WAV";
-        boolean wasSent = sentFiles().contains(file.getName());
-        nsIcon.setText((wasSent ? "  ☁✓ " : "  ☁ ") + fmtLabel);
-        nsIcon.setTextColor(getResources().getColor(wasSent ? R.color.pr_accent : R.color.pr_muted));
-        nsIcon.setTextSize(11f);
-        topRow.addView(nsIcon);
+        android.widget.LinearLayout top = Ui.row(this);
+        TextView name = Ui.text(this, file.getName(), 13f, R.color.pr_text);
+        name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        name.setMaxLines(2);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        top.addView(name, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        card.addView(topRow);
+        TextView cat = Ui.text(this, described ? meta.cat : "bez opisu", 10f, described ? R.color.pr_purple : R.color.pr_pause);
+        cat.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        cat.setPadding((int) (7 * d), (int) (2 * d), (int) (7 * d), (int) (2 * d));
+        int catColor = getResources().getColor(described ? R.color.pr_purple : R.color.pr_pause);
+        cat.setBackground(Ui.rounded((catColor & 0x00FFFFFF) | 0x22000000, 0, 0, 5 * d));
+        android.widget.LinearLayout.LayoutParams catLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        catLp.leftMargin = (int) (8 * d);
+        top.addView(cat, catLp);
 
-        // Wiersz autor + data (na razie "Ja" jako placeholder — prawdziwy autor po
-        // zalogowaniu, kolejny etap).
-        android.widget.LinearLayout metaRow = new android.widget.LinearLayout(this);
-        metaRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        String cloud = "sent".equals(meta.ns) ? "☁✓" : "error".equals(meta.ns) ? "☁✗" : "☁";
+        int cloudCol = "sent".equals(meta.ns) ? R.color.pr_accent : "error".equals(meta.ns) ? R.color.pr_warn : R.color.pr_muted;
+        TextView ns = Ui.text(this, cloud, 16f, cloudCol);
+        ns.setPadding((int) (8 * d), 0, 0, 0);
+        top.addView(ns);
+        card.addView(top);
 
-        TextView authorView = new TextView(this);
-        authorView.setText(getString(R.string.author_placeholder));
-        authorView.setTextColor(getResources().getColor(R.color.pr_muted));
-        authorView.setTextSize(12f);
-        metaRow.addView(authorView);
-
-        TextView dateView = new TextView(this);
-        dateView.setText("   " + fmt.format(new java.util.Date(file.lastModified())));
-        dateView.setTextColor(getResources().getColor(R.color.pr_muted));
-        dateView.setTextSize(12f);
-        metaRow.addView(dateView);
-
+        android.widget.LinearLayout metaRow = Ui.row(this);
+        metaRow.setPadding(0, (int) (4 * d), 0, 0);
+        String noteTxt = meta.note;
+        if (!meta.name.isEmpty()) noteTxt = meta.name + (noteTxt.isEmpty() ? "" : " — " + noteTxt);
+        TextView note = Ui.text(this, noteTxt, 11f, R.color.pr_muted);
+        note.setMaxLines(1);
+        note.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        metaRow.addView(note, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        metaRow.addView(Ui.text(this, fmt.format(new java.util.Date(file.lastModified())), 10f, R.color.pr_muted));
         card.addView(metaRow);
 
-        // Wiersz przyciskow — 4, jak w PitchRec: Wyslij NS / DAW / pobierz / Usun.
-        android.widget.LinearLayout btnRow = new android.widget.LinearLayout(this);
-        btnRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-        int btnMarginEnd = (int) (6 * density);
-
-        Button sendBtn = makeOutlinedButton(getString(R.string.btn_send_ns), R.color.pr_purple, density);
-        sendBtn.setOnClickListener(v -> sendToNs(file));
-        android.widget.LinearLayout.LayoutParams sendParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        sendParams.rightMargin = btnMarginEnd;
-        sendBtn.setLayoutParams(sendParams);
-        btnRow.addView(sendBtn);
-
-        Button playBtn = makeOutlinedButton(getString(R.string.btn_daw_short), R.color.pr_accent, density);
-        playBtn.setOnClickListener(v -> {
-            if (dialogRef[0] != null) dialogRef[0].dismiss();
+        android.widget.LinearLayout btns = Ui.row(this);
+        btns.setPadding(0, (int) (10 * d), 0, 0);
+        if (!described) {
+            Button desc = Ui.button(this, logged ? "📝 Opisz i wyślij" : "📝 Opisz", R.color.pr_pause, true);
+            desc.setOnClickListener(v -> describeExisting(file, logged));
+            btns.addView(desc, Ui.weight(1.3f, 6 * d));
+        } else if (logged) {
+            Button send = Ui.button(this, "sent".equals(meta.ns) ? "☁ Wyślij ponownie" : "☁ Wyślij NS", R.color.pr_purple, false);
+            send.setOnClickListener(v -> sendToNs(file));
+            btns.addView(send, Ui.weight(1.3f, 6 * d));
+        }
+        Button daw = Ui.button(this, "▶ DAW", R.color.pr_purple, false);
+        daw.setOnClickListener(v -> {
+            showPage("daw");
             loadAndDisplayFile(file);
             playFile(file.getAbsolutePath(), 0L);
         });
-        android.widget.LinearLayout.LayoutParams playParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        playParams.rightMargin = btnMarginEnd;
-        playBtn.setLayoutParams(playParams);
-        btnRow.addView(playBtn);
-
-        Button shareBtn = makeOutlinedButton("⬇", R.color.pr_accent, density);
-        shareBtn.setOnClickListener(v -> shareRecording(file));
-        android.widget.LinearLayout.LayoutParams shareParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 0.5f);
-        shareParams.rightMargin = btnMarginEnd;
-        shareBtn.setLayoutParams(shareParams);
-        btnRow.addView(shareBtn);
-
-        Button delBtn = makeOutlinedButton(getString(R.string.btn_delete_short), R.color.pr_warn, density);
-        delBtn.setOnClickListener(v -> new AlertDialog.Builder(this)
+        btns.addView(daw, Ui.weight(1f, 6 * d));
+        Button dl = Ui.button(this, "⬇", R.color.pr_accent, false);
+        dl.setOnClickListener(v -> shareRecording(file));
+        btns.addView(dl, Ui.weight(0.5f, 6 * d));
+        Button del = Ui.button(this, "✕ Usuń", R.color.pr_warn, false);
+        del.setOnClickListener(v -> new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.delete_confirm_title))
                 .setMessage(file.getName())
                 .setPositiveButton(getString(R.string.btn_delete), (d2, w2) -> {
                     file.delete();
+                    RecMeta.delete(this, file.getName());
                     Toast.makeText(this, getString(R.string.deleted_toast), Toast.LENGTH_SHORT).show();
-                    showRecordingsList();
+                    renderRecsPage();
                 })
                 .setNegativeButton(getString(R.string.btn_cancel), null)
                 .show());
-        delBtn.setLayoutParams(new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        btnRow.addView(delBtn);
-
-        card.addView(btnRow);
-
-        android.widget.LinearLayout.LayoutParams cardParams = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = marginBottom;
-        card.setLayoutParams(cardParams);
-
+        btns.addView(del, Ui.weight(1f, 0));
+        card.addView(btns);
+        // Opisane nagranie mozna tez edytowac — dotkniecie nazwy otwiera opis
+        name.setOnClickListener(v -> describeExisting(file, false));
         return card;
     }
 

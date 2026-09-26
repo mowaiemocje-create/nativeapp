@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Dokładne odwzorowanie zmiennych CSS z PitchRec (wariant ciemny) -->
-    <color name="pr_bg">#17171C</color>
-    <color name="pr_card">#232329</color>
-    <color name="pr_border">#33333C</color>
-    <color name="pr_accent">#F0973A</color>
-    <color name="pr_purple">#B8B8C4</color>
-    <color name="pr_warn">#FF6B5C</color>
-    <color name="pr_pause">#E0A438</color>
-    <color name="pr_text">#FFFFFF</color>
-    <color name="pr_muted">#8A8A94</color>
+    <!-- Dokladne odwzorowanie zmiennych CSS z PitchRec — wariant JASNY (:root).
+         Wariant ciemny w values-night (jak @media prefers-color-scheme:dark w PWA). -->
+    <color name="pr_bg">#F8F6F2</color>
+    <color name="pr_card">#FFFFFF</color>
+    <color name="pr_border">#E8E4DC</color>
+    <color name="pr_accent">#E8820C</color>
+    <color name="pr_purple">#2C2C2C</color>
+    <color name="pr_warn">#D93025</color>
+    <color name="pr_pause">#C47800</color>
+    <color name="pr_text">#1A1A1A</color>
+    <color name="pr_muted">#888880</color>
     <color name="pr_thumb">#FF9500</color>
+    <color name="pr_btn_bg">#FFFFFF</color>
+    <color name="pr_btn_border">#E8E4DC</color>
     <color name="ic_launcher_background">#000000</color>
 </resources>

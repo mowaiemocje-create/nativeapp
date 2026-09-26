@@ -42,14 +42,14 @@ public class LiveAudioData {
     // odczytu w BackgroundRecorderService. Wczesniej suwak TYLKO zmienial wyswietlany tekst,
     // nigdy faktycznie nie wplywal na dzwiek — to byl prawdziwy blad.
     public static volatile float gainMultiplier = 1f;
-    public static volatile float pitchLineWidthDp = 4f;
-    public static volatile int pitchLineColor = 0xFFFF3B30; // czerwony (ARGB)
+    public static volatile float pitchLineWidthDp = 3f;
+    public static volatile int pitchLineColor = 0xFFFFE600; // zolty jak w PitchRec (ARGB)
     public static volatile float gridLineWidthDp = 1f; // wspolna grubosc linii poziomych i pionowych (0.5-10)
     // AUTO 0 dB — po Stop nagranie jest podglasniane do 0 dB (szczyt -0,1 dBFS)
     public static volatile boolean autoNormalize = true;
-    public static volatile int gridLineColor = 0x20FFFFFF; // ARGB, domyslnie subtelny
-    public static volatile int dawBackgroundColor = 0xFF1A1A1A; // ARGB, tlo wykresu DAW
-    public static volatile int waveColor = 0xFF00E000; // ARGB, kolor fali (obwiedni amplitudy)
+    public static volatile int gridLineColor = 0x4DFFFFFF; // ARGB, domyslnie subtelny
+    public static volatile int dawBackgroundColor = 0xFF050510; // ARGB, tlo wykresu DAW
+    public static volatile int waveColor = 0xFFFFB23C; // ARGB, kolor fali (obwiedni amplitudy)
 
     // Bramka szumów — jeśli włączona, próbki o RMS poniżej progu są wyciszane (ustawiane
     // na zero) przed zapisem/analizą. Domyślnie wyłączona.
