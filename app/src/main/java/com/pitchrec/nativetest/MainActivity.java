@@ -147,6 +147,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         loadDawSettings();
         updateNavForLogin();
+        setupLoginOnlyNav();
+        if (isLoggedIn()) {
+            NsClient.loadCategories(nsToken(), nsEmail());
+            verifySession(null);
+        }
 
         gainSlider.setValue(0.65f); // +6dB domyslnie w zakresie -20/+20
         gainSlider.setOnValueChangeListener(v -> {
@@ -339,21 +344,304 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     // ── LOGOWANIE / MENU ──
-    // Korekta, Dziennik i Statystyki wymagaja konta NewSpeech — bez zalogowania sa UKRYTE
-    // (nie tylko wyszarzone). Logowanie w aplikacji natywnej to kolejny etap; gdy powstanie,
-    // wystarczy zapisac token pod kluczem "ns_token" i wywolac updateNavForLogin().
+    // Korekta, Dziennik i Statystyki wymagaja konta NewSpeech — bez zalogowania sa UKRYTE.
+    // Po zalogowaniu (Ustawienia -> Konto NewSpeech) pojawiaja sie w dolnym menu.
+    private android.content.SharedPreferences prefs() {
+        return getSharedPreferences("app_settings", MODE_PRIVATE);
+    }
+    private String nsToken() { return prefs().getString("ns_token", null); }
+    private String nsEmail() { return prefs().getString("ns_email", ""); }
+    private String nsUserId() { return prefs().getString("ns_user_id", ""); }
+
     private boolean isLoggedIn() {
-        String tok = getSharedPreferences("app_settings", MODE_PRIVATE).getString("ns_token", null);
+        String tok = nsToken();
         return tok != null && !tok.trim().isEmpty();
     }
 
+    // Stan sesji do wyswietlenia: "none" | "checking" | "ok" | "expired" | "offline"
+    private String nsAuthState = "none";
+    private long nsAuthCheckedAt = 0L;
+
     private void updateNavForLogin() {
-        int vis = isLoggedIn() ? View.VISIBLE : View.GONE;
+        boolean logged = isLoggedIn();
+        int vis = logged ? View.VISIBLE : View.GONE;
         int[] ids = {R.id.correctionNavButton, R.id.diaryNavButton, R.id.statsNavButton};
         for (int id : ids) {
             View b = findViewById(id);
-            if (b != null) b.setVisibility(vis);
+            if (b != null) {
+                b.setVisibility(vis);
+                b.setEnabled(logged);
+                if (b instanceof TextView) ((TextView) b).setTextColor(getResources().getColor(R.color.pr_accent));
+            }
         }
+        if (!logged && !"expired".equals(nsAuthState)) nsAuthState = "none";
+    }
+
+    private void setupLoginOnlyNav() {
+        View corr = findViewById(R.id.correctionNavButton);
+        View diary = findViewById(R.id.diaryNavButton);
+        View stats = findViewById(R.id.statsNavButton);
+        if (corr != null) corr.setOnClickListener(v -> openLoginOnlySection("Korekta"));
+        if (diary != null) diary.setOnClickListener(v -> openLoginOnlySection("Dziennik"));
+        if (stats != null) stats.setOnClickListener(v -> openLoginOnlySection("Statystyki"));
+    }
+
+    // Wejscie do sekcji wymagajacej konta: najpierw sprawdzamy sesje (jak w PWA) —
+    // wygasla sesja = czytelny komunikat i przejscie do logowania, nie pusty ekran.
+    private void openLoginOnlySection(String name) {
+        if (!isLoggedIn()) { promptLogin("Aby otworzyć sekcję " + name + ", zaloguj się do NewSpeech."); return; }
+        verifySession(state -> {
+            if ("ok".equals(state)) {
+                new AlertDialog.Builder(this)
+                        .setTitle(name)
+                        .setMessage("Jesteś zalogowany ✓\n\nSekcja " + name + " jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.")
+                        .setPositiveButton(getString(R.string.btn_close), null)
+                        .show();
+            } else if ("expired".equals(state)) {
+                promptLogin("Twoja sesja NewSpeech wygasła. Zaloguj się ponownie.");
+            } else {
+                new AlertDialog.Builder(this)
+                        .setTitle("Brak połączenia z NewSpeech")
+                        .setMessage("Nie udało się połączyć z serwerem NewSpeech. Sprawdź internet i spróbuj ponownie.")
+                        .setPositiveButton(getString(R.string.btn_close), null)
+                        .show();
+            }
+        });
+    }
+
+    private void promptLogin(String message) {
+        new AlertDialog.Builder(this)
+                .setTitle("Wymagane logowanie")
+                .setMessage(message)
+                .setPositiveButton("Przejdź do logowania", (d, w) -> showSettingsDialog())
+                .setNegativeButton(getString(R.string.btn_cancel), null)
+                .show();
+    }
+
+    public interface AuthStateCallback { void onState(String state); }
+
+    // Sprawdza waznosc tokenu. Wynik "ok" trzymamy 5 minut, zeby nie pytac serwera przy
+    // kazdym kliknieciu. 401/403 = sesja wygasla -> token usuwany (email zostaje).
+    private void verifySession(AuthStateCallback cb) {
+        if (!isLoggedIn()) { if (cb != null) cb.onState(nsAuthState.equals("expired") ? "expired" : "none"); return; }
+        if ("ok".equals(nsAuthState) && System.currentTimeMillis() - nsAuthCheckedAt < 5 * 60 * 1000L) {
+            if (cb != null) cb.onState("ok");
+            return;
+        }
+        nsAuthState = "checking";
+        refreshAccountSection();
+        final String tokAtStart = nsToken();
+        NsClient.verify(tokAtStart, nsEmail(), nsUserId(), r -> {
+            if (tokAtStart == null || !tokAtStart.equals(nsToken())) { if (cb != null) cb.onState(nsAuthState); return; }
+            if (r.isAuthError()) {
+                markSessionExpired();
+            } else if (r.ok) {
+                nsAuthState = "ok";
+                nsAuthCheckedAt = System.currentTimeMillis();
+            } else {
+                nsAuthState = "offline";
+            }
+            refreshAccountSection();
+            if (cb != null) cb.onState(nsAuthState);
+        });
+    }
+
+    private void markSessionExpired() {
+        boolean was = isLoggedIn();
+        prefs().edit().remove("ns_token").putBoolean("ns_session_expired", true).apply();
+        nsAuthState = "expired";
+        nsAuthCheckedAt = 0L;
+        updateNavForLogin();
+        refreshAccountSection();
+        if (was) Toast.makeText(this, "Sesja NewSpeech wygasła — zaloguj się ponownie w Ustawieniach", Toast.LENGTH_LONG).show();
+    }
+
+    private void doLogin(String email, String password, TextView errView) {
+        if (email.isEmpty() || password.isEmpty()) { errView.setText("Wpisz email i hasło"); return; }
+        errView.setText("⏳ Łączenie…");
+        NsClient.login(email, password, r -> {
+            if (r.ok) {
+                prefs().edit()
+                        .putString("ns_token", r.token)
+                        .putString("ns_email", r.email)
+                        .putString("ns_user_id", r.userId == null ? "" : r.userId)
+                        .putBoolean("ns_session_expired", false)
+                        .apply();
+                nsAuthState = "ok";
+                nsAuthCheckedAt = System.currentTimeMillis();
+                NsClient.loadCategories(r.token, r.email);
+                updateNavForLogin();
+                refreshAccountSection();
+                Toast.makeText(this, "✓ Zalogowano do NewSpeech", Toast.LENGTH_SHORT).show();
+            } else {
+                errView.setText("✗ " + r.err);
+            }
+        });
+    }
+
+    private void doLogout() {
+        prefs().edit().remove("ns_token").remove("ns_user_id").putBoolean("ns_session_expired", false).apply();
+        nsAuthState = "none";
+        nsAuthCheckedAt = 0L;
+        updateNavForLogin();
+        refreshAccountSection();
+    }
+
+    // Sekcja "Konto NewSpeech" na gorze Ustawien — zawsze pokazuje JASNY stan:
+    // niezalogowany / sprawdzam / zalogowano / sesja wygasla / brak polaczenia.
+    private android.widget.LinearLayout accountSection;
+
+    private void refreshAccountSection() {
+        if (accountSection == null) return;
+        accountSection.removeAllViews();
+        float density = getResources().getDisplayMetrics().density;
+        TextView title = new TextView(this);
+        title.setText("👤 KONTO NEWSPEECH");
+        title.setTextSize(12f);
+        title.setTextColor(getResources().getColor(R.color.pr_muted));
+        accountSection.addView(title);
+
+        TextView status = new TextView(this);
+        status.setTextSize(14f);
+        status.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+        accountSection.addView(status);
+
+        if (isLoggedIn()) {
+            String st = nsAuthState;
+            if ("none".equals(st) || "expired".equals(st)) st = "checking";
+            if ("ok".equals(st)) {
+                status.setText("✓ Zalogowano: " + nsEmail());
+                status.setTextColor(getResources().getColor(R.color.pr_accent));
+            } else if ("offline".equals(st)) {
+                status.setText("⚠ Brak połączenia z NS — logowanie niepotwierdzone (" + nsEmail() + ")");
+                status.setTextColor(getResources().getColor(R.color.pr_warn));
+                Button retry = makeOutlinedButton("Spróbuj ponownie", R.color.pr_accent, density);
+                retry.setOnClickListener(v -> { nsAuthCheckedAt = 0L; verifySession(null); });
+                accountSection.addView(retry);
+            } else {
+                status.setText("⏳ Sprawdzam logowanie… (" + nsEmail() + ")");
+                status.setTextColor(getResources().getColor(R.color.pr_muted));
+            }
+            Button logout = makeOutlinedButton("Wyloguj", R.color.pr_warn, density);
+            logout.setOnClickListener(v -> doLogout());
+            accountSection.addView(logout);
+        } else {
+            boolean expired = "expired".equals(nsAuthState) || prefs().getBoolean("ns_session_expired", false);
+            status.setText(expired ? "⚠ Sesja wygasła — zaloguj się ponownie" : "Nie jesteś zalogowany");
+            status.setTextColor(getResources().getColor(expired ? R.color.pr_warn : R.color.pr_muted));
+
+            android.widget.EditText emailInput = new android.widget.EditText(this);
+            emailInput.setHint("Email");
+            emailInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            emailInput.setText(nsEmail());
+            accountSection.addView(emailInput);
+
+            android.widget.EditText passInput = new android.widget.EditText(this);
+            passInput.setHint("Hasło");
+            passInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            accountSection.addView(passInput);
+
+            TextView err = new TextView(this);
+            err.setTextColor(getResources().getColor(R.color.pr_warn));
+            err.setTextSize(12f);
+
+            Button login = makeOutlinedButton("Zaloguj", R.color.pr_accent, density);
+            login.setOnClickListener(v -> doLogin(emailInput.getText().toString().trim(), passInput.getText().toString(), err));
+            accountSection.addView(login);
+            accountSection.addView(err);
+        }
+
+        TextView note = new TextView(this);
+        note.setText("Po zalogowaniu pojawią się Korekta, Dziennik i Statystyki, a w Nagraniach zadziała „Wyślij NS”.");
+        note.setTextSize(11f);
+        note.setTextColor(getResources().getColor(R.color.pr_muted));
+        note.setPadding(0, (int) (4 * density), 0, (int) (14 * density));
+        accountSection.addView(note);
+    }
+
+    // ── WYSYLKA DO NS ──
+    private java.util.Set<String> sentFiles() {
+        return new java.util.HashSet<>(prefs().getStringSet("ns_sent_files", new java.util.HashSet<>()));
+    }
+
+    private void markSent(File f) {
+        java.util.Set<String> s = sentFiles();
+        s.add(f.getName());
+        prefs().edit().putStringSet("ns_sent_files", s).apply();
+    }
+
+    private void pickCategory(java.util.function.Consumer<String> onPicked) {
+        new AlertDialog.Builder(this)
+                .setTitle("Kategoria nagrania")
+                .setItems(NsClient.CATEGORIES, (d, which) -> onPicked.accept(NsClient.CATEGORIES[which]))
+                .setNegativeButton(getString(R.string.btn_cancel), null)
+                .show();
+    }
+
+    private void sendToNs(File file) {
+        if (!isLoggedIn()) { promptLogin("Aby wysłać nagranie do NewSpeech, zaloguj się."); return; }
+        pickCategory(cat -> {
+            String catId = NsClient.categoryId(cat);
+            if (catId == null) { Toast.makeText(this, "Nieznana kategoria: " + cat, Toast.LENGTH_LONG).show(); return; }
+            statusText.setText("☁ Wysyłanie do NS: " + file.getName() + "…");
+            NsClient.uploadRecording(nsToken(), nsEmail(), file, catId, r -> {
+                if (r.ok) {
+                    markSent(file);
+                    statusText.setText("☁✓ Wysłano do NS (" + cat + ")");
+                    Toast.makeText(this, "☁✓ Wysłano do NS", Toast.LENGTH_SHORT).show();
+                    showRecordingsList();
+                } else if (r.isAuthError()) {
+                    markSessionExpired();
+                    statusText.setText("⚠ Sesja wygasła — zaloguj się ponownie");
+                } else if (r.isLimitError()) {
+                    statusText.setText("⛔ Dzienny limit NOWYCH nagrań wyczerpany");
+                    new AlertDialog.Builder(this).setTitle("Limit nagrań")
+                            .setMessage("Serwer NS: " + r.err + "\n\nDzienny limit dotyczy tylko nowych nagrań. Poprawki odrzuconych nagrań nie mają limitu (sekcja Korekta).")
+                            .setPositiveButton(getString(R.string.btn_close), null).show();
+                } else {
+                    statusText.setText("☁✗ NS: " + r.err);
+                    Toast.makeText(this, "Błąd wysyłki: " + r.err, Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+    }
+
+    // "Wyslij wszystkie" — wszystkie JESZCZE NIEWYSLANE nagrania, w jednej wybranej
+    // kategorii, po kolei. Zatrzymuje sie na pierwszym bledzie (np. limit dzienny).
+    private void sendAllToNs(File[] files) {
+        if (!isLoggedIn()) { promptLogin("Aby wysłać nagrania do NewSpeech, zaloguj się."); return; }
+        java.util.Set<String> sent = sentFiles();
+        java.util.List<File> todo = new java.util.ArrayList<>();
+        for (File f : files) if (!sent.contains(f.getName())) todo.add(f);
+        if (todo.isEmpty()) { Toast.makeText(this, "Wszystkie nagrania są już wysłane", Toast.LENGTH_SHORT).show(); return; }
+        pickCategory(cat -> new AlertDialog.Builder(this)
+                .setTitle("Wysłać " + todo.size() + " nagrań?")
+                .setMessage("Wszystkie niewysłane nagrania (" + todo.size() + ") trafią do NS w kategorii: " + cat)
+                .setPositiveButton("Wyślij", (d, w) -> sendNext(todo, 0, NsClient.categoryId(cat), 0))
+                .setNegativeButton(getString(R.string.btn_cancel), null)
+                .show());
+    }
+
+    private void sendNext(java.util.List<File> todo, int idx, String catId, int okCount) {
+        if (catId == null) { Toast.makeText(this, "Nieznana kategoria", Toast.LENGTH_LONG).show(); return; }
+        if (idx >= todo.size()) {
+            statusText.setText("☁✓ Wysłano " + okCount + " nagrań do NS");
+            showRecordingsList();
+            return;
+        }
+        File f = todo.get(idx);
+        statusText.setText("☁ Wysyłanie " + (idx + 1) + "/" + todo.size() + "…");
+        NsClient.uploadRecording(nsToken(), nsEmail(), f, catId, r -> {
+            if (r.ok) {
+                markSent(f);
+                sendNext(todo, idx + 1, catId, okCount + 1);
+            } else {
+                if (r.isAuthError()) markSessionExpired();
+                statusText.setText("☁✗ Wysłano " + okCount + "/" + todo.size() + " — zatrzymano: " + r.err);
+                Toast.makeText(this, "Zatrzymano wysyłkę: " + r.err, Toast.LENGTH_LONG).show();
+                showRecordingsList();
+            }
+        });
     }
 
     // ── ZAPIS USTAWIEN WYGLADU/DZWIEKU (przetrwaja zamkniecie aplikacji) ──
@@ -391,6 +679,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         container.setOrientation(android.widget.LinearLayout.VERTICAL);
         int pad = (int) (16 * getResources().getDisplayMetrics().density);
         container.setPadding(pad, pad, pad, pad);
+
+        accountSection = new android.widget.LinearLayout(this);
+        accountSection.setOrientation(android.widget.LinearLayout.VERTICAL);
+        container.addView(accountSection);
+        refreshAccountSection();
+        if (isLoggedIn()) verifySession(null);
 
         TextView formatLabel = new TextView(this);
         formatLabel.setText("Format nagrywania:");
@@ -500,9 +794,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         waveColorLabel.setText("Kolor fali:");
         addColorRow(container, waveColorLabel, LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
 
+        // Przewijane — ustawien (z kontem NS) jest wiecej niz miesci sie na ekranie
+        android.widget.ScrollView settingsScroll = new android.widget.ScrollView(this);
+        settingsScroll.addView(container);
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.settings_title))
-                .setView(container)
+                .setView(settingsScroll)
                 .setPositiveButton(getString(R.string.btn_close), null)
                 .show();
     }
@@ -902,7 +1199,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         topActionsRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
 
         Button sendAllBtn = makeOutlinedButton(getString(R.string.btn_send_all), R.color.pr_purple, density);
-        sendAllBtn.setOnClickListener(v -> Toast.makeText(this, getString(R.string.requires_login), Toast.LENGTH_LONG).show());
+        sendAllBtn.setOnClickListener(v -> sendAllToNs(finalFiles));
         android.widget.LinearLayout.LayoutParams sendAllParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         sendAllParams.rightMargin = (int) (6 * density);
         sendAllBtn.setLayoutParams(sendAllParams);
@@ -1002,8 +1299,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         TextView nsIcon = new TextView(this);
         String fmtLabel = file.getName().endsWith(".mp3") ? "MP3" : "WAV";
-        nsIcon.setText("  ☁ " + fmtLabel);
-        nsIcon.setTextColor(getResources().getColor(R.color.pr_muted));
+        boolean wasSent = sentFiles().contains(file.getName());
+        nsIcon.setText((wasSent ? "  ☁✓ " : "  ☁ ") + fmtLabel);
+        nsIcon.setTextColor(getResources().getColor(wasSent ? R.color.pr_accent : R.color.pr_muted));
         nsIcon.setTextSize(11f);
         topRow.addView(nsIcon);
 
@@ -1034,7 +1332,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         int btnMarginEnd = (int) (6 * density);
 
         Button sendBtn = makeOutlinedButton(getString(R.string.btn_send_ns), R.color.pr_purple, density);
-        sendBtn.setOnClickListener(v -> Toast.makeText(this, getString(R.string.requires_login), Toast.LENGTH_LONG).show());
+        sendBtn.setOnClickListener(v -> sendToNs(file));
         android.widget.LinearLayout.LayoutParams sendParams = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         sendParams.rightMargin = btnMarginEnd;
         sendBtn.setLayoutParams(sendParams);
