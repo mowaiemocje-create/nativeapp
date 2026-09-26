@@ -429,6 +429,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (!page.equals(currentPage)) return;
             if ("ok".equals(state) && "fix".equals(page)) {
                 renderFixPage(false);
+            } else if ("ok".equals(state) && "diary".equals(page)) {
+                new DiaryPage(this, c, diaryHost()).render();
+            } else if ("ok".equals(state) && "stats".equals(page)) {
+                new StatsPage(this, c, new StatsPage.Host() {
+                    public String token() { return nsToken(); }
+                    public String email() { return nsEmail(); }
+                    public boolean isCurrent() { return "stats".equals(currentPage); }
+                }).render();
             } else if ("ok".equals(state)) {
                 msg.setText("Jesteś zalogowany ✓\n\nSekcja " + title + " jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.");
                 msg.setTextColor(getResources().getColor(R.color.pr_text));
@@ -440,6 +448,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 msg.setTextColor(getResources().getColor(R.color.pr_warn));
             }
         });
+    }
+
+    private DiaryPage.Host diaryHost() {
+        return new DiaryPage.Host() {
+            public String token() { return nsToken(); }
+            public String email() { return nsEmail(); }
+            public String studentName() { return prefs().getString("student_name", ""); }
+            public void onAuthExpired() {
+                markSessionExpired();
+                showPage("daw");
+                promptLogin("Twoja sesja NewSpeech wygasła. Zaloguj się ponownie.");
+            }
+            public boolean isCurrent() { return "diary".equals(currentPage); }
+        };
     }
 
     private TextView pageTitle(String t) {

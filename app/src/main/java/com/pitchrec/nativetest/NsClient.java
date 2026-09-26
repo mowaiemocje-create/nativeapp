@@ -279,6 +279,59 @@ public class NsClient {
         });
     }
 
+
+    // ── Ogolne zapytanie do NS (JSON / formularz) — uzywane przez Dziennik i Statystyki ──
+    public static void request(String method, String path, String token, String email, String contentType, byte[] body, Callback cb) {
+        runAsync(() -> {
+            HttpURLConnection c = open(path, method, token, email);
+            c.setReadTimeout(30000);
+            if (body != null) {
+                c.setDoOutput(true);
+                if (contentType != null) c.setRequestProperty("Content-Type", contentType);
+                try (OutputStream os = c.getOutputStream()) { os.write(body); }
+            }
+            return finish(c);
+        }, cb);
+    }
+
+    // Zapytanie do naszego nowego backendu (Cloudflare Worker "newspeech-backend")
+    public static void backend(String method, String pathAndQuery, String jsonBody, Callback cb) {
+        runAsync(() -> {
+            HttpURLConnection c = (HttpURLConnection) new URL("https://newspeech-backend.mowaiemocje.workers.dev" + pathAndQuery).openConnection();
+            c.setRequestMethod(method);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(30000);
+            c.setRequestProperty("Accept", "application/json");
+            if (jsonBody != null) {
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json");
+                try (OutputStream os = c.getOutputStream()) { os.write(jsonBody.getBytes(StandardCharsets.UTF_8)); }
+            }
+            return finish(c);
+        }, cb);
+    }
+
+    // Wyslanie formularza (np. Google Forms) — "wyslij i zapomnij", bledy ignorowane.
+    public static void postForm(String url, String body) {
+        NET.execute(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                c.setRequestMethod("POST");
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(20000);
+                c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                try (OutputStream os = c.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
+                c.getResponseCode();
+                c.disconnect();
+            } catch (Exception e) { /* ignorowane */ }
+        });
+    }
+
+    public static String enc(String s) {
+        try { return java.net.URLEncoder.encode(s == null ? "" : s, "UTF-8"); } catch (Exception e) { return ""; }
+    }
+
     private static void writeFilePart(DataOutputStream out, String boundary, String field, File f, String mime) throws Exception {
         out.writeBytes("--" + boundary + "\r\n");
         out.write(("Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + f.getName() + "\"\r\n").getBytes(StandardCharsets.UTF_8));
