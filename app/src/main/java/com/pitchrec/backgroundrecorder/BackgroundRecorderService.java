@@ -252,6 +252,8 @@ public class BackgroundRecorderService extends Service {
 
                                     float freq = YinPitchDetector.detect(yinWindow);
                                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
+                                    // Wykrywanie glosu czlowieka i pauz (VAD) — patrz VadDetector
+                                    LiveAudioData.analyzeVoice(windowStartSample + YIN_WINDOW, rms, freq);
 
                                     if (freq > 70 && freq < 1000 && rms > 0.006f) {
                                         // Wygladzanie wykladnicze (fSm), dokladnie jak w

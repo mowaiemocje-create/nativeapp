@@ -229,6 +229,17 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         setupBottomNav();
         showPage("daw");
+        // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
+        statusText.setOnClickListener(v -> {
+            String[] fx = loadFixTarget();
+            if (fx == null || isRecording) return;
+            new AlertDialog.Builder(this).setTitle("Anulować poprawkę?")
+                    .setMessage("Kolejne nagranie będzie zwykłym nagraniem, nie poprawką dla: " + fx[1])
+                    .setPositiveButton("Anuluj poprawkę", (d, w) -> { clearFixTarget(); setStatus(getString(R.string.status_ready)); })
+                    .setNegativeButton("Zostaw", null).show();
+        });
+        String[] fxStart = loadFixTarget();
+        if (fxStart != null) setStatus("🔄 Nagrywasz poprawkę dla: " + fxStart[1] + "  (dotknij, aby anulować)");
         autoGainButton.setOnClickListener(v -> toggleAutoGain());
         blackScreenButton.setOnClickListener(v -> showBlackScreen());
     }
@@ -416,7 +427,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(msg);
         verifySession(state -> {
             if (!page.equals(currentPage)) return;
-            if ("ok".equals(state)) {
+            if ("ok".equals(state) && "fix".equals(page)) {
+                renderFixPage(false);
+            } else if ("ok".equals(state)) {
                 msg.setText("Jesteś zalogowany ✓\n\nSekcja " + title + " jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.");
                 msg.setTextColor(getResources().getColor(R.color.pr_text));
             } else if ("expired".equals(state)) {
@@ -612,12 +625,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         String catId = NsClient.categoryId(meta.cat);
         if (catId == null) { Toast.makeText(this, "Nieznana kategoria: " + meta.cat, Toast.LENGTH_LONG).show(); return; }
-        setStatus("☁ Wysyłanie do NS…");
-        NsClient.uploadRecording(nsToken(), nsEmail(), file, catId, r -> {
+        boolean isFix = !meta.fixRecordId.isEmpty();
+        setStatus(isFix ? "☁ Wysyłanie poprawki…" : "☁ Wysyłanie do NS…");
+        NsClient.Callback cb = r -> {
             if (r.ok) {
                 markNs(file, "sent");
-                setStatus("☁✓ NS: wysłano (" + meta.cat + ")");
-                Toast.makeText(this, "☁✓ Wysłano do NS", Toast.LENGTH_SHORT).show();
+                setStatus(isFix ? "☁✓ Poprawka wysłana! Czeka na ocenę trenera." : "☁✓ NS: wysłano (" + meta.cat + ")");
+                Toast.makeText(this, isFix ? "☁✓ Poprawka wysłana" : "☁✓ Wysłano do NS", Toast.LENGTH_SHORT).show();
+                if (isFix) fixListCache = null;
+            } else if (isFix && r.isLimitError()) {
+                markNs(file, "error");
+                setStatus("⛔ Poprawka odrzucona z powodu limitu");
+                new AlertDialog.Builder(this).setTitle("Limit nagrań")
+                        .setMessage("Wysłanie poprawki nie powiodło się z powodu limitu nagrań (" + r.err + "). Poprawki powinny być możliwe bez limitu — jeśli to się powtarza, zgłoś to trenerowi.")
+                        .setPositiveButton(getString(R.string.btn_close), null).show();
             } else if (r.isAuthError()) {
                 markSessionExpired();
                 setStatus("⚠ Sesja wygasła — zaloguj się ponownie");
@@ -633,7 +654,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 Toast.makeText(this, "Błąd wysyłki: " + r.err, Toast.LENGTH_LONG).show();
             }
             if ("recs".equals(currentPage)) renderRecsPage();
-        });
+        };
+        if (isFix) NsClient.correctRecording(nsToken(), nsEmail(), file, meta.fixRecordId, catId, cb);
+        else NsClient.uploadRecording(nsToken(), nsEmail(), file, catId, cb);
     }
 
     // "Wyslij wszystkie" — wszystkie OPISANE i jeszcze niewyslane nagrania, kazde w swojej
@@ -668,10 +691,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             return;
         }
         File f = todo.get(idx);
-        String catId = NsClient.categoryId(RecMeta.load(this, f.getName()).cat);
+        RecMeta fm = RecMeta.load(this, f.getName());
+        String catId = NsClient.categoryId(fm.cat);
         if (catId == null) { sendNext(todo, idx + 1, okCount); return; }
         setStatus("☁ Wysyłanie " + (idx + 1) + "/" + todo.size() + "…");
-        NsClient.uploadRecording(nsToken(), nsEmail(), f, catId, r -> {
+        NsClient.Callback cb = r -> {
             if (r.ok) {
                 markNs(f, "sent");
                 sendNext(todo, idx + 1, okCount + 1);
@@ -681,7 +705,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 Toast.makeText(this, "Zatrzymano wysyłkę: " + r.err, Toast.LENGTH_LONG).show();
                 if ("recs".equals(currentPage)) renderRecsPage();
             }
-        });
+        };
+        if (!fm.fixRecordId.isEmpty()) NsClient.correctRecording(nsToken(), nsEmail(), f, fm.fixRecordId, catId, cb);
+        else NsClient.uploadRecording(nsToken(), nsEmail(), f, catId, cb);
     }
 
     private void setStatus(String s) {
@@ -692,11 +718,33 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Po STOP: nowe nagranie -> pelny opis (wymagane: imie, kategoria, emocje, GPS),
     // potem zmiana nazwy pliku jak w PitchRec i pytanie o wyslanie do NS.
     private void describeNewRecording(File file) {
-        DescribeSheet.show(this, null, true, "ZAPISZ NAGRANIE", meta -> {
+        String[] fix = loadFixTarget();
+        RecMeta init = new RecMeta();
+        String banner = null;
+        if (fix != null) {
+            init.cat = fix[1];
+            init.fixRecordId = fix[0];
+            banner = "🔄 Nagrywasz poprawkę dla: " + fix[1];
+            // zapamietujemy od razu na pliku — nawet "Zamknij" nie zgubi informacji, ze to poprawka
+            RecMeta pre = RecMeta.load(this, file.getName());
+            pre.fixRecordId = fix[0];
+            pre.save(this, file.getName());
+        }
+        final boolean isFix = fix != null;
+        DescribeSheet.show(this, init, true, isFix ? "ZAPISZ POPRAWKĘ" : "ZAPISZ NAGRANIE", banner, meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
             if (file.getAbsolutePath().equals(lastSavedFilePath)) lastSavedFilePath = renamed.getAbsolutePath();
-            setStatus("💾 Zapisano: " + renamed.getName());
-            askSendAfterSave(renamed);
+            if (isFix) {
+                clearFixTarget();
+                setStatus("💾 Poprawka zapisana (" + meta.cat + ")");
+                if (isLoggedIn()) sendToNs(renamed); // poprawka idzie od razu (PUT, bez limitu)
+            } else {
+                setStatus("💾 Zapisano (" + meta.cat + ")");
+                askSendAfterSave(renamed);
+            }
+        }, () -> {
+            if (isFix) clearFixTarget();
+            setStatus("💾 Zapisano bez opisu — opisz i wyślij w NAGRANIACH");
         });
     }
 
@@ -733,6 +781,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.noiseGateEnabled = p.getBoolean("noise_gate", LiveAudioData.noiseGateEnabled);
         keepScreenOnEnabled = p.getBoolean("keep_screen_on", true); // domyslnie ekran NIE gasnie
         selectedFormat = p.getString("format", "wav");
+        LiveAudioData.pauseMinS = p.getFloat("pause_min", 1.0f);
+        LiveAudioData.pauseMaxS = p.getFloat("pause_max", 2.5f);
         applyKeepScreenOnSetting();
     }
 
@@ -748,6 +798,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putBoolean("noise_gate", LiveAudioData.noiseGateEnabled)
                 .putBoolean("keep_screen_on", keepScreenOnEnabled)
                 .putString("format", selectedFormat)
+                .putFloat("pause_min", LiveAudioData.pauseMinS)
+                .putFloat("pause_max", LiveAudioData.pauseMaxS)
                 .apply();
         if (pitchWaveView != null) pitchWaveView.refreshStyle();
     }
@@ -821,6 +873,18 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         fg.addView(vol, Ui.weight(1f, 0));
         c.addView(fg);
 
+        // Pauzy — prawidlowy zakres (jak w PitchRec: MIN/MAX, regulacja 1-4 s co 0,5 s)
+        android.widget.LinearLayout pz = Ui.card(this);
+        pz.addView(Ui.label(this, "⏸ PAUZY — ZAKRES PRAWIDŁOWY"));
+        android.widget.LinearLayout pzRow = Ui.row(this);
+        pzRow.addView(pauseStepper("MIN", true), Ui.weight(1f, 10 * d));
+        pzRow.addView(pauseStepper("MAX", false), Ui.weight(1f, 0));
+        pz.addView(pzRow);
+        TextView pzInfo = Ui.text(this, String.format(Locale.US, "Pauza między porcjami mowy %.1f–%.1f s liczy się jako prawidłowa (regulacja 1–4 s)", LiveAudioData.pauseMinS, LiveAudioData.pauseMaxS), 10f, R.color.pr_muted);
+        pzInfo.setPadding(0, (int) (6 * d), 0, 0);
+        pz.addView(pzInfo);
+        c.addView(pz);
+
         // Wyglad DAW
         android.widget.LinearLayout daw = Ui.card(this);
         daw.addView(Ui.label(this, "🎨 WYGLĄD DAW"));
@@ -868,6 +932,148 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         opt.addView(gpsRow);
         c.addView(opt);
         c.addView(Ui.spacer(this, 20));
+    }
+
+    private android.widget.LinearLayout pauseStepper(String label, boolean isMin) {
+        android.widget.LinearLayout r = Ui.row(this);
+        r.addView(Ui.text(this, label, 11f, R.color.pr_muted));
+        Button minus = Ui.button(this, "−", R.color.pr_muted, false);
+        Button plus = Ui.button(this, "+", R.color.pr_accent, false);
+        float v = isMin ? LiveAudioData.pauseMinS : LiveAudioData.pauseMaxS;
+        TextView val = Ui.text(this, String.format(Locale.US, "%.1fs", v), 15f, R.color.pr_accent);
+        val.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        val.setGravity(android.view.Gravity.CENTER);
+        View.OnClickListener step = b -> {
+            float dir = b == plus ? 0.5f : -0.5f;
+            if (isMin) {
+                LiveAudioData.pauseMinS = Math.max(1f, Math.min(3.5f, LiveAudioData.pauseMinS + dir));
+                if (LiveAudioData.pauseMaxS < LiveAudioData.pauseMinS + 0.5f) LiveAudioData.pauseMaxS = LiveAudioData.pauseMinS + 0.5f;
+            } else {
+                LiveAudioData.pauseMaxS = Math.max(1.5f, Math.min(4f, LiveAudioData.pauseMaxS + dir));
+                if (LiveAudioData.pauseMinS > LiveAudioData.pauseMaxS - 0.5f) LiveAudioData.pauseMinS = LiveAudioData.pauseMaxS - 0.5f;
+            }
+            saveDawSettings();
+            renderSettingsPage();
+        };
+        minus.setOnClickListener(step);
+        plus.setOnClickListener(step);
+        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        r.addView(minus, new android.widget.LinearLayout.LayoutParams((int) Ui.dp(this, 40), (int) Ui.dp(this, 40)));
+        r.addView(val, lp);
+        r.addView(plus, new android.widget.LinearLayout.LayoutParams((int) Ui.dp(this, 40), (int) Ui.dp(this, 40)));
+        return r;
+    }
+
+    // ── KOREKTA (jak zakladka KOREKTA w PitchRec) ──
+    private java.util.List<NsClient.FixEntry> fixListCache = null;
+    private long fixListCacheAt = 0L;
+    private int fixShowCount = 10;
+
+    private void renderFixPage(boolean force) {
+        android.widget.LinearLayout c = findViewById(R.id.nsContent);
+        c.removeAllViews();
+        android.widget.LinearLayout head = Ui.row(this);
+        head.addView(pageTitle("KOREKTA"), new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button refresh = Ui.button(this, "↻", R.color.pr_muted, false);
+        refresh.setOnClickListener(v -> renderFixPage(true));
+        head.addView(refresh);
+        c.addView(head);
+        if (!force && fixListCache != null && System.currentTimeMillis() - fixListCacheAt < 120000) {
+            fillFixList(c, fixListCache);
+            return;
+        }
+        TextView loading = Ui.text(this, "⏳ Wczytywanie…", 14f, R.color.pr_muted);
+        c.addView(loading);
+        NsClient.fetchNeedsCorrection(nsToken(), nsEmail(), force, (list, err) -> {
+            if (!"fix".equals(currentPage)) return;
+            if ("AUTH".equals(err)) { markSessionExpired(); showPage("daw"); promptLogin("Twoja sesja NewSpeech wygasła. Zaloguj się ponownie."); return; }
+            if (err != null && list.isEmpty()) {
+                loading.setText("📡 " + err + "\nSprawdź internet i spróbuj ponownie (↻).");
+                loading.setTextColor(getResources().getColor(R.color.pr_warn));
+                return;
+            }
+            fixListCache = list;
+            fixListCacheAt = System.currentTimeMillis();
+            c.removeView(loading);
+            fillFixList(c, list);
+        });
+    }
+
+    private void fillFixList(android.widget.LinearLayout c, java.util.List<NsClient.FixEntry> list) {
+        float d = getResources().getDisplayMetrics().density;
+        if (list.isEmpty()) {
+            TextView e = Ui.text(this, "Brak nagrań do poprawy. Wszystko zaliczone albo czeka na pierwszą ocenę.", 14f, R.color.pr_muted);
+            e.setPadding(0, (int) (20 * d), 0, 0);
+            c.addView(e);
+            return;
+        }
+        int shown = Math.min(fixShowCount, list.size());
+        if (list.size() > 10) {
+            TextView info = Ui.text(this, "Pokazuję " + shown + " z " + list.size() + " — od najstarszych", 11f, R.color.pr_muted);
+            info.setGravity(android.view.Gravity.CENTER);
+            info.setPadding(0, 0, 0, (int) (10 * d));
+            c.addView(info);
+        }
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM.yyyy", Locale.getDefault());
+        for (int i = 0; i < shown; i++) {
+            NsClient.FixEntry fe = list.get(i);
+            android.widget.LinearLayout card = Ui.card(this);
+            card.setBackground(Ui.rounded(getResources().getColor(R.color.pr_card), getResources().getColor(R.color.pr_warn), d, 14 * d));
+            android.widget.LinearLayout top = Ui.row(this);
+            TextView cat = Ui.text(this, fe.categoryName, 15f, R.color.pr_text);
+            cat.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            top.addView(cat, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            TextView pill = Ui.text(this, "nie zaliczone", 10f, R.color.pr_warn);
+            pill.setPadding((int) (8 * d), (int) (2 * d), (int) (8 * d), (int) (2 * d));
+            pill.setBackground(Ui.rounded((getResources().getColor(R.color.pr_warn) & 0x00FFFFFF) | 0x26000000, 0, 0, 6 * d));
+            top.addView(pill);
+            card.addView(top);
+            if (fe.reviewedAt > 0) {
+                TextView dt = Ui.text(this, df.format(new java.util.Date(fe.reviewedAt * 1000L)), 11f, R.color.pr_muted);
+                dt.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
+                card.addView(dt);
+            }
+            if (fe.allGood) {
+                card.addView(Ui.text(this, "Wszystkie elementy techniki ocenione dobrze, ale całość nie została zaliczona. Częsty powód: nagranie było słabej jakości (zbyt cicho, szum, przerwa) i trener nie mógł go w pełni ocenić. Spróbuj nagrać jeszcze raz w spokojniejszym miejscu.", 12f, R.color.pr_muted));
+            } else if (!fe.weakText.isEmpty()) {
+                card.addView(Ui.text(this, "Słabe elementy:", 11f, R.color.pr_muted));
+                TextView wk = Ui.text(this, fe.weakText, 12f, R.color.pr_warn);
+                wk.setPadding(0, (int) (2 * d), 0, 0);
+                card.addView(wk);
+            }
+            card.addView(Ui.spacer(this, 10));
+            Button rec = Ui.button(this, "🎤 Nagraj poprawkę", R.color.pr_accent, true);
+            rec.setOnClickListener(v -> startFixRecording(fe.id, fe.categoryName));
+            card.addView(rec, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+            c.addView(card);
+        }
+        if (shown < list.size()) {
+            Button more = Ui.button(this, "Pokaż kolejne " + Math.min(10, list.size() - shown), R.color.pr_accent, false);
+            more.setOnClickListener(v -> { fixShowCount += 10; renderFixPage(false); });
+            c.addView(more);
+        }
+    }
+
+    // Tryb poprawki: zapamietany w ustawieniach (z czasem), zeby przetrwal np. zamkniecie
+    // aplikacji w trakcie nagrywania. Starszy niz 3 h jest ignorowany (bezpiecznik jak w PWA).
+    private void startFixRecording(String recordId, String catName) {
+        prefs().edit().putString("fix_record_id", recordId).putString("fix_cat", catName)
+                .putLong("fix_saved_at", System.currentTimeMillis()).apply();
+        showPage("daw");
+        setStatus("🔄 Nagrywasz poprawkę dla: " + catName + "  (dotknij, aby anulować)");
+        Toast.makeText(this, "Nagraj poprawkę — REC", Toast.LENGTH_SHORT).show();
+    }
+
+    private String[] loadFixTarget() {
+        android.content.SharedPreferences p = prefs();
+        String id = p.getString("fix_record_id", null);
+        if (id == null || id.isEmpty()) return null;
+        if (System.currentTimeMillis() - p.getLong("fix_saved_at", 0L) > 3 * 60 * 60 * 1000L) { clearFixTarget(); return null; }
+        return new String[]{id, p.getString("fix_cat", "")};
+    }
+
+    private void clearFixTarget() {
+        prefs().edit().remove("fix_record_id").remove("fix_cat").remove("fix_saved_at").apply();
     }
 
     private android.widget.LinearLayout tile(String icon, String label, int colorRes, View.OnClickListener l) {
@@ -1012,6 +1218,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         zoomValueText.setText("8s");
         pitchWaveView.setZoomSeconds(8f);
         statusText.setText(getString(R.string.status_recording));
+        String[] fxRec = loadFixTarget();
+        if (fxRec != null) statusText.setText("🔴 Nagrywasz poprawkę dla: " + fxRec[1]);
         headerStatus.setText("● NAGRYWA");
         headerStatus.setTextColor(getResources().getColor(R.color.pr_warn));
         pitchWaveView.postOnAnimation(redrawLoop);
@@ -1243,7 +1451,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pitchWaveView.setLiveMode(false);
             pitchWaveView.resetPan();
             pitchWaveView.invalidate();
-            statusText.setText("Wczytano: " + file.getName());
+            statusText.setText("Wczytano nagranie");
         } catch (IOException e) {
             statusText.setText("Błąd wczytywania: " + e.getMessage());
         }
@@ -1380,7 +1588,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         name.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
         top.addView(name, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView cat = Ui.text(this, described ? meta.cat : "bez opisu", 10f, described ? R.color.pr_purple : R.color.pr_pause);
+        TextView cat = Ui.text(this, (meta.fixRecordId.isEmpty() ? "" : "🔄 poprawka · ") + (described ? meta.cat : "bez opisu"), 10f, described ? R.color.pr_purple : R.color.pr_pause);
         cat.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         cat.setPadding((int) (7 * d), (int) (2 * d), (int) (7 * d), (int) (2 * d));
         int catColor = getResources().getColor(described ? R.color.pr_purple : R.color.pr_pause);

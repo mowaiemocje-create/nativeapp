@@ -33,6 +33,11 @@ public class DescribeSheet {
     // newRecording = true: pola wymagane jak w PitchRec (imie, kategoria, emocje, GPS).
     // false (opisywanie istniejacego pliku): wymagana tylko kategoria.
     public static void show(Activity a, RecMeta initial, boolean newRecording, String title, OnSave onSave) {
+        show(a, initial, newRecording, title, null, onSave, null);
+    }
+
+    // banner = np. "Nagrywasz poprawkę dla: Sklepy" (tryb poprawki); onClose = "Zamknij" bez opisu
+    public static void show(Activity a, RecMeta initial, boolean newRecording, String title, String banner, OnSave onSave, Runnable onClose) {
         final RecMeta m = initial != null ? initial : new RecMeta();
         final ViewGroup root = a.findViewById(android.R.id.content);
 
@@ -70,6 +75,16 @@ public class DescribeSheet {
         col.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         android.content.SharedPreferences prefs = a.getSharedPreferences("app_settings", Context.MODE_PRIVATE);
+
+        if (banner != null) {
+            TextView bn = Ui.text(a, banner, 13f, R.color.pr_accent);
+            bn.setTypeface(Typeface.DEFAULT_BOLD);
+            int bp = (int) Ui.dp(a, 10);
+            bn.setPadding(bp, bp, bp, bp);
+            bn.setBackground(Ui.rounded((Ui.col(a, R.color.pr_accent) & 0x00FFFFFF) | 0x1A000000, Ui.col(a, R.color.pr_accent), Ui.dp(a, 1), Ui.dp(a, 8)));
+            body.addView(bn);
+            body.addView(Ui.spacer(a, 12));
+        }
 
         // IMIE KURSANTA (zapamietywane jak w PWA)
         body.addView(Ui.label(a, "IMIĘ KURSANTA"));
@@ -166,10 +181,18 @@ public class DescribeSheet {
         save.setLetterSpacing(0.1f);
         noteRow.addView(save);
         body.addView(noteRow);
+        body.addView(Ui.spacer(a, 16));
+
+        // ZAMKNIJ bez opisu — nagranie zostaje w NAGRANIACH jako "bez opisu"; opisac i wyslac
+        // mozna je pozniej przyciskiem "📝 Opisz i wyślij" (tak jak w PitchRec).
+        Button closeBtn = Ui.button(a, newRecording ? "ZAMKNIJ — zapisz bez opisu" : "ZAMKNIJ", R.color.pr_muted, false);
+        body.addView(closeBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         body.addView(Ui.spacer(a, 24));
 
         Runnable dismiss = () -> { try { root.removeView(overlay); } catch (Exception e) { } };
-        close.setOnClickListener(v -> dismiss.run());
+        View.OnClickListener closeL = v -> { dismiss.run(); if (onClose != null) onClose.run(); };
+        close.setOnClickListener(closeL);
+        closeBtn.setOnClickListener(closeL);
 
         save.setOnClickListener(v -> {
             String name = nameInput.getText().toString().trim();

@@ -39,6 +39,8 @@ public class AudioFileLoader {
 
                     float freq = YinPitchDetector.detect(yinWindow);
                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
+                    // Wykrywanie glosu czlowieka i pauz (VAD) — patrz VadDetector
+                    LiveAudioData.analyzeVoice(windowStartSample + YIN_WINDOW, rms, freq);
                     if (freq > 70 && freq < 1000 && rms > 0.006f) {
                         float smoothed = lastSmoothedFreq > 0
                                 ? lastSmoothedFreq * 0.88f + freq * 0.12f
@@ -47,6 +49,7 @@ public class AudioFileLoader {
                         LiveAudioData.appendPitch(windowStartSample, smoothed);
                     } else {
                         LiveAudioData.appendPitch(windowStartSample, -1);
+                        lastSmoothedFreq = 0f; // po ciszy nowa porcja mowy od prawdziwego tonu
                     }
                     yinFillCount = 0;
                 }

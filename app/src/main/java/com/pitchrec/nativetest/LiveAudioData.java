@@ -56,8 +56,49 @@ public class LiveAudioData {
     public static volatile boolean noiseGateEnabled = false;
     public static volatile float noiseGateThreshold = 0.02f; // RMS, 0.0-1.0
 
-    public static void reset() {
+    // ── Wykrywanie glosu i pauz (VAD, jak w PitchRec PWA v288) ──
+    public static final VadDetector vad = new VadDetector();
+    public static volatile float pauseMinS = 1.0f, pauseMaxS = 2.5f; // prawidlowy zakres pauzy (Ustawienia)
+    public static class Pause {
+        public final double start, end;
+        Pause(double s, double e) { start = s; end = e; }
+        public double dur() { return end - start; }
+        public boolean ok() { return dur() >= pauseMinS && dur() <= pauseMaxS; }
+    }
+    private static final List<Pause> pauses = new ArrayList<>();
+
+    // Wolane dla kazdego okna analizy (YIN, 2048 probek) — z nagrywania i z wczytanego pliku.
+    public static void analyzeVoice(long windowEndSample, float rms, float f0) {
+        vad.frame(windowEndSample / (double) SAMPLE_RATE, rms, rms > 0.003f ? f0 : -1f);
+        double[] pp = vad.pendingPause;
+        if (pp == null) return;
+        vad.pendingPause = null;
+        float[] env;
+        int e0;
         synchronized (lock) {
+            e0 = Math.max(0, (int) ((pp[0] - 1.0) * SAMPLE_RATE / ENVELOPE_CHUNK));
+            int e1 = Math.min(envelopeSize, (int) (pp[1] * SAMPLE_RATE / ENVELOPE_CHUNK) + 1);
+            if (e1 - e0 < 8) return;
+            env = new float[e1 - e0];
+            System.arraycopy(envelope, e0, env, 0, e1 - e0);
+        }
+        double[] r = VadDetector.refine(env, (long) e0 * ENVELOPE_CHUNK, SAMPLE_RATE, pp[0], pp[1]);
+        if (r != null && r[1] - r[0] >= 0.2 && r[1] - r[0] < 60) {
+            synchronized (lock) {
+                pauses.add(new Pause(r[0], r[1]));
+                if (pauses.size() > 400) pauses.remove(0);
+            }
+        }
+    }
+
+    public static List<Pause> pausesSnapshot() {
+        synchronized (lock) { return new ArrayList<>(pauses); }
+    }
+
+    public static void reset() {
+        vad.reset();
+        synchronized (lock) {
+            pauses.clear();
             envelope = new float[4096];
             envelopeSize = 0;
             envelopeChunkMax = 0f;

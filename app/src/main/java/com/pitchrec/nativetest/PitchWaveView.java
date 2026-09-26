@@ -34,6 +34,10 @@ public class PitchWaveView extends View {
     private final Paint playheadPaint = new Paint();
     private final Paint gridLinePaint = new Paint();
     private final Paint nowLinePaint = new Paint();
+    private final Paint pauseFillPaint = new Paint();
+    private final Paint pauseBorderPaint = new Paint();
+    private final Paint pauseTextPaint = new Paint();
+    private final Paint pauseLabelBgPaint = new Paint();
     private static final float PITCH_GAP_S = 0.2f;
 
     public interface OnSeekListener {
@@ -90,6 +94,13 @@ public class PitchWaveView extends View {
         gridLinePaint.setColor(Color.parseColor("#20FFFFFF"));
         gridLinePaint.setStrokeWidth(1f);
         gridLinePaint.setAntiAlias(false);
+
+        pauseBorderPaint.setStyle(Paint.Style.STROKE);
+        pauseBorderPaint.setStrokeWidth(dp(1.5f));
+        pauseTextPaint.setTextSize(dp(12));
+        pauseTextPaint.setFakeBoldText(true);
+        pauseTextPaint.setAntiAlias(true);
+        pauseLabelBgPaint.setColor(0x99000000);
 
         nowLinePaint.setColor(Color.parseColor("#66FFFFFF"));
         nowLinePaint.setStrokeWidth(dp(1.5f));
@@ -462,6 +473,31 @@ public class PitchWaveView extends View {
             }
             canvas.drawLines(envelopeLinePts, 0, visiblePointCount * 4, envelopePaint);
 
+            // PAUZY (jak w PitchRec): zielone = w prawidlowym zakresie, czerwone = za krotkie/za dlugie,
+            // z dlugoscia pauzy na srodku. Granice liczone dokladnie przez VadDetector.
+            List<LiveAudioData.Pause> pz = new java.util.ArrayList<>();
+            double visA = visibleStartSample / (double) LiveAudioData.SAMPLE_RATE;
+            double visB = (visibleStartSample + visibleSampleRange) / (double) LiveAudioData.SAMPLE_RATE;
+            for (LiveAudioData.Pause pa : LiveAudioData.pausesSnapshot()) { if (pa.end >= visA && pa.start <= visB) pz.add(pa); }
+            for (LiveAudioData.Pause pa : pz) {
+                float x0 = (float) ((pa.start * LiveAudioData.SAMPLE_RATE - visibleStartSample) / visibleSampleRange * w);
+                float x1 = (float) ((pa.end * LiveAudioData.SAMPLE_RATE - visibleStartSample) / visibleSampleRange * w);
+                if (x1 < 0 || x0 > w) continue;
+                boolean ok = pa.ok();
+                pauseFillPaint.setColor(ok ? 0x7300C86E : 0x73C83232);
+                pauseBorderPaint.setColor(ok ? 0xB300FF8C : 0xB3FF5050);
+                canvas.drawRect(x0, rulerHeight, x1, rulerHeight + h, pauseFillPaint);
+                canvas.drawRect(x0, rulerHeight, x1, rulerHeight + h, pauseBorderPaint);
+                String lbl = String.format(Locale.US, "%.2fs", pa.dur());
+                float tw = pauseTextPaint.measureText(lbl);
+                if (x1 - x0 > tw + dp(6)) {
+                    float cx = (x0 + x1) / 2f, cy = rulerHeight + mid;
+                    canvas.drawRect(cx - tw / 2 - dp(4), cy - dp(11), cx + tw / 2 + dp(4), cy + dp(6), pauseLabelBgPaint);
+                    pauseTextPaint.setColor(ok ? 0xFF00FF8A : 0xFFFF6464);
+                    canvas.drawText(lbl, cx - tw / 2, cy + dp(2), pauseTextPaint);
+                }
+            }
+
             List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
             pitchPath.reset();
             boolean penDown = false;
@@ -475,6 +511,11 @@ public class PitchWaveView extends View {
                 }
                 // Przerwa w danych dluzsza niz 0,2 s = pauza — NIE laczymy linii przez nia.
                 if (lastPitchSample != Long.MIN_VALUE && p.sampleIndex - lastPitchSample > maxGap) penDown = false;
+                // W wykrytej pauzie nie rysujemy pitch (jak w PitchRec)
+                double pt = p.sampleIndex / (double) LiveAudioData.SAMPLE_RATE;
+                boolean inPause = false;
+                for (LiveAudioData.Pause pa : pz) { if (pt >= pa.start && pt <= pa.end) { inPause = true; break; } }
+                if (inPause) { penDown = false; lastPitchSample = p.sampleIndex; continue; }
                 lastPitchSample = p.sampleIndex;
                 float x = ((p.sampleIndex - visibleStartSample) / visibleSampleRange) * w;
                 if (x < 0 || x > w) { penDown = false; continue; }

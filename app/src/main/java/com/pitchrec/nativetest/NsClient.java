@@ -216,6 +216,69 @@ public class NsClient {
         }, r -> { });
     }
 
+    // Lista nagran DO POPRAWY — szybkie zrodlo (nowy backend, jak w PitchRec PWA).
+    public static class FixEntry {
+        public String id, categoryName, weakText;
+        public long reviewedAt;
+        public boolean allGood;
+    }
+
+    public interface FixCallback { void done(java.util.List<FixEntry> list, String err); }
+
+    public static void fetchNeedsCorrection(String token, String email, boolean force, FixCallback cb) {
+        NET.execute(() -> {
+            java.util.List<FixEntry> list = new java.util.ArrayList<>();
+            String err = null;
+            try {
+                String q = "ns_token=" + java.net.URLEncoder.encode(token, "UTF-8")
+                        + "&ns_email=" + java.net.URLEncoder.encode(email == null ? "" : email, "UTF-8")
+                        + "&ns_server=new" + (force ? "&force=1" : "");
+                HttpURLConnection c = (HttpURLConnection) new URL("https://newspeech-backend.mowaiemocje.workers.dev/needs-correction/from-ns?" + q).openConnection();
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(30000);
+                c.setRequestProperty("Accept", "application/json");
+                int st = c.getResponseCode();
+                String body = readBody(c);
+                if (st == 401 || st == 403) err = "AUTH";
+                else if (st < 200 || st >= 300) err = "Błąd " + st;
+                else {
+                    JSONObject d = new JSONObject(body);
+                    if (!d.optBoolean("ok", false)) err = d.optString("error", "Błąd serwera");
+                    JSONArray arr = d.optJSONArray("entries");
+                    if (arr != null) {
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.optJSONObject(i);
+                            if (o == null) continue;
+                            FixEntry fe = new FixEntry();
+                            fe.id = o.optString("id", "");
+                            fe.categoryName = o.optString("category_name", "");
+                            fe.reviewedAt = o.optLong("reviewed_at", 0L);
+                            fe.allGood = o.optBoolean("all_good", false);
+                            StringBuilder sb = new StringBuilder();
+                            JSONArray wk = o.optJSONArray("weak_areas");
+                            if (wk != null) {
+                                for (int j = 0; j < Math.min(4, wk.length()); j++) {
+                                    JSONObject w = wk.optJSONObject(j);
+                                    if (w == null) continue;
+                                    String unit = w.optString("unit_name", "");
+                                    if (unit.isEmpty()) unit = w.optInt("percent_mark", 0) + "%";
+                                    if (sb.length() > 0) sb.append("\n");
+                                    sb.append("• ").append(w.optString("category_name", "")).append(" — ").append(unit);
+                                }
+                            }
+                            fe.weakText = sb.toString();
+                            if (!fe.id.isEmpty()) list.add(fe);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                err = "Brak połączenia z serwerem";
+            }
+            final String fErr = err;
+            MAIN.post(() -> cb.done(list, fErr));
+        });
+    }
+
     private static void writeFilePart(DataOutputStream out, String boundary, String field, File f, String mime) throws Exception {
         out.writeBytes("--" + boundary + "\r\n");
         out.write(("Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + f.getName() + "\"\r\n").getBytes(StandardCharsets.UTF_8));

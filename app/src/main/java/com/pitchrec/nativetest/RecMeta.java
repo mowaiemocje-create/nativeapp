@@ -22,6 +22,7 @@ public class RecMeta {
     public double lat = Double.NaN, lon = Double.NaN;
     public String ns = "";      // "" | "sent" | "error"
     public String nsRecordId = "";
+    public String fixRecordId = ""; // nagranie jest POPRAWKA rekordu NS o tym ID (PUT bez limitu)
 
     public static final String[] EMOTION_LABELS = {"", "luz", "komfortowo", "neutralnie", "niekomfortowo", "stres"};
     public static final String[] SYS_LEVELS = {"Basic", "U1", "U1K", "FIX", "K1", "K2", "Full"};
@@ -47,6 +48,7 @@ public class RecMeta {
                 m.lon = o.optDouble("lon", Double.NaN);
                 m.ns = o.optString("ns", "");
                 m.nsRecordId = o.optString("nsId", "");
+                m.fixRecordId = o.optString("fixId", "");
             } catch (Exception e) { /* uszkodzony wpis — traktujemy jak brak opisu */ }
         }
         // Zgodnosc: nagrania wyslane przed wprowadzeniem opisow (lista "ns_sent_files")
@@ -69,6 +71,7 @@ public class RecMeta {
             if (hasGps()) { o.put("lat", lat); o.put("lon", lon); }
             o.put("ns", ns);
             o.put("nsId", nsRecordId);
+            o.put("fixId", fixRecordId);
             sp(c).edit().putString(fileName, o.toString()).apply();
         } catch (Exception e) { /* ignorowane */ }
     }
