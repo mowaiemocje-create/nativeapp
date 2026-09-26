@@ -44,7 +44,9 @@ public class LiveAudioData {
     public static volatile float gainMultiplier = 1f;
     public static volatile float pitchLineWidthDp = 4f;
     public static volatile int pitchLineColor = 0xFFFF3B30; // czerwony (ARGB)
-    public static volatile float gridLineWidthDp = 1f;
+    public static volatile float gridLineWidthDp = 1f; // wspolna grubosc linii poziomych i pionowych (0.5-10)
+    // AUTO 0 dB — po Stop nagranie jest podglasniane do 0 dB (szczyt -0,1 dBFS)
+    public static volatile boolean autoNormalize = true;
     public static volatile int gridLineColor = 0x20FFFFFF; // ARGB, domyslnie subtelny
     public static volatile int dawBackgroundColor = 0xFF1A1A1A; // ARGB, tlo wykresu DAW
     public static volatile int waveColor = 0xFF00E000; // ARGB, kolor fali (obwiedni amplitudy)

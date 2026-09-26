@@ -145,6 +145,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         RecordingResultHolder.setListener(this);
 
+        loadDawSettings();
+        updateNavForLogin();
+
         gainSlider.setValue(0.65f); // +6dB domyslnie w zakresie -20/+20
         gainSlider.setOnValueChangeListener(v -> {
             float db = -20f + v * 40f; // zakres -20dB do +20dB
@@ -335,6 +338,54 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         contentRoot.addView(overlay);
     }
 
+    // ── LOGOWANIE / MENU ──
+    // Korekta, Dziennik i Statystyki wymagaja konta NewSpeech — bez zalogowania sa UKRYTE
+    // (nie tylko wyszarzone). Logowanie w aplikacji natywnej to kolejny etap; gdy powstanie,
+    // wystarczy zapisac token pod kluczem "ns_token" i wywolac updateNavForLogin().
+    private boolean isLoggedIn() {
+        String tok = getSharedPreferences("app_settings", MODE_PRIVATE).getString("ns_token", null);
+        return tok != null && !tok.trim().isEmpty();
+    }
+
+    private void updateNavForLogin() {
+        int vis = isLoggedIn() ? View.VISIBLE : View.GONE;
+        int[] ids = {R.id.correctionNavButton, R.id.diaryNavButton, R.id.statsNavButton};
+        for (int id : ids) {
+            View b = findViewById(id);
+            if (b != null) b.setVisibility(vis);
+        }
+    }
+
+    // ── ZAPIS USTAWIEN WYGLADU/DZWIEKU (przetrwaja zamkniecie aplikacji) ──
+    private void loadDawSettings() {
+        android.content.SharedPreferences p = getSharedPreferences("app_settings", MODE_PRIVATE);
+        LiveAudioData.pitchLineWidthDp = p.getFloat("pitch_width", LiveAudioData.pitchLineWidthDp);
+        LiveAudioData.pitchLineColor = p.getInt("pitch_color", LiveAudioData.pitchLineColor);
+        LiveAudioData.gridLineWidthDp = p.getFloat("grid_width", LiveAudioData.gridLineWidthDp);
+        LiveAudioData.gridLineColor = p.getInt("grid_color", LiveAudioData.gridLineColor);
+        LiveAudioData.dawBackgroundColor = p.getInt("daw_bg", LiveAudioData.dawBackgroundColor);
+        LiveAudioData.waveColor = p.getInt("wave_color", LiveAudioData.waveColor);
+        LiveAudioData.autoNormalize = p.getBoolean("auto_normalize", true);
+        LiveAudioData.noiseGateEnabled = p.getBoolean("noise_gate", LiveAudioData.noiseGateEnabled);
+        keepScreenOnEnabled = p.getBoolean("keep_screen_on", false);
+        applyKeepScreenOnSetting();
+    }
+
+    private void saveDawSettings() {
+        getSharedPreferences("app_settings", MODE_PRIVATE).edit()
+                .putFloat("pitch_width", LiveAudioData.pitchLineWidthDp)
+                .putInt("pitch_color", LiveAudioData.pitchLineColor)
+                .putFloat("grid_width", LiveAudioData.gridLineWidthDp)
+                .putInt("grid_color", LiveAudioData.gridLineColor)
+                .putInt("daw_bg", LiveAudioData.dawBackgroundColor)
+                .putInt("wave_color", LiveAudioData.waveColor)
+                .putBoolean("auto_normalize", LiveAudioData.autoNormalize)
+                .putBoolean("noise_gate", LiveAudioData.noiseGateEnabled)
+                .putBoolean("keep_screen_on", keepScreenOnEnabled)
+                .apply();
+        if (pitchWaveView != null) pitchWaveView.refreshStyle();
+    }
+
     private void showSettingsDialog() {
         android.widget.LinearLayout container = new android.widget.LinearLayout(this);
         container.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -362,8 +413,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         android.widget.CheckBox noiseGateCheck = new android.widget.CheckBox(this);
         noiseGateCheck.setText("Bramka szumów (tłumi cichy szum tła)");
         noiseGateCheck.setChecked(LiveAudioData.noiseGateEnabled);
-        noiseGateCheck.setOnCheckedChangeListener((btn, checked) -> LiveAudioData.noiseGateEnabled = checked);
+        noiseGateCheck.setOnCheckedChangeListener((btn, checked) -> { LiveAudioData.noiseGateEnabled = checked; saveDawSettings(); });
         container.addView(noiseGateCheck);
+
+        android.widget.CheckBox autoNormCheck = new android.widget.CheckBox(this);
+        autoNormCheck.setText("AUTO głośność 0 dB (po zapisie podgłaśnia ciche nagrania)");
+        autoNormCheck.setChecked(LiveAudioData.autoNormalize);
+        autoNormCheck.setOnCheckedChangeListener((btn, checked) -> { LiveAudioData.autoNormalize = checked; saveDawSettings(); });
+        container.addView(autoNormCheck);
 
         android.widget.CheckBox keepScreenOnCheck = new android.widget.CheckBox(this);
         keepScreenOnCheck.setText("Nie wygaszaj ekranu podczas nagrywania");
@@ -371,6 +428,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         keepScreenOnCheck.setOnCheckedChangeListener((btn, checked) -> {
             keepScreenOnEnabled = checked;
             applyKeepScreenOnSetting();
+            saveDawSettings();
         });
         container.addView(keepScreenOnCheck);
 
@@ -405,37 +463,42 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * getResources().getDisplayMetrics().density));
         pitchWidthSlider.setLayoutParams(sliderParams);
         pitchWidthSlider.setValue((LiveAudioData.pitchLineWidthDp - 1f) / 9f); // zakres 1-10dp
-        pitchWidthSlider.setOnValueChangeListener(v -> LiveAudioData.pitchLineWidthDp = 1f + v * 9f);
+        pitchWidthSlider.setOnValueChangeListener(v -> { LiveAudioData.pitchLineWidthDp = 1f + v * 9f; saveDawSettings(); });
         container.addView(pitchWidthSlider);
 
         // Kolor linii pitch — kwadracik pokazujacy aktualny kolor, klikniecie otwiera
         // siatke 16 kolorow do wyboru.
         TextView pitchColorLabel = new TextView(this);
         pitchColorLabel.setText("Kolor linii pitch:");
-        addColorRow(container, pitchColorLabel, LiveAudioData.pitchLineColor, color -> LiveAudioData.pitchLineColor = color);
+        addColorRow(container, pitchColorLabel, LiveAudioData.pitchLineColor, color -> { LiveAudioData.pitchLineColor = color; saveDawSettings(); });
 
         // Grubosc siatki DAW
         TextView gridWidthLabel = new TextView(this);
-        gridWidthLabel.setText("Grubość siatki:");
+        gridWidthLabel.setText(String.format(Locale.getDefault(), "Grubość siatki (poziome i pionowe): ×%.1f", LiveAudioData.gridLineWidthDp));
         container.addView(gridWidthLabel);
 
+        // Jedna wspolna grubosc dla linii poziomych i pionowych, zakres 0.5 - 10
         SliderView gridWidthSlider = new SliderView(this);
         gridWidthSlider.setLayoutParams(sliderParams);
-        gridWidthSlider.setValue((LiveAudioData.gridLineWidthDp - 0.5f) / 3.5f); // zakres 0.5-4dp
-        gridWidthSlider.setOnValueChangeListener(v -> LiveAudioData.gridLineWidthDp = 0.5f + v * 3.5f);
+        gridWidthSlider.setValue((LiveAudioData.gridLineWidthDp - 0.5f) / 9.5f);
+        gridWidthSlider.setOnValueChangeListener(v -> {
+            LiveAudioData.gridLineWidthDp = Math.round((0.5f + v * 9.5f) * 2f) / 2f; // krok 0,5
+            gridWidthLabel.setText(String.format(Locale.getDefault(), "Grubość siatki (poziome i pionowe): ×%.1f", LiveAudioData.gridLineWidthDp));
+            saveDawSettings();
+        });
         container.addView(gridWidthSlider);
 
         TextView gridColorLabel = new TextView(this);
         gridColorLabel.setText("Kolor siatki:");
-        addColorRow(container, gridColorLabel, LiveAudioData.gridLineColor, color -> LiveAudioData.gridLineColor = color);
+        addColorRow(container, gridColorLabel, LiveAudioData.gridLineColor, color -> { LiveAudioData.gridLineColor = color; saveDawSettings(); });
 
         TextView dawBgLabel = new TextView(this);
         dawBgLabel.setText("Kolor tła DAW:");
-        addColorRow(container, dawBgLabel, LiveAudioData.dawBackgroundColor, color -> LiveAudioData.dawBackgroundColor = color);
+        addColorRow(container, dawBgLabel, LiveAudioData.dawBackgroundColor, color -> { LiveAudioData.dawBackgroundColor = color; saveDawSettings(); });
 
         TextView waveColorLabel = new TextView(this);
         waveColorLabel.setText("Kolor fali:");
-        addColorRow(container, waveColorLabel, LiveAudioData.waveColor, color -> LiveAudioData.waveColor = color);
+        addColorRow(container, waveColorLabel, LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
 
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.settings_title))

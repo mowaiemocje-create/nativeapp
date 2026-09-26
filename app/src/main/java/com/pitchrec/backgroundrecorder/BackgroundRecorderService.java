@@ -265,6 +265,9 @@ public class BackgroundRecorderService extends Service {
                                         LiveAudioData.appendPitch(windowStartSample, smoothed);
                                     } else {
                                         LiveAudioData.appendPitch(windowStartSample, -1);
+                                        // Po ciszy/pauzie nowa porcja mowy startuje od
+                                        // PRAWDZIWEJ wartosci, nie "dojezdza" od tonu sprzed pauzy.
+                                        lastSmoothedFreq = 0f;
                                     }
                                     yinFillCount = 0;
                                 }
@@ -349,6 +352,9 @@ public class BackgroundRecorderService extends Service {
             if (!hasData) {
                 RecordingResultHolder.rejectStop("EMPTY_RECORDING", null);
             } else {
+                // AUTO 0 dB: ciche nagranie podglasniamy tak, zeby najglosniejsza probka
+                // trafila w 0 dB (-0,1 dBFS). Czysto liniowo = bez znieksztalcen.
+                if (LiveAudioData.autoNormalize) normalizeWavInPlace(outputFile);
                 File finalFile = outputFile;
                 String mime = "audio/wav";
                 if ("mp3".equals(outputFormat)) {
@@ -408,6 +414,47 @@ public class BackgroundRecorderService extends Service {
         } catch (Exception e) {
             return null; // konwersja nieudana — zostajemy przy WAV (obsluzone przez wywolujacego)
         }
+    }
+
+    // Normalizacja szczytu do -0,1 dBFS (wartosc 32390 z 32767). Dwa przejscia po pliku:
+    // 1) znajdz najglosniejsza probke, 2) przemnoz wszystkie probki przez wspolny wspolczynnik.
+    // Tylko PODGLASNIANIE (glosne nagranie zostaje bez zmian). Blad = zostawiamy oryginal.
+    private void normalizeWavInPlace(File wavFile) {
+        try (RandomAccessFile raf = new RandomAccessFile(wavFile, "rw")) {
+            long len = raf.length();
+            if (len <= 44) return;
+            byte[] buf = new byte[65536];
+            int peak = 0;
+            raf.seek(44);
+            int read;
+            while ((read = raf.read(buf)) > 0) {
+                for (int i = 0; i + 1 < read; i += 2) {
+                    int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                    int a = v < 0 ? -v : v;
+                    if (a > peak) peak = a;
+                }
+            }
+            if (peak < 33) return; // praktycznie cisza — nie wzmacniamy szumu
+            double gain = 32390.0 / peak;
+            if (gain <= 1.01) return; // juz glosne
+            long pos = 44;
+            raf.seek(pos);
+            while ((read = raf.read(buf)) > 0) {
+                int even = read & ~1;
+                if (even == 0) break; // pojedynczy nieparzysty bajt na koncu — koniec danych
+                for (int i = 0; i < even; i += 2) {
+                    int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                    long nv = Math.round(v * gain);
+                    if (nv > 32767) nv = 32767; else if (nv < -32768) nv = -32768;
+                    buf[i] = (byte) (nv & 0xff);
+                    buf[i + 1] = (byte) ((nv >> 8) & 0xff);
+                }
+                raf.seek(pos);
+                raf.write(buf, 0, even);
+                pos += even;
+                raf.seek(pos);
+            }
+        } catch (Exception e) { /* zostaje oryginalne nagranie */ }
     }
 
     private void cleanupAudioResources() {

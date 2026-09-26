@@ -33,6 +33,8 @@ public class PitchWaveView extends View {
     private final Paint rulerTextPaint = new Paint();
     private final Paint playheadPaint = new Paint();
     private final Paint gridLinePaint = new Paint();
+    private final Paint nowLinePaint = new Paint();
+    private static final float PITCH_GAP_S = 0.2f;
 
     public interface OnSeekListener {
         void onSeek(long sampleIndex);
@@ -89,6 +91,10 @@ public class PitchWaveView extends View {
         gridLinePaint.setStrokeWidth(1f);
         gridLinePaint.setAntiAlias(false);
 
+        nowLinePaint.setColor(Color.parseColor("#66FFFFFF"));
+        nowLinePaint.setStrokeWidth(dp(1.5f));
+        nowLinePaint.setPathEffect(new android.graphics.DashPathEffect(new float[]{dp(5), dp(4)}, 0));
+
         playheadPaint.setColor(Color.parseColor("#FFFFFF"));
         playheadPaint.setStrokeWidth(dp(2));
     }
@@ -121,8 +127,17 @@ public class PitchWaveView extends View {
         int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
         int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : 1000;
         long tailSamples = (long) tailCount * 256;
-        panOffsetSample = Math.max(0, totalSamples - tailSamples);
+        // Jak w RecForge: biezaca chwila zostaje na SRODKU ekranu (tak samo jak podczas
+        // nagrywania) — bez skoku widoku w momencie pauzy. Moze byc ujemne na poczatku.
+        panOffsetSample = totalSamples - tailSamples / 2;
         isLiveMode = false;
+        forceNextRebuild = true;
+        invalidate();
+    }
+
+    // Wymusza natychmiastowe przerysowanie (np. po zmianie kolorow/grubosci w Ustawieniach,
+    // gdy nic sie nie nagrywa i petla odswiezania nie dziala).
+    public void refreshStyle() {
         forceNextRebuild = true;
         invalidate();
     }
@@ -152,6 +167,20 @@ public class PitchWaveView extends View {
         panOffsetSample = 0L;
         playheadSample = -1L;
         cacheValid = false;
+    }
+
+    // JEDNO wspolne okno widoku dla fali, pitch, siatki i podzialki — dzieki temu wszystko
+    // zawsze pokrywa sie z sekundami (wczesniej podzialka w trybie live startowala od 0 i
+    // "rosla" przez pierwsze sekundy, a fala miala stale okno — rozjezdzaly sie).
+    // Tryb live: biezaca chwila na SRODKU ekranu (jak RecForge).
+    private long windowStartSample(long totalSamples, long tailSamples) {
+        return isLiveMode ? totalSamples - tailSamples / 2 : panOffsetSample;
+    }
+
+    private int tailCountFor(int w) {
+        int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
+        int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
+        return tailCount <= 0 ? 1 : tailCount;
     }
 
     private float freqToY(float freq, int height) {
@@ -195,14 +224,15 @@ public class PitchWaveView extends View {
                 // nieskonczonosc nawet przy krotkim nagraniu.
                 long totalSamples = LiveAudioData.getTotalSamplesWritten();
                 long maxPan = Math.max(0, totalSamples - (long) (lastVisibleSeconds * 0.2f * LiveAudioData.SAMPLE_RATE));
-                panOffsetSample = Math.max(0, Math.min(newPan, maxPan));
+                long minPan = -(long) (lastVisibleSampleRange / 2f);
+                panOffsetSample = Math.max(minPan, Math.min(newPan, maxPan));
                 invalidate();
                 return true;
             }
             case MotionEvent.ACTION_UP:
                 if (!touchMoved) {
                     float pxPerSecond = getWidth() / Math.max(0.001f, lastVisibleSeconds);
-                    long tappedSample = panOffsetSample + (long) (event.getX() / pxPerSecond * LiveAudioData.SAMPLE_RATE);
+                    long tappedSample = Math.max(0, panOffsetSample + (long) (event.getX() / pxPerSecond * LiveAudioData.SAMPLE_RATE));
                     playheadSample = tappedSample;
                     if (seekListener != null) seekListener.onSeek(tappedSample);
                     invalidate();
@@ -310,21 +340,11 @@ public class PitchWaveView extends View {
         int h = (int) (fullH - rulerHeight);
         if (h <= 0) return;
 
-        int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
-        int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
-        if (tailCount <= 0) tailCount = 1;
-
+        int tailCount = tailCountFor(w);
+        long tailSamples = (long) tailCount * 256;
         long totalSamples = LiveAudioData.getExtrapolatedTotalSamples();
-        long visibleStartSample;
-        float visibleSampleRange;
-        if (isLiveMode) {
-            long tailSamples = (long) tailCount * 256;
-            visibleStartSample = Math.max(0, totalSamples - tailSamples);
-            visibleSampleRange = Math.max(1, totalSamples - visibleStartSample);
-        } else {
-            visibleStartSample = panOffsetSample;
-            visibleSampleRange = (long) tailCount * 256;
-        }
+        long visibleStartSample = windowStartSample(totalSamples, tailSamples);
+        float visibleSampleRange = tailSamples;
 
         // Zamalowujemy pas podzialki na wierzchu cache (tlo), zeby stare etykiety/linie z
         // poprzedniej klatki nie przebijaly przez nowe.
@@ -334,22 +354,36 @@ public class PitchWaveView extends View {
         float pxPerSecond = w / visibleSeconds;
         if (pxPerSecond <= 0f || !Float.isFinite(pxPerSecond)) return;
 
-        float tickIntervalSec = 1f;
-        int safety = 0;
-        while (tickIntervalSec * pxPerSecond < dp(40) && safety < 30) { tickIntervalSec *= 2; safety++; }
-        if (tickIntervalSec <= 0f || !Float.isFinite(tickIntervalSec)) return;
+        gridLinePaint.setColor(LiveAudioData.gridLineColor);
+        gridLinePaint.setStrokeWidth(dp(LiveAudioData.gridLineWidthDp));
+
+        // PIONOWE linie co 1 s. Przy duzym oddaleniu (linie gestsze niz ~6dp) rzadsze kroki,
+        // zeby siatka nie zlala sie w jedna plame.
+        float[] steps = {1f, 5f, 10f, 30f, 60f, 300f, 600f};
+        float lineStep = 600f;
+        for (float st : steps) { if (st * pxPerSecond >= dp(6)) { lineStep = st; break; } }
+        // Opis sekund (na gorze) co tyle linii, zeby napisy sie nie nakladaly.
+        int labelEvery = Math.max(1, (int) Math.ceil(dp(34) / (lineStep * pxPerSecond)));
 
         float startSecond = visibleStartSample / (float) LiveAudioData.SAMPLE_RATE;
-        float firstTickSecond = (float) (Math.ceil(startSecond / tickIntervalSec) * tickIntervalSec);
-
+        long firstIdx = (long) Math.ceil(startSecond / lineStep);
         int tickSafety = 0;
-        for (float sec = firstTickSecond; tickSafety < 200; sec += tickIntervalSec, tickSafety++) {
+        for (long idx = firstIdx; tickSafety < 400; idx++, tickSafety++) {
+            float sec = idx * lineStep;
             float x = (sec - startSecond) * pxPerSecond;
             if (x > w) break;
             canvas.drawLine(x, rulerHeight, x, fullH, gridLinePaint);
-            canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
-            String label = String.format(Locale.getDefault(), "%.0fs", sec);
-            canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);
+            if (sec >= 0 && idx % labelEvery == 0) {
+                canvas.drawLine(x, rulerHeight - dp(6), x, rulerHeight, rulerTickPaint);
+                String label = String.format(Locale.getDefault(), "%.0fs", sec);
+                canvas.drawText(label, x + dp(2), rulerHeight - dp(7), rulerTextPaint);
+            }
+        }
+
+        // Linia "teraz" na srodku ekranu podczas nagrywania (jak w RecForge)
+        if (isLiveMode && LiveAudioData.isRecordingActive) {
+            float nowX = ((totalSamples - visibleStartSample) / visibleSampleRange) * w;
+            if (nowX >= 0 && nowX <= w) canvas.drawLine(nowX, rulerHeight, nowX, fullH, nowLinePaint);
         }
     }
 
@@ -370,25 +404,30 @@ public class PitchWaveView extends View {
         envelopePaint.setColor(LiveAudioData.waveColor);
         canvas.drawRect(0, 0, w, fullH, bgPaint);
 
-        int horizontalLines = 8;
-        for (int i = 1; i < horizontalLines; i++) {
-            float y = rulerHeight + (h * i / (float) horizontalLines);
-            canvas.drawLine(0, y, w, y, gridLinePaint);
+        // POZIOME linie: glosnosc — 5 w gore i 5 w dol od srodka, rowne odstepy.
+        // Ta sama grubosc i kolor co linie pionowe (jedna wspolna regulacja w Ustawieniach).
+        float vGap = (mid * 0.92f) / 5f;
+        for (int k = 1; k <= 5; k++) {
+            float yu = rulerHeight + mid - k * vGap;
+            float yd = rulerHeight + mid + k * vGap;
+            canvas.drawLine(0, yu, w, yu, gridLinePaint);
+            canvas.drawLine(0, yd, w, yd, gridLinePaint);
         }
 
+        midlinePaint.setStrokeWidth(dp(LiveAudioData.gridLineWidthDp));
         canvas.drawLine(0, rulerHeight + mid, w, rulerHeight + mid, midlinePaint);
 
-        int envChunksPerSecond = LiveAudioData.SAMPLE_RATE / 256;
-        int tailCount = (zoomSeconds > 0) ? (int) (zoomSeconds * envChunksPerSecond) : w;
-        if (tailCount <= 0) tailCount = 1; // zabezpieczenie
+        int tailCount = tailCountFor(w);
+        long tailSamplesW = (long) tailCount * 256;
+        long totalNow = isLiveMode ? LiveAudioData.getExtrapolatedTotalSamples() : LiveAudioData.getTotalSamplesWritten();
+        long windowStart = windowStartSample(totalNow, tailSamplesW);
 
-        LiveAudioData.FrameSnapshot snap = isLiveMode
-                ? LiveAudioData.snapshotForDrawing(tailCount)
-                : LiveAudioData.snapshotForDrawingAtSample(panOffsetSample, tailCount);
+        // Dane od poczatku okna (moze byc "przed" 0 s — wtedy od 0).
+        LiveAudioData.FrameSnapshot snap = LiveAudioData.snapshotForDrawingAtSample(Math.max(0, windowStart), tailCount);
         float[] envelope = snap.envelope;
 
         if (envelope.length > 0) {
-            long tailSamples = (long) tailCount * 256;
+            long tailSamples = tailSamplesW;
             // WAZNE: okno docelowe (visibleStartSample/Range) jest ZAWSZE STALEJ
             // wielkosci (tailSamples), niezaleznie od tego, ile danych faktycznie juz
             // jest nagranych — visibleStartSample MOZE wyjsc "przed" poczatek nagrania
@@ -397,8 +436,7 @@ public class PitchWaveView extends View {
             // "rosl" przy kazdej przebudowie, przeliczajac WSZYSTKIE pozycje na nowo —
             // to bylo prawdziwe zrodlo skakania fali (nie tylko na starcie nagrania, ale
             // przy KAZDYM nagraniu krotszym niz pelne okno zoom).
-            long totalSamples = isLiveMode ? LiveAudioData.getExtrapolatedTotalSamples() : snap.totalSamples;
-            long visibleStartSample = isLiveMode ? (totalSamples - tailSamples) : snap.visibleStartSample;
+            long visibleStartSample = windowStart;
             float visibleSampleRange = tailSamples;
             lastVisibleSeconds = visibleSampleRange / (float) LiveAudioData.SAMPLE_RATE;
             lastVisibleStartSample = visibleStartSample;
@@ -427,12 +465,17 @@ public class PitchWaveView extends View {
             List<LiveAudioData.PitchPoint> pitchPts = snap.pitchPoints;
             pitchPath.reset();
             boolean penDown = false;
+            long lastPitchSample = Long.MIN_VALUE;
+            long maxGap = (long) (PITCH_GAP_S * LiveAudioData.SAMPLE_RATE);
 
             for (LiveAudioData.PitchPoint p : pitchPts) {
                 if (p.freq <= 0 || p.freq < PMIN || p.freq > PMAX) {
                     penDown = false;
                     continue;
                 }
+                // Przerwa w danych dluzsza niz 0,2 s = pauza — NIE laczymy linii przez nia.
+                if (lastPitchSample != Long.MIN_VALUE && p.sampleIndex - lastPitchSample > maxGap) penDown = false;
+                lastPitchSample = p.sampleIndex;
                 float x = ((p.sampleIndex - visibleStartSample) / visibleSampleRange) * w;
                 if (x < 0 || x > w) { penDown = false; continue; }
                 float y = rulerHeight + freqToY(p.freq, h);
