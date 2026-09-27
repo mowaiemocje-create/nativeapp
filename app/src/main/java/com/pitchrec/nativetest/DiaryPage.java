@@ -281,7 +281,11 @@ public class DiaryPage {
         // Dodatkowe informacje (pola badawcze)
         LinearLayout extra = section(L.t("📊 DODATKOWE INFORMACJE"));
         extra.addView(question(L.t("MIEJSCOWOŚĆ")));
-        extra.addView(textInput(draft.city, s -> draft.city = s));
+        EditText cityInput = textInput(draft.city, s -> draft.city = s);
+        extra.addView(cityInput);
+        TextView cityHint = Ui.text(a, "", 11f, R.color.pr_muted);
+        extra.addView(cityHint);
+        autoCity(cityInput, cityHint);
         extra.addView(Ui.spacer(a, 8));
         extra.addView(question(L.t("SYTUACJE DLA MNIE TRUDNE (można kilka)")));
         extra.addView(simpleChips(SITUATIONS, draft.hard, null));
@@ -428,6 +432,44 @@ public class DiaryPage {
         int acc = Ui.col(a, R.color.pr_accent);
         b.setBackground(Ui.rounded(on ? (acc & 0x00FFFFFF) | 0x26000000 : Ui.col(a, R.color.pr_card), on ? acc : Ui.col(a, R.color.pr_border), d, 8 * d));
         b.setTextColor(on ? acc : Ui.col(a, R.color.pr_muted));
+    }
+
+    // MIEJSCOWOSC wpisuje sie sama: najpierw miasto z profilu NS, a gdy go brak — z GPS
+    // (nazwa miejscowosci z pozycji telefonu). Kursant moze ja zawsze poprawic.
+    private void autoCity(EditText in, TextView hint) {
+        if (draft.city != null && !draft.city.trim().isEmpty()) return;
+        String pc = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getString("ns_city", "");
+        if (pc != null && !pc.trim().isEmpty()) {
+            in.setText(pc.trim());
+            hint.setText("📍 " + L.t("z profilu NewSpeech — możesz zmienić"));
+            return;
+        }
+        if (!GpsHelper.hasPermission(a)) { hint.setText("📍 " + L.t("wpisz miejscowość (brak zgody na GPS)")); return; }
+        hint.setText("📍 " + L.t("wykrywanie z GPS…"));
+        java.util.function.Consumer<android.location.Location> fromLoc = loc -> {
+            if (loc == null) { hint.setText("📍 " + L.t("GPS niedostępny — wpisz miejscowość")); return; }
+            new Thread(() -> {
+                String city = "";
+                try {
+                    android.location.Geocoder g = new android.location.Geocoder(a, new Locale("pl", "PL"));
+                    java.util.List<android.location.Address> r = g.getFromLocation(loc.getLatitude(), loc.getLongitude(), 1);
+                    if (r != null && !r.isEmpty()) {
+                        android.location.Address ad = r.get(0);
+                        city = ad.getLocality() != null ? ad.getLocality() : ad.getSubAdminArea() != null ? ad.getSubAdminArea() : "";
+                    }
+                } catch (Exception e) { }
+                final String c = city;
+                a.runOnUiThread(() -> {
+                    if (!c.isEmpty() && (draft.city == null || draft.city.trim().isEmpty())) {
+                        in.setText(c);
+                        hint.setText("📍 " + L.t("z GPS — możesz zmienić"));
+                    } else if (c.isEmpty()) hint.setText("📍 " + L.t("nie udało się ustalić — wpisz miejscowość"));
+                    else hint.setText("");
+                });
+            }).start();
+        };
+        if (GpsHelper.lastFix != null) fromLoc.accept(GpsHelper.lastFix);
+        else GpsHelper.requestFix(a, fromLoc::accept);
     }
 
     private EditText textInput(String initial, StrSet st) {
