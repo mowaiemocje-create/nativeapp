@@ -220,6 +220,8 @@ public class NsClient {
     public static class FixEntry {
         public String id, categoryName, weakText;
         public long reviewedAt;
+        public long recordedAt, firstSentAt;   // unix [s]; 0 = brak (stary cache backendu)
+        public String recordDate = "";
         public boolean allGood;
     }
 
@@ -253,6 +255,9 @@ public class NsClient {
                             fe.id = o.optString("id", "");
                             fe.categoryName = o.optString("category_name", "");
                             fe.reviewedAt = o.optLong("reviewed_at", 0L);
+                            fe.recordedAt = o.isNull("recorded_at") ? 0L : o.optLong("recorded_at", 0L);
+                            fe.firstSentAt = o.isNull("first_sent_at") ? 0L : o.optLong("first_sent_at", 0L);
+                            fe.recordDate = o.isNull("record_date") ? "" : o.optString("record_date", "");
                             fe.allGood = o.optBoolean("all_good", false);
                             StringBuilder sb = new StringBuilder();
                             JSONArray wk = o.optJSONArray("weak_areas");

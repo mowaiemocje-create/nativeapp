@@ -1509,21 +1509,34 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pill.setBackground(Ui.rounded((getResources().getColor(R.color.pr_warn) & 0x00FFFFFF) | 0x26000000, 0, 0, 6 * d));
             top.addView(pill);
             card.addView(top);
-            // Data NAGRANIA (z NewSpeech) i data OCENY — wczesniej byla tylko data oceny, przez
-            // co kursant szukal nagrania z dnia oceny, a nagranie bylo z innego dnia.
-            final String revTxt = fe.reviewedAt > 0 ? L.t("ocenione") + ": " + df.format(new java.util.Date(fe.reviewedAt * 1000L)) : "";
-            TextView dt = Ui.text(this, "🎙 " + L.t("nagrane") + ": …" + (revTxt.isEmpty() ? "" : "  ·  " + revTxt), 11f, R.color.pr_muted);
-            dt.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
-            card.addView(dt);
-            getRecordInfo(fe.id, (st, body) -> {
-                if (st == 404) {
-                    dt.setText("⚠ " + L.t("Tego nagrania nie ma już w NewSpeech (mogło zostać usunięte) — zgłoś to trenerowi.") + (revTxt.isEmpty() ? "" : "  ·  " + revTxt));
-                    dt.setTextColor(getResources().getColor(R.color.pr_warn));
-                    return;
+            // Daty (backend: recorded_at = aktualna wersja nagrania, first_sent_at = pierwsze
+            // wyslanie, reviewed_at = ocena trenera). Czas polski.
+            java.util.TimeZone pl = java.util.TimeZone.getTimeZone("Europe/Warsaw");
+            java.text.SimpleDateFormat dHm = new java.text.SimpleDateFormat("dd.MM, HH:mm", Locale.US);
+            java.text.SimpleDateFormat dDm = new java.text.SimpleDateFormat("dd.MM", Locale.US);
+            dHm.setTimeZone(pl); dDm.setTimeZone(pl);
+            if (fe.recordedAt > 0) {
+                TextView rec1 = Ui.text(this, "🎙 " + L.t("Nagrane") + ": " + dHm.format(new java.util.Date(fe.recordedAt * 1000L)), 13f, R.color.pr_text);
+                rec1.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                rec1.setPadding(0, (int) (4 * d), 0, 0);
+                card.addView(rec1);
+                StringBuilder sub = new StringBuilder();
+                if (fe.reviewedAt > 0) sub.append(L.t("Oceniono")).append(": ").append(dDm.format(new java.util.Date(fe.reviewedAt * 1000L)));
+                if (fe.firstSentAt > 0 && Math.abs(fe.firstSentAt - fe.recordedAt) > 60) {
+                    if (sub.length() > 0) sub.append("  ·  ");
+                    sub.append(L.t("pierwsza wersja")).append(": ").append(dDm.format(new java.util.Date(fe.firstSentAt * 1000L)));
                 }
-                String rd = recordDate(body);
-                dt.setText("🎙 " + L.t("nagrane") + ": " + (rd.isEmpty() ? "?" : rd) + (revTxt.isEmpty() ? "" : "  ·  " + revTxt));
-            });
+                if (sub.length() > 0) {
+                    TextView rec2 = Ui.text(this, sub.toString(), 10f, R.color.pr_muted);
+                    rec2.setPadding(0, (int) (1 * d), 0, (int) (6 * d));
+                    card.addView(rec2);
+                }
+            } else if (fe.reviewedAt > 0) {
+                // stary cache backendu — jak dotad: data oceny
+                TextView dt = Ui.text(this, df.format(new java.util.Date(fe.reviewedAt * 1000L)), 11f, R.color.pr_muted);
+                dt.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
+                card.addView(dt);
+            }
             if (fe.allGood) {
                 card.addView(Ui.text(this, L.t("Wszystkie elementy techniki ocenione dobrze, ale całość nie została zaliczona. Częsty powód: nagranie było słabej jakości (zbyt cicho, szum, przerwa) i trener nie mógł go w pełni ocenić. Spróbuj nagrać jeszcze raz w spokojniejszym miejscu."), 12f, R.color.pr_muted));
             } else if (!fe.weakText.isEmpty()) {
