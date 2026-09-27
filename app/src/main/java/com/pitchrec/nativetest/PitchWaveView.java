@@ -541,10 +541,12 @@ public class PitchWaveView extends View {
     // f(t): wzrost > 3%/s = strzalka w gore (zielona), spadek = w dol (niebieska), inaczej plaska.
     private final Paint arrowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    // STRZALKI NA KAZDA SYLABE: w obrebie sylaby liczymy zmiane tonu w POLTONACH (regresja
-    // liniowa na skali logarytmicznej). Strzalka pojawia sie tylko, gdy ton zmienia sie w danym
-    // kierunku o wiecej niz prog z Ustawien (domyslnie 1,5 poltonu); im ostrzejsza zmiana, tym
-    // bardziej stroma strzalka. Sasiednie sylaby w tym samym kierunku lacza sie w jedna strzalke.
+    // STRZALKI INTONACJI: po jednej na sylabe, zgodnie z linia pitch (zmiana tonu w POLTONACH,
+    // regresja na skali logarytmicznej).
+    //  • Sylaba 4-fazowa = JEDNA strzalka przez cala jej dlugosc (dwie 4-fazowe pod rzad = dwie).
+    //  • Pozostale sylaby: w gore / w dol, gdy ton zmienia sie o wiecej niz prog z Ustawien
+    //    (domyslnie 1,5 poltonu), inaczej strzalka PLASKA; sasiednie w tym samym kierunku sie lacza.
+    //  • Im wieksza zmiana, tym bardziej stroma strzalka.
     private void drawArrows(Canvas canvas, int w, int h, float top, List<LiveAudioData.PitchPoint> pts,
                             List<LiveAudioData.Pause> pz, long visStart, float visRange) {
         double visA = visStart / (double) LiveAudioData.SAMPLE_RATE;
@@ -572,19 +574,25 @@ public class PitchWaveView extends View {
         int i = 0;
         double prevEnd = -1;
         while (i < n) {
-            int d = !ok[i] ? 0 : ch[i] >= thr ? 1 : ch[i] <= -thr ? -1 : 0;
-            if (d == 0) { i++; continue; }
+            if (!ok[i]) { i++; continue; }
+            int d = ch[i] >= thr ? 1 : ch[i] <= -thr ? -1 : 0;
             int j = i;
             double total = ch[i];
-            while (j + 1 < n && ok[j + 1] && syl.get(j + 1).start - syl.get(j).end < 0.05
-                    && (d > 0 ? ch[j + 1] >= thr : ch[j + 1] <= -thr)) { j++; total += ch[j]; }
+            if (!syl.get(i).four) {
+                while (j + 1 < n && ok[j + 1] && !syl.get(j + 1).four && syl.get(j + 1).start - syl.get(j).end < 0.05) {
+                    double c = ch[j + 1];
+                    int d2 = c >= thr ? 1 : c <= -thr ? -1 : 0;
+                    if (d2 != d) break;
+                    j++; total += c;
+                }
+            }
             double t0 = syl.get(i).start, t1 = syl.get(j).end;
             if (prevEnd < 0 || t0 - prevEnd > 0.3) y = arrowY; // nowa porcja mowy
             float x0 = (float) ((t0 * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) + dp(2);
             float x1 = (float) ((t1 * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) - dp(2);
             if (x1 - x0 >= dp(6) && x1 > 0 && x0 < w) {
-                // stromosc = wielkosc zmiany (ok. 7 dp na poltonu, maks. 34 dp)
-                float dy = (float) Math.max(dp(6), Math.min(dp(34), Math.abs(total) * dp(7)));
+                // stromosc = wielkosc zmiany (ok. 7 dp na poltonu, maks. 34 dp); plaska = pozioma
+                float dy = d == 0 ? 0f : (float) Math.max(dp(6), Math.min(dp(34), Math.abs(total) * dp(7)));
                 float ye = y + (d > 0 ? -dy : dy);
                 drawOneArrow(canvas, x0, y, x1, ye, d, true);
                 y = (ye < arrowY - dp(34) || ye > arrowY + dp(34)) ? arrowY : ye;
@@ -676,8 +684,7 @@ public class PitchWaveView extends View {
                 if (i1 - i0 < 1) continue;
                 double chg = semitoneChange(vis.subList(i0, i1 + 1));
                 int dir = chg >= LiveAudioData.arrowThresholdSt ? 1 : chg <= -LiveAudioData.arrowThresholdSt ? -1 : 0;
-                if (dir == 0) continue;
-                float dy = (float) Math.max(dp(6), Math.min(dp(34), Math.abs(chg) * dp(7)));
+                float dy = dir == 0 ? 0f : (float) Math.max(dp(6), Math.min(dp(34), Math.abs(chg) * dp(7)));
                 float ye = y + (dir > 0 ? -dy : dy);
                 drawOneArrow(canvas, cx[c], y, cx[c + 1], ye, dir, true);
                 y = (ye < arrowY - dp(34) || ye > arrowY + dp(34)) ? arrowY : ye;

@@ -16,6 +16,7 @@ public class SyllableDetector {
 
     public static class Syl {
         public final double start, nucleus, end;
+        public boolean four = false;   // sylaba 4-fazowa (jedna strzalka na cala dlugosc)
         public Syl(double s, double n, double e) { start = s; nucleus = n; end = e; }
     }
 

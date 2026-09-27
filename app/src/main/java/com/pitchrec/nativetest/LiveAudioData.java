@@ -117,14 +117,23 @@ public class LiveAudioData {
 
     private static void handleSyllables(double now) {
         Norms.Segment done = norms.pollFinished();
-        if (!showTempo) { liveSyllables = null; return; }   // pomiar sylab wylaczony w Ustawieniach
+        // sylaby sa potrzebne do tempa ORAZ do strzalek (po jednej na sylabe)
+        if (!showTempo && !showArrows) { liveSyllables = null; return; }
         if (done != null) {
             List<SyllableDetector.Syl> s;
             if (done.fourPhase && done.unitEnd > 0) {
                 // sylaba 4-fazowa liczy sie jako JEDNA sylaba; dalej zwykle sylaby
+                // (dwie 4-fazowe pod rzad = dwie sylaby 4-fazowe)
                 s = new ArrayList<>();
-                s.add(new SyllableDetector.Syl(done.start, done.unitPeak, done.unitEnd));
-                if (done.end - done.unitEnd > 0.15) s.addAll(countSyllables(done.unitEnd, done.end));
+                double[] fe = done.fourEnds != null && done.fourEnds.length > 0 ? done.fourEnds : new double[]{done.unitEnd};
+                double a = done.start;
+                for (int k = 0; k < fe.length; k++) {
+                    SyllableDetector.Syl u = new SyllableDetector.Syl(a, k == 0 ? done.unitPeak : (a + fe[k]) / 2, fe[k]);
+                    u.four = true;
+                    s.add(u);
+                    a = fe[k];
+                }
+                if (done.end - a > 0.15) s.addAll(countSyllables(a, done.end));
             } else s = countSyllables(done.start, done.end);
             double dur = Math.max(0.2, done.end - done.start);
             done.syllables = s.size();
@@ -148,7 +157,9 @@ public class LiveAudioData {
             List<SyllableDetector.Syl> s;
             if (norms.liveFour) {
                 s = new ArrayList<>();
-                s.add(new SyllableDetector.Syl(st, (st + ue) / 2, ue));
+                SyllableDetector.Syl u = new SyllableDetector.Syl(st, (st + ue) / 2, ue);
+                u.four = true;
+                s.add(u);
                 if (now - ue > 0.15) s.addAll(countSyllables(ue, now));
             } else s = countSyllables(st, now);
             liveSyllables = s;

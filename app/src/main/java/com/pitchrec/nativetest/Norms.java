@@ -89,6 +89,7 @@ public class Norms {
         public volatile float rate = 0f;        // tempo [sylab/min]
         public double unitEnd = -1, unitPeak = -1; // oceniana (pierwsza) sylaba: koniec i szczyt [s]
         public boolean fourPhase = false;           // czy pierwsza sylaba miala ksztalt 4-fazowy
+        public double[] fourEnds;               // konce kolejnych sylab 4-fazowych od startu porcji [s] (2 pod rzad = 2 konce)
         public float[] buf;                     // RMS okien sylaby 4-fazowej (tylko przy kalibracji)
         public int preLen;
         Segment(double s, double e, Result r) { start = s; end = e; result = r; }
@@ -174,6 +175,19 @@ public class Norms {
                     sg.fourPhase = four;
                     sg.unitEnd = segStart + ue / FPS;
                     sg.unitPeak = segStart + peakIndex(unit, bufPreLen) / FPS;
+                    if (four) {
+                        List<Double> ends = new ArrayList<>();
+                        ends.add(segStart + ue / FPS);
+                        int e = ue;
+                        for (int k = 0; k < 4; k++) {
+                            int e2 = nextFourEnd(arr, e);
+                            if (e2 <= e + 3) break;
+                            ends.add(segStart + e2 / FPS);
+                            e = e2;
+                        }
+                        sg.fourEnds = new double[ends.size()];
+                        for (int k = 0; k < ends.size(); k++) sg.fourEnds[k] = ends.get(k);
+                    }
                     if (keepBuffers && four) { sg.buf = unit; sg.preLen = bufPreLen; }
                     segments.add(sg);
                     finished = sg;
@@ -217,17 +231,36 @@ public class Norms {
     }
 
     // Indeks konca sylaby 4-fazowej (wylacznie) albo -1, gdy jeszcze sie nie wyciszyla
+    // Szczyt = najwyzszy punkt PIERWSZEGO garbu (nie calej porcji) — gdy po sylabie 4-fazowej
+    // jest druga 4-fazowa albo glosniejsze sylaby zwykle, koniec pierwszej jest i tak poprawny.
     public static int unitEnd(float[] raw, int preLen) {
         float[] b = smooth3(raw);
-        int n = b.length;
-        int pkI = peakIndex(raw, preLen);
-        float pk = b[pkI];
-        if (pk <= 0.0005f) return -1;
+        int n = b.length, st = Math.min(preLen, Math.max(0, n - 1));
+        float g = 0;
+        for (int i = st; i < n; i++) g = Math.max(g, b[i]);
+        if (g <= 0.0005f) return -1;
+        float run = 0;
         int j = -1;
-        for (int i = pkI + 1; i < n; i++) if (b[i] < pk * 0.3f) { j = i; break; }
+        for (int i = st; i < n; i++) {
+            if (b[i] > run) run = b[i];
+            if (run >= g * 0.5f && b[i] < run * 0.3f) { j = i; break; }
+        }
         if (j < 0) return -1;
         while (j + 1 < n && b[j + 1] < b[j]) j++;       // do najnizszego punktu dolka
         return Math.min(n, j + 1);
+    }
+
+    // Kolejna sylaba 4-fazowa zaraz po poprzedniej (dwie 4-fazowe pod rzad): od dolka `from`
+    // bierzemy pierwszy "garb" (do spadku < 30% jego szczytu) i sprawdzamy ksztalt 4 faz.
+    // Zwraca indeks konca (wylacznie) albo -1.
+    public static int nextFourEnd(float[] raw, int from) {
+        int st = Math.max(0, from - 1);
+        if (raw.length - st < 8) return -1;
+        float[] sub = java.util.Arrays.copyOfRange(raw, st, raw.length);
+        int end = unitEnd(sub, 1);
+        if (end < 0) end = sub.length;
+        if (!isFourPhase(sub, 1, end)) return -1;
+        return st + end;
     }
 
     // Czy to sylaba 4-fazowa: dlugi, cichy start (faza leniwa) i wyrazny szczyt?
