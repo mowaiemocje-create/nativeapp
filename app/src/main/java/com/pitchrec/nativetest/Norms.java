@@ -112,6 +112,8 @@ public class Norms {
     private double segStart = -1, lastVoiceT = -1;
     private final List<Segment> segments = new ArrayList<>();
     private boolean unitDone = false;
+    public volatile double liveUnitEnd = -1;   // koniec pierwszej sylaby trwajacej porcji (-1 = jeszcze trwa)
+    public volatile boolean liveFour = false;  // czy ta pierwsza sylaba jest 4-fazowa
     public boolean keepBuffers = false;                 // kalibracja: zachowaj RMS porcji
     public volatile Result live = null;                 // wynik biezacej porcji (do podpowiedzi)
     public volatile long liveAtMs = 0L;
@@ -146,7 +148,9 @@ public class Norms {
                     if (ue < 0) { live = analyze(arr, bufPreLen); }
                     else {
                         unitDone = true;
-                        if (!isFourPhase(arr, bufPreLen, ue)) ue = firstSyllableEnd(arr, bufPreLen);
+                        liveFour = isFourPhase(arr, bufPreLen, ue);
+                        if (!liveFour) ue = firstSyllableEnd(arr, bufPreLen);
+                        liveUnitEnd = segStart + ue / FPS;
                         live = analyze(java.util.Arrays.copyOf(arr, ue), bufPreLen);
                     }
                     liveAtMs = System.currentTimeMillis();
@@ -177,6 +181,7 @@ public class Norms {
                 }
                 segStart = -1;
                 unitDone = false;
+                liveUnitEnd = -1; liveFour = false;
                 buf.clear();
             }
         }

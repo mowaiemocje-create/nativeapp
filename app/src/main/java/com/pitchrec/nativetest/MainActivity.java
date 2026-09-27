@@ -1509,11 +1509,21 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pill.setBackground(Ui.rounded((getResources().getColor(R.color.pr_warn) & 0x00FFFFFF) | 0x26000000, 0, 0, 6 * d));
             top.addView(pill);
             card.addView(top);
-            if (fe.reviewedAt > 0) {
-                TextView dt = Ui.text(this, df.format(new java.util.Date(fe.reviewedAt * 1000L)), 11f, R.color.pr_muted);
-                dt.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
-                card.addView(dt);
-            }
+            // Data NAGRANIA (z NewSpeech) i data OCENY — wczesniej byla tylko data oceny, przez
+            // co kursant szukal nagrania z dnia oceny, a nagranie bylo z innego dnia.
+            final String revTxt = fe.reviewedAt > 0 ? L.t("ocenione") + ": " + df.format(new java.util.Date(fe.reviewedAt * 1000L)) : "";
+            TextView dt = Ui.text(this, "🎙 " + L.t("nagrane") + ": …" + (revTxt.isEmpty() ? "" : "  ·  " + revTxt), 11f, R.color.pr_muted);
+            dt.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
+            card.addView(dt);
+            getRecordInfo(fe.id, (st, body) -> {
+                if (st == 404) {
+                    dt.setText("⚠ " + L.t("Tego nagrania nie ma już w NewSpeech (mogło zostać usunięte) — zgłoś to trenerowi.") + (revTxt.isEmpty() ? "" : "  ·  " + revTxt));
+                    dt.setTextColor(getResources().getColor(R.color.pr_warn));
+                    return;
+                }
+                String rd = recordDate(body);
+                dt.setText("🎙 " + L.t("nagrane") + ": " + (rd.isEmpty() ? "?" : rd) + (revTxt.isEmpty() ? "" : "  ·  " + revTxt));
+            });
             if (fe.allGood) {
                 card.addView(Ui.text(this, L.t("Wszystkie elementy techniki ocenione dobrze, ale całość nie została zaliczona. Częsty powód: nagranie było słabej jakości (zbyt cicho, szum, przerwa) i trener nie mógł go w pełni ocenić. Spróbuj nagrać jeszcze raz w spokojniejszym miejscu."), 12f, R.color.pr_muted));
             } else if (!fe.weakText.isEmpty()) {
@@ -1604,7 +1614,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (recordId.equals(m.nsRecordId) && !m.sys.isEmpty()) { FIX_SYS_CACHE.put(recordId, m.sys); cb.done(m.sys); return; }
         }
         if (!isLoggedIn()) { cb.done(""); return; }
-        NsClient.request("GET", "/records/" + recordId, nsToken(), nsEmail(), null, null, r -> {
+        getRecordInfo(recordId, (status, rbody) -> {
+            NsClient.Result r = new NsClient.Result();
+            r.status = status; r.body = rbody; r.ok = status >= 200 && status < 300;
             String sys = "";
             if (r.ok && r.body != null) {
                 java.util.regex.Matcher mm = SYS_IN_NAME.matcher(r.body);
@@ -1624,6 +1636,36 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 cb.done(res);
             });
         });
+    }
+
+    // Rekord NS (GET /records/{id}) z pamiecia podreczna — uzywany do daty nagrania, systemu mowy
+    // i sprawdzenia, czy nagranie nadal istnieje na serwerze.
+    public interface RecCb { void done(int status, String body); }
+    private static final java.util.Map<String, Object[]> RECORD_CACHE = new java.util.HashMap<>();
+
+    private void getRecordInfo(String id, RecCb cb) {
+        Object[] c = RECORD_CACHE.get(id);
+        if (c != null && System.currentTimeMillis() - (Long) c[2] < 10 * 60 * 1000L) { cb.done((Integer) c[0], (String) c[1]); return; }
+        if (!isLoggedIn()) { cb.done(0, ""); return; }
+        NsClient.request("GET", "/records/" + id, nsToken(), nsEmail(), null, null, r -> {
+            if (r.ok || r.status == 404) RECORD_CACHE.put(id, new Object[]{r.status, r.body == null ? "" : r.body, System.currentTimeMillis()});
+            cb.done(r.status, r.body == null ? "" : r.body);
+        });
+    }
+
+    private static String recordDate(String body) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(body);
+            if (o.optJSONObject("record") != null) o = o.optJSONObject("record");
+            String d = o.optString("date", "");
+            if (d.length() >= 10 && d.charAt(4) == '-') return d.substring(8, 10) + "." + d.substring(5, 7) + "." + d.substring(0, 4);
+            String c = o.optString("created_at", "");
+            if (c.length() >= 10) {
+                java.time.ZonedDateTime z = java.time.OffsetDateTime.parse(c.replace(" ", "T")).atZoneSameInstant(java.time.ZoneId.systemDefault());
+                return String.format(Locale.US, "%02d.%02d.%d %02d:%02d", z.getDayOfMonth(), z.getMonthValue(), z.getYear(), z.getHour(), z.getMinute());
+            }
+        } catch (Exception e) { }
+        return "";
     }
 
     private static org.json.JSONArray MAP_POINTS = null;

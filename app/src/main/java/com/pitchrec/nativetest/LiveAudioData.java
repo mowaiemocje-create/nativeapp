@@ -70,7 +70,8 @@ public class LiveAudioData {
         long end = windowStartSample + 2048;
         boolean speech = analyzeVoice(end, rms, strictF0);
         tracker.frame(windowStartSample, rms, strictF0, relaxedF0, PITCH_SINK);
-        if (strictF0 > 70 && strictF0 < 600 && rms > 0.004f) {
+        float vf = strictF0 > 0 ? strictF0 : relaxedF0;  // niski glos: YIN czesto daje tylko wynik "luzniejszy"
+        if (vf > 60 && vf < 600 && rms > 0.004f) {
             synchronized (lock) {
                 if (voicedN >= voicedT.length) {
                     if (voicedN > 60000) { System.arraycopy(voicedT, voicedN - 30000, voicedT, 0, 30000); voicedN = 30000; }
@@ -140,7 +141,16 @@ public class LiveAudioData {
         }
         double st = norms.currentSpeechStart();
         if (st >= 0 && (++frameNo % 4 == 0) && now - st > 0.4) {
-            List<SyllableDetector.Syl> s = countSyllables(st, now);
+            // Pierwsza sylaba porcji moze byc 4-fazowa (dluga, z wahaniami glosnosci) — liczymy ja
+            // dopiero, gdy sie skonczy, i wtedy jako JEDNA sylabe; inaczej pokazywalo 3-4 sylaby.
+            double ue = norms.liveUnitEnd;
+            if (ue < 0) return;
+            List<SyllableDetector.Syl> s;
+            if (norms.liveFour) {
+                s = new ArrayList<>();
+                s.add(new SyllableDetector.Syl(st, (st + ue) / 2, ue));
+                if (now - ue > 0.15) s.addAll(countSyllables(ue, now));
+            } else s = countSyllables(st, now);
             liveSyllables = s;
             liveRate = (float) (s.size() / (now - st) * 60);
         }

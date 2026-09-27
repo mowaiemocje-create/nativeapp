@@ -20,10 +20,11 @@ public class SyllableDetector {
     }
 
     private static final int CHUNK = 256;
-    public static double MIN_DIP_DB = 2.0;
+    public static double MIN_DIP_DB = 5.0;
     public static double MIN_GAP_S = 0.075;
     public static double RANGE_DB = 20.0;
     public static int HALF = 4;
+    public static double VOICED_TOL = 0.12;
 
     // env: obwiednia (max |probka| w oknach 256 probek), env[0] = probka envStartSample.
     // voiced: czasy [s] punktow z tonem krtaniowym (posortowane); null = bez sprawdzania.
@@ -70,7 +71,7 @@ public class SyllableDetector {
         List<Integer> nuc = new ArrayList<>();
         for (int p : kept) {
             double t = (envStartSample + (long) (a + p) * CHUNK + CHUNK / 2.0) / sr;
-            if (voiced == null || nearVoiced(voiced, t, 0.07)) nuc.add(p);
+            if (voiced == null || nearVoiced(voiced, t, VOICED_TOL)) nuc.add(p);
         }
         // granice = najcichsze miejsca miedzy jadrami
         double prev = segStart;
