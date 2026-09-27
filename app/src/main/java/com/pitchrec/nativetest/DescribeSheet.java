@@ -119,13 +119,20 @@ public class DescribeSheet {
             if (!"Special".equals(selCat[0])) return;
             specialBox.addView(Ui.spacer(a, 8));
             specialBox.addView(Ui.label(a, "🎬 " + L.t("ZADANIE SPECJALNE — które wykonujesz?")));
-            java.util.Map<String, Long> done = SpecialTasks.done(a);
             String mySys = prefs.getString("last_sys", "");
+            // zadania zaliczone przez trenera znikaja z listy (sa juz na stale w Statystykach)
             List<SpecialTasks.Task> order = new ArrayList<>();
-            for (SpecialTasks.Task tk : SpecialTasks.ALL) if (tk.forSystem(mySys)) order.add(tk);
-            for (SpecialTasks.Task tk : SpecialTasks.ALL) if (!tk.forSystem(mySys)) order.add(tk);
+            int okN = 0;
+            for (SpecialTasks.Task tk : SpecialTasks.ALL) { if ("ok".equals(SpecialTasks.state(a, tk))) { okN++; continue; } if (tk.forSystem(mySys)) order.add(tk); }
+            for (SpecialTasks.Task tk : SpecialTasks.ALL) if (!"ok".equals(SpecialTasks.state(a, tk)) && !tk.forSystem(mySys)) order.add(tk);
+            if (okN > 0) {
+                TextView okInfo = Ui.text(a, "✓ " + L.f("{0} zadań zaliczonych — nie ma ich już na liście", okN), 11f, R.color.pr_accent);
+                okInfo.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
+                specialBox.addView(okInfo);
+            }
             for (SpecialTasks.Task tk : order) {
                 boolean on = tk.name.equals(selSpecial[0]);
+                String stt = SpecialTasks.state(a, tk);
                 LinearLayout row = Ui.row(a);
                 row.setGravity(android.view.Gravity.CENTER_VERTICAL);
                 int pd = (int) Ui.dp(a, 8);
@@ -136,7 +143,9 @@ public class DescribeSheet {
                 ic.setBackground(Ui.rounded(tk.color, 0, 0, Ui.dp(a, 8)));
                 int icS = (int) Ui.dp(a, 36);
                 row.addView(ic, new LinearLayout.LayoutParams(icS, icS));
-                String sub = done.containsKey(tk.name) ? "  ✓ " + L.t("wykonane") : (tk.forSystem(mySys) ? "" : "  · " + android.text.TextUtils.join("/", tk.systems));
+                String sub = "pending".equals(stt) ? "  ⏳ " + L.t("czeka na ocenę")
+                        : "rejected".equals(stt) ? "  ↺ " + L.t("do poprawy")
+                        : (tk.forSystem(mySys) ? "" : "  · " + android.text.TextUtils.join("/", tk.systems));
                 TextView tx = Ui.text(a, tk.shortName() + sub, 12f, R.color.pr_text);
                 if (on) tx.setTypeface(Typeface.DEFAULT_BOLD);
                 tx.setAlpha(tk.forSystem(mySys) || on ? 1f : 0.55f);
@@ -148,8 +157,16 @@ public class DescribeSheet {
                 specialBox.addView(row, rlp);
             }
         };
-        buildGrid(a, catGrid, NsClient.CATEGORIES, catBtns, selCat, () -> buildSpecial[0].run());
-        buildSpecial[0].run();
+        final boolean[] nsAsked = {false};
+        Runnable onCat = () -> {
+            buildSpecial[0].run();
+            if ("Special".equals(selCat[0]) && !nsAsked[0]) {
+                nsAsked[0] = true;
+                SpecialTasks.refreshFromNs(a, () -> buildSpecial[0].run()); // swiezy stan z NewSpeech
+            }
+        };
+        buildGrid(a, catGrid, NsClient.CATEGORIES, catBtns, selCat, onCat);
+        onCat.run();
         body.addView(Ui.spacer(a, 12));
 
         // SYSTEM NOWEJ MOWY (ostatni wybor zapamietany)

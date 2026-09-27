@@ -51,6 +51,85 @@ public class SpecialTasks {
         new Task("TV – wystąpienie telewizyjne.", s("K1", "K2", "Full"), "📺", 0xFF1E3A8A),
     };
 
+    // KOD ZADANIA w nazwie wysylanego pliku ("-ZS07" = 7. zadanie z listy) — dzieki temu z
+    // rekordu w NewSpeech wiadomo, ktore zadanie wykonano, i czy trener je zaliczyl.
+    public static int code(Task t) { for (int i = 0; i < ALL.length; i++) if (ALL[i] == t) return i + 1; return 0; }
+    public static String codeTag(String name) {
+        Task t = find(name);
+        return t == null ? "" : String.format(java.util.Locale.US, "ZS%02d", code(t));
+    }
+    private static final java.util.regex.Pattern CODE = java.util.regex.Pattern.compile("[-_]ZS(\\d{2})(?!\\d)");
+
+    // Stan zadania: "ok" = zaliczone przez trenera (na stale), "pending" = wyslane, czeka na ocene,
+    // "rejected" = do poprawy, "" = jeszcze nie robione
+    private static final Map<String, String> NS_STATE = new HashMap<>();
+
+    private static android.content.SharedPreferences prefs(Context c) {
+        return c.getSharedPreferences("app_settings", Context.MODE_PRIVATE);
+    }
+
+    public static java.util.Set<String> approved(Context c) {
+        return new java.util.HashSet<>(prefs(c).getStringSet("special_ok", new java.util.HashSet<>()));
+    }
+
+    public static String state(Context c, Task t) {
+        if (approved(c).contains(t.name)) return "ok";
+        synchronized (NS_STATE) { String s = NS_STATE.get(t.name); if (s != null) return s; }
+        return done(c).containsKey(t.name) ? "pending" : "";
+    }
+
+    // Pobiera nagrania Special z NewSpeech i odczytuje z nazw plikow kody zadan
+    public static void refreshFromNs(Context c, Runnable done) { refreshFromNs(c, done, true); }
+
+    private static void refreshFromNs(Context c, Runnable done, boolean filtered) {
+        String token = prefs(c).getString("ns_token", null);
+        if (token == null) { if (done != null) done.run(); return; }
+        String email = prefs(c).getString("ns_email", "");
+        String catId = NsClient.categoryId("Special");
+        // najpierw tylko kategoria Special; gdyby serwer nie znal filtra — 200 najnowszych nagran
+        String q = filtered && catId != null
+                ? "/records?page_size=100&sort_by=date&sort_order=desc&record_category_id=" + catId
+                : "/records?page_size=200&sort_by=date&sort_order=desc";
+        NsClient.request("GET", q, token, email, null, null, r -> {
+            if (!r.ok && filtered && catId != null && r.status != 401) { refreshFromNs(c, done, false); return; }
+            if (r.ok && r.body != null) {
+                try {
+                    String b = r.body.trim();
+                    org.json.JSONArray arr = b.startsWith("[") ? new org.json.JSONArray(b) : new org.json.JSONObject(b).optJSONArray("collection");
+                    java.util.Set<String> ok = approved(c);
+                    Map<String, String> st = new HashMap<>();
+                    for (int i = 0; arr != null && i < arr.length(); i++) {
+                        org.json.JSONObject o = arr.optJSONObject(i);
+                        if (o == null) continue;
+                        String cid = o.optString("record_category_id", "");
+                        org.json.JSONObject cat = o.optJSONObject("record_category");
+                        if (cat != null && cid.isEmpty()) cid = cat.optString("id", "");
+                        boolean special = (catId != null && catId.equals(cid)) || (cat != null && "Special".equalsIgnoreCase(cat.optString("name", "")));
+                        if (!special) continue;
+                        java.util.regex.Matcher m = CODE.matcher(o.toString());
+                        if (!m.find()) continue;
+                        int k = Integer.parseInt(m.group(1));
+                        if (k < 1 || k > ALL.length) continue;
+                        String nm = ALL[k - 1].name;
+                        boolean reviewed = !o.isNull("reviewed_at") && !o.optString("reviewed_at", "").isEmpty();
+                        String upd = o.optString("record_file_updated_by_author_at", o.optString("updated_by_author_at", ""));
+                        boolean reReview = reviewed && !upd.isEmpty() && upd.compareTo(o.optString("reviewed_at", "")) > 0;
+                        String s;
+                        if (reviewed && !reReview && !o.isNull("is_correct") && o.optBoolean("is_correct", false)) s = "ok";
+                        else if (reviewed && !reReview && !o.isNull("is_correct")) s = "rejected";
+                        else s = "pending";
+                        if ("ok".equals(s)) ok.add(nm);
+                        String prev = st.get(nm);
+                        if (prev == null || "rejected".equals(prev)) st.put(nm, s); // najnowsze nagranie decyduje (lista od najnowszych)
+                    }
+                    prefs(c).edit().putStringSet("special_ok", ok).apply();
+                    synchronized (NS_STATE) { NS_STATE.clear(); NS_STATE.putAll(st); }
+                } catch (Exception e) { /* zostaje stan z telefonu */ }
+            }
+            if (done != null) done.run();
+        });
+    }
+
     public static Task find(String name) {
         if (name == null || name.isEmpty()) return null;
         for (Task t : ALL) if (t.name.equals(name) || t.shortName().equals(name)) return t;
@@ -58,8 +137,14 @@ public class SpecialTasks {
     }
 
     // Wykonane zadania: nazwa -> data pierwszego nagrania (z nagran na tym telefonie)
-    public static Map<String, Long> done(Context c) {
+    private static Map<String, Long> doneCache = null;
+    private static long doneAt = 0;
+
+    public static synchronized Map<String, Long> done(Context c) {
+        if (doneCache != null && System.currentTimeMillis() - doneAt < 2000) return doneCache;
         Map<String, Long> out = new HashMap<>();
+        doneCache = out;
+        doneAt = System.currentTimeMillis();
         File[] files = c.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
         if (files == null) return out;
         for (File f : files) {

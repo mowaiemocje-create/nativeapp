@@ -131,49 +131,63 @@ public class StatsPage {
     // systemu kursanta, reszta pod "pokaz wszystkie".
     private boolean specialAll = false;
 
+    private boolean specialAsked = false;
+
     private void fillSpecial(LinearLayout card) {
+        if (!specialAsked) {
+            specialAsked = true;
+            SpecialTasks.refreshFromNs(a, () -> { if (host.isCurrent()) fillSpecial(card); });
+        }
         card.removeAllViews();
-        Map<String, Long> done = SpecialTasks.done(a);
+        Map<String, Long> sentLocal = SpecialTasks.done(a);
         String mySys = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getString("last_sys", "");
+        int okN = 0;
+        for (SpecialTasks.Task t : SpecialTasks.ALL) if ("ok".equals(SpecialTasks.state(a, t))) okN++;
         LinearLayout head = Ui.row(a);
         head.addView(Ui.label(a, "🎬 " + L.t("ZADANIA SPECJALNE")), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView cnt = Ui.text(a, L.t("wykonane") + " " + done.size() + "/" + SpecialTasks.ALL.length, 12f, R.color.pr_accent);
+        TextView cnt = Ui.text(a, L.t("zaliczone") + " " + okN + "/" + SpecialTasks.ALL.length, 12f, R.color.pr_accent);
         cnt.setTypeface(Typeface.DEFAULT_BOLD);
         head.addView(cnt);
         card.addView(head);
-        TextView info = Ui.text(a, L.t("Przy opisie nagrania „Special” wybierz zadanie — tu podświetli się jako wykonane."), 11f, R.color.pr_muted);
+        TextView info = Ui.text(a, L.t("Wgraj nagranie „Special” i wybierz zadanie. Gdy trener je zaliczy, zaświeci się tu na stałe."), 11f, R.color.pr_muted);
         info.setPadding(0, (int) (2 * d), 0, (int) (8 * d));
         card.addView(info);
         java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("dd.MM.yyyy", Locale.getDefault());
         int hidden = 0;
         List<SpecialTasks.Task> order = new ArrayList<>();
-        for (SpecialTasks.Task t : SpecialTasks.ALL) if (done.containsKey(t.name)) order.add(t);
-        for (SpecialTasks.Task t : SpecialTasks.ALL) if (!done.containsKey(t.name) && t.forSystem(mySys)) order.add(t);
-        for (SpecialTasks.Task t : SpecialTasks.ALL) if (!done.containsKey(t.name) && !t.forSystem(mySys)) order.add(t);
+        String[] rank = {"ok", "pending", "rejected"};
+        for (String r : rank) for (SpecialTasks.Task t : SpecialTasks.ALL) if (r.equals(SpecialTasks.state(a, t))) order.add(t);
+        for (SpecialTasks.Task t : SpecialTasks.ALL) if (SpecialTasks.state(a, t).isEmpty() && t.forSystem(mySys)) order.add(t);
+        for (SpecialTasks.Task t : SpecialTasks.ALL) if (SpecialTasks.state(a, t).isEmpty() && !t.forSystem(mySys)) order.add(t);
         for (SpecialTasks.Task t : order) {
-            boolean isDone = done.containsKey(t.name);
-            if (!isDone && !t.forSystem(mySys) && !specialAll) { hidden++; continue; }
+            String st = SpecialTasks.state(a, t);
+            boolean ok = "ok".equals(st), pend = "pending".equals(st), rej = "rejected".equals(st);
+            if (st.isEmpty() && !t.forSystem(mySys) && !specialAll) { hidden++; continue; }
+            int col = ok ? 0xFF00E5A0 : pend ? 0xFFE8820C : rej ? 0xFFFF5050 : 0x22FFFFFF;
             LinearLayout row = Ui.row(a);
             row.setGravity(Gravity.CENTER_VERTICAL);
             int pd = (int) (8 * d);
             row.setPadding(pd, pd, pd, pd);
-            row.setBackground(Ui.rounded(isDone ? 0x2600E5A0 : 0x00000000, isDone ? 0xFF00E5A0 : 0x22FFFFFF, isDone ? 2 * d : d, 8 * d));
+            row.setBackground(Ui.rounded(ok ? 0x2600E5A0 : 0x00000000, col, ok ? 2 * d : d, 8 * d));
             TextView ic = Ui.text(a, t.icon, 18f, R.color.pr_text);
             ic.setGravity(Gravity.CENTER);
             ic.setBackground(Ui.rounded(t.color, 0, 0, 8 * d));
-            ic.setAlpha(isDone ? 1f : 0.6f);
+            ic.setAlpha(st.isEmpty() ? 0.6f : 1f);
             row.addView(ic, new LinearLayout.LayoutParams((int) (34 * d), (int) (34 * d)));
-            LinearLayout col = new LinearLayout(a);
-            col.setOrientation(LinearLayout.VERTICAL);
-            col.setPadding((int) (10 * d), 0, 0, 0);
-            TextView nm = Ui.text(a, t.shortName(), 13f, isDone ? R.color.pr_text : R.color.pr_muted);
-            if (isDone) nm.setTypeface(Typeface.DEFAULT_BOLD);
-            col.addView(nm);
-            String sub = isDone ? "✓ " + L.t("wykonane") + " " + df.format(new java.util.Date(done.get(t.name)))
+            LinearLayout colL = new LinearLayout(a);
+            colL.setOrientation(LinearLayout.VERTICAL);
+            colL.setPadding((int) (10 * d), 0, 0, 0);
+            TextView nm = Ui.text(a, t.shortName(), 13f, st.isEmpty() ? R.color.pr_muted : R.color.pr_text);
+            if (ok) nm.setTypeface(Typeface.DEFAULT_BOLD);
+            colL.addView(nm);
+            Long at = sentLocal.get(t.name);
+            String sub = ok ? "✓ " + L.t("zaliczone przez trenera")
+                    : pend ? "⏳ " + L.t("wysłane — czeka na ocenę trenera") + (at != null ? " (" + df.format(new java.util.Date(at)) + ")" : "")
+                    : rej ? "↺ " + L.t("do poprawy — zobacz Korektę")
                     : (t.systems.length == 0 ? L.t("każdy system") : android.text.TextUtils.join(" · ", t.systems));
-            TextView sb = Ui.text(a, sub, 10f, isDone ? R.color.pr_accent : R.color.pr_muted);
-            col.addView(sb);
-            row.addView(col, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            TextView sb = Ui.text(a, sub, 10f, ok ? R.color.pr_accent : pend || rej ? R.color.pr_warn : R.color.pr_muted);
+            colL.addView(sb);
+            row.addView(colL, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             final String full = t.name;
             row.setOnClickListener(v -> new android.app.AlertDialog.Builder(a).setTitle(t.icon + " " + t.shortName()).setMessage(full).setPositiveButton("OK", null).show());
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);

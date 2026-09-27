@@ -102,8 +102,9 @@ public class RecMeta {
         String sysWord = sys == null ? "" : sys.replaceAll("[^a-zA-Z0-9]", "");
         String emoWord = (emotion > 0 && emotion < EMOTION_LABELS.length) ? EMOTION_LABELS[emotion] : "";
         String gpsWord = hasGps() ? String.format(Locale.US, "_GPS%.5f_%.5f", lat, lon) : "";
+        String spWord = "Special".equals(cat) ? SpecialTasks.codeTag(special) : "";
         return catPart + "_" + datePart + (sysWord.isEmpty() ? "" : "-" + sysWord)
-                + (emoWord.isEmpty() ? "" : "-" + emoWord) + gpsWord + ext;
+                + (emoWord.isEmpty() ? "" : "-" + emoWord) + (spWord.isEmpty() ? "" : "-" + spWord) + gpsWord + ext;
     }
 
     // Zmienia nazwe pliku na nowa (wg opisu) i przenosi opis. Zwraca nowy plik (albo stary,
