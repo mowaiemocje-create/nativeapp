@@ -61,7 +61,7 @@ public class LiveAudioData {
     public static final PitchTracker tracker = new PitchTracker();
     public static final Norms norms = new Norms();
     // Podpowiedzi na wykresie — wlaczane/wylaczane w Ustawieniach
-    public static volatile boolean showPauses = true, showNorms = true, showArrows = true;
+    public static volatile boolean showPauses = true, showNorms = true, showArrows = true, showTempo = true;
     private static final PitchTracker.Sink PITCH_SINK = LiveAudioData::appendPitch;
 
     // JEDNO miejsce analizy okna (2048 probek) — wspolne dla nagrywania na zywo i wczytanego
@@ -70,12 +70,92 @@ public class LiveAudioData {
         long end = windowStartSample + 2048;
         boolean speech = analyzeVoice(end, rms, strictF0);
         tracker.frame(windowStartSample, rms, strictF0, relaxedF0, PITCH_SINK);
-        norms.frame(end / (double) SAMPLE_RATE, rms, speech);
+        if (strictF0 > 70 && strictF0 < 600 && rms > 0.004f) {
+            synchronized (lock) {
+                if (voicedN >= voicedT.length) {
+                    if (voicedN > 60000) { System.arraycopy(voicedT, voicedN - 30000, voicedT, 0, 30000); voicedN = 30000; }
+                    else voicedT = java.util.Arrays.copyOf(voicedT, voicedT.length * 2);
+                }
+                voicedT[voicedN++] = (windowStartSample + 1024) / (double) SAMPLE_RATE;
+            }
+        }
+        double t = end / (double) SAMPLE_RATE;
+        norms.frame(t, rms, speech);
+        handleSyllables(t);
     }
 
     public static void finishAnalysis() {
         tracker.flush(PITCH_SINK);
         norms.finish(getTotalSamplesWritten() / (double) SAMPLE_RATE);
+        handleSyllables(getTotalSamplesWritten() / (double) SAMPLE_RATE);
+        liveSyllables = null;
+    }
+
+    // ── SYLABY I TEMPO ──
+    private static final List<SyllableDetector.Syl> syllables = new ArrayList<>();
+    public static volatile List<SyllableDetector.Syl> liveSyllables = null; // trwajaca porcja
+    public static volatile float liveRate = 0f;         // tempo biezacej porcji [syl/min]
+    private static double[] voicedT = new double[4096];  // srodki okien z wyraznym tonem krtaniowym (surowy YIN)
+    private static int voicedN = 0;
+    private static int sylTotal = 0;
+    private static double sylTime = 0;
+    private static int frameNo = 0;
+
+    public static float averageRate() { synchronized (lock) { return sylTime > 0.5 ? (float) (sylTotal / sylTime * 60) : 0f; } }
+
+    public static List<SyllableDetector.Syl> syllablesSnapshot() {
+        synchronized (lock) {
+            List<SyllableDetector.Syl> l = new ArrayList<>(syllables);
+            List<SyllableDetector.Syl> cur = liveSyllables;
+            if (cur != null) l.addAll(cur);
+            return l;
+        }
+    }
+
+    private static void handleSyllables(double now) {
+        Norms.Segment done = norms.pollFinished();
+        if (done != null) {
+            List<SyllableDetector.Syl> s = countSyllables(done.start, done.end);
+            double dur = Math.max(0.2, done.end - done.start);
+            done.syllables = s.size();
+            done.rate = (float) (s.size() / dur * 60);
+            synchronized (lock) {
+                syllables.addAll(s);
+                if (syllables.size() > 5000) syllables.subList(0, 1000).clear();
+                sylTotal += s.size();
+                sylTime += dur;
+            }
+            liveSyllables = null;
+            liveRate = done.rate;
+            return;
+        }
+        double st = norms.currentSpeechStart();
+        if (st >= 0 && (++frameNo % 4 == 0) && now - st > 0.4) {
+            List<SyllableDetector.Syl> s = countSyllables(st, now);
+            liveSyllables = s;
+            liveRate = (float) (s.size() / (now - st) * 60);
+        }
+    }
+
+    public static List<SyllableDetector.Syl> countSyllables(double start, double end) {
+        float[] env;
+        long envStart;
+        double[] voiced;
+        synchronized (lock) {
+            int e0 = Math.max(0, (int) ((start - 0.1) * SAMPLE_RATE / ENVELOPE_CHUNK));
+            int e1 = Math.min(envelopeSize, (int) ((end + 0.1) * SAMPLE_RATE / ENVELOPE_CHUNK) + 1);
+            if (e1 - e0 < 10) return new ArrayList<>();
+            env = new float[e1 - e0];
+            System.arraycopy(envelope, e0, env, 0, e1 - e0);
+            envStart = (long) e0 * ENVELOPE_CHUNK;
+            double va = start - 0.2, vb = end + 0.2;
+            int i0 = voicedN;
+            while (i0 > 0 && voicedT[i0 - 1] >= va) i0--;
+            int i1 = i0;
+            while (i1 < voicedN && voicedT[i1] <= vb) i1++;
+            voiced = java.util.Arrays.copyOfRange(voicedT, i0, i1);
+        }
+        return SyllableDetector.detect(env, envStart, SAMPLE_RATE, start, end, voiced);
     }
     public static volatile float pauseMinS = 1.0f, pauseMaxS = 2.5f; // prawidlowy zakres pauzy (Ustawienia)
     public static class Pause {
@@ -117,6 +197,9 @@ public class LiveAudioData {
 
     public static void reset() {
         vad.reset();
+        liveSyllables = null;
+        liveRate = 0f;
+        synchronized (lock) { syllables.clear(); sylTotal = 0; sylTime = 0; frameNo = 0; voicedN = 0; }
         tracker.reset();
         norms.reset();
         synchronized (lock) {

@@ -530,7 +530,8 @@ public class PitchWaveView extends View {
             }
             canvas.drawPath(pitchPath, pitchPaint);
 
-            if (LiveAudioData.showNorms) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.showNorms || LiveAudioData.showTempo) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.showTempo) drawSyllableTicks(canvas, w, h, rulerHeight, visibleStartSample, visibleSampleRange);
             if (LiveAudioData.showArrows) drawArrows(canvas, w, h, rulerHeight, pitchPts, pz, visibleStartSample, visibleSampleRange);
         }
     }
@@ -540,7 +541,95 @@ public class PitchWaveView extends View {
     // f(t): wzrost > 3%/s = strzalka w gore (zielona), spadek = w dol (niebieska), inaczej plaska.
     private final Paint arrowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
+    // STRZALKI NA KAZDA SYLABE: w obrebie sylaby liczymy kierunek tonu (regresja liniowa);
+    // sasiednie sylaby o tym samym kierunku lacza sie w jedna strzalke, a zmiana kierunku
+    // (np. pierwsza sylaba w dol, druga w gore) daje dwie strzalki obok siebie.
     private void drawArrows(Canvas canvas, int w, int h, float top, List<LiveAudioData.PitchPoint> pts,
+                            List<LiveAudioData.Pause> pz, long visStart, float visRange) {
+        double visA = visStart / (double) LiveAudioData.SAMPLE_RATE;
+        double visB = (visStart + visRange) / (double) LiveAudioData.SAMPLE_RATE;
+        List<SyllableDetector.Syl> syl = new java.util.ArrayList<>();
+        for (SyllableDetector.Syl sy : LiveAudioData.syllablesSnapshot()) if (sy.end >= visA && sy.start <= visB) syl.add(sy);
+        if (syl.isEmpty()) { drawArrowsWindows(canvas, w, h, top, pts, pz, visStart, visRange); return; }
+        // kierunek kazdej sylaby
+        int[] dir = new int[syl.size()];
+        for (int i = 0; i < syl.size(); i++) {
+            SyllableDetector.Syl sy = syl.get(i);
+            List<LiveAudioData.PitchPoint> in = new java.util.ArrayList<>();
+            for (LiveAudioData.PitchPoint p : pts) {
+                if (p.freq <= 0) continue;
+                double t = (p.sampleIndex + 1024) / (double) LiveAudioData.SAMPLE_RATE;
+                if (t >= sy.start && t <= sy.end) in.add(p);
+            }
+            dir[i] = in.size() >= 2 ? sylDir(in) : 2; // 2 = brak tonu (nie rysujemy)
+        }
+        float arrowY = top + h * 0.82f;
+        double angle = Math.PI / 7;
+        float y = arrowY;
+        int i = 0;
+        double prevEnd = -1;
+        boolean first = true;
+        while (i < syl.size()) {
+            if (dir[i] == 2) { i++; first = true; y = arrowY; continue; }
+            int j = i;
+            while (j + 1 < syl.size() && dir[j + 1] == dir[i] && syl.get(j + 1).start - syl.get(j).end < 0.05) j++;
+            double t0 = syl.get(i).start, t1 = syl.get(j).end;
+            if (prevEnd >= 0 && t0 - prevEnd > 0.3) { y = arrowY; first = true; } // nowa porcja mowy
+            float x0 = (float) ((t0 * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) + dp(2);
+            float x1 = (float) ((t1 * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) - dp(2);
+            if (x1 - x0 >= dp(6) && x1 > 0 && x0 < w) {
+                int d = dir[i];
+                float dx = x1 - x0;
+                float dy = (float) (Math.min(dx, dp(40)) * Math.tan(angle));
+                float ye = y + (d > 0 ? -dy : d < 0 ? dy : 0);
+                drawOneArrow(canvas, x0, y, x1, ye, d, first);
+                y = ye;
+                // nie uciekamy poza pas strzalek
+                if (y < arrowY - dp(28) || y > arrowY + dp(28)) y = arrowY;
+                first = false;
+            }
+            prevEnd = t1;
+            i = j + 1;
+        }
+    }
+
+    // Wzgledna zmiana tonu w sylabie (nachylenie × czas / srednia): >= 5% = w gore / w dol
+    private static int sylDir(List<LiveAudioData.PitchPoint> pts) {
+        int n = pts.size();
+        double sx = 0, sy = 0, sxy = 0, sx2 = 0;
+        for (LiveAudioData.PitchPoint p : pts) {
+            double x = p.sampleIndex / (double) LiveAudioData.SAMPLE_RATE;
+            sx += x; sy += p.freq; sxy += x * p.freq; sx2 += x * x;
+        }
+        double den = n * sx2 - sx * sx;
+        double sl = den > 0 ? (n * sxy - sx * sy) / den : 0;
+        double dur = (pts.get(n - 1).sampleIndex - pts.get(0).sampleIndex) / (double) LiveAudioData.SAMPLE_RATE;
+        double change = sl * Math.max(dur, 0.05) / (sy / n) * 100;
+        return Math.abs(change) < 5 ? 0 : change > 0 ? 1 : -1;
+    }
+
+    private void drawOneArrow(Canvas canvas, float x0, float y0, float x1, float y1, int dir, boolean dot) {
+        int col = dir > 0 ? 0xFF00E5A0 : dir < 0 ? 0xFF00CFFF : 0xFF8888BB;
+        float dx = x1 - x0;
+        float thick = Math.max(dp(2.5f), Math.min(dp(5), dx / 30f));
+        float head = Math.max(dp(7), Math.min(dp(14), dx / 4f));
+        arrowPaint.setColor(col);
+        arrowPaint.setAlpha(230);
+        arrowPaint.setStyle(Paint.Style.STROKE);
+        arrowPaint.setStrokeWidth(thick);
+        arrowPaint.setStrokeCap(Paint.Cap.ROUND);
+        canvas.drawLine(x0, y0, x1, y1, arrowPaint);
+        double ga = Math.atan2(y1 - y0, x1 - x0), ha = Math.PI / 5;
+        canvas.drawLine(x1, y1, (float) (x1 - Math.cos(ga - ha) * head), (float) (y1 - Math.sin(ga - ha) * head), arrowPaint);
+        canvas.drawLine(x1, y1, (float) (x1 - Math.cos(ga + ha) * head), (float) (y1 - Math.sin(ga + ha) * head), arrowPaint);
+        if (dot) {
+            arrowPaint.setStyle(Paint.Style.FILL);
+            canvas.drawCircle(x0, y0, thick * 0.9f, arrowPaint);
+        }
+    }
+
+    // Zapasowo (gdy sylaby nie sa jeszcze policzone): okna ~3,5 s jak w PitchRec PWA
+    private void drawArrowsWindows(Canvas canvas, int w, int h, float top, List<LiveAudioData.PitchPoint> pts,
                             List<LiveAudioData.Pause> pz, long visStart, float visRange) {
         List<List<LiveAudioData.PitchPoint>> segs = new java.util.ArrayList<>();
         List<LiveAudioData.PitchPoint> cur = new java.util.ArrayList<>();
@@ -637,18 +726,32 @@ public class PitchWaveView extends View {
             float x0 = (float) ((sg.start * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
             float x1 = (float) ((sg.end * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
             if (x1 < 0 || x0 > w) continue;
-            int col = scoreColor(sg.result.score);
+            int col = LiveAudioData.showNorms ? scoreColor(sg.result.score) : 0xFFB388FF;
             normPaint.setColor((col & 0x00FFFFFF) | 0xCC000000);
             normPaint.setStyle(Paint.Style.FILL);
             // pasek pod podzialka na dlugosc porcji
             canvas.drawRect(Math.max(0, x0), top + dp(2), Math.min(w, x1), top + dp(5), normPaint);
-            String lbl = sg.result.score + "%";
+            String tempo = LiveAudioData.showTempo && sg.syllables >= 0 ? sg.syllables + " " + L.t("syl") + " · " + Math.round(sg.rate) + "/min" : "";
+            String lbl = LiveAudioData.showNorms ? sg.result.score + "%" + (tempo.isEmpty() ? "" : "  " + tempo) : tempo;
+            if (lbl.isEmpty()) continue;
             float tw = normTextPaint.measureText(lbl);
             float cx = Math.max(tw / 2 + dp(6), Math.min(w - tw / 2 - dp(6), (x0 + x1) / 2f));
             normPaint.setColor(0xB0000000);
             canvas.drawRoundRect(new android.graphics.RectF(cx - tw / 2 - dp(5), top + dp(7), cx + tw / 2 + dp(5), top + dp(23)), dp(8), dp(8), normPaint);
             normTextPaint.setColor(col);
             canvas.drawText(lbl, cx - tw / 2, top + dp(19), normTextPaint);
+        }
+    }
+
+    // Kreseczki = wykryte sylaby (jadra), u dolu wykresu — widac, co zostalo policzone
+    private void drawSyllableTicks(Canvas canvas, int w, int h, float top, long visStart, float visRange) {
+        normPaint.setColor(0xCCB388FF);
+        normPaint.setStyle(Paint.Style.FILL);
+        float yb = top + h - dp(3);
+        for (SyllableDetector.Syl sy : LiveAudioData.syllablesSnapshot()) {
+            float x = (float) ((sy.nucleus * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
+            if (x < 0 || x > w) continue;
+            canvas.drawRect(x - dp(1.5f), yb - dp(9), x + dp(1.5f), yb, normPaint);
         }
     }
 
@@ -668,6 +771,12 @@ public class PitchWaveView extends View {
             String q = r.hasQuiet == null ? L.t("WEJŚCIE") + ": …" : r.hasQuiet ? L.t("WEJŚCIE") + ": " + L.t("łagodne ✓") : L.t("WEJŚCIE") + ": " + L.t("za głośno ✗");
             String l2 = q + (r.shapeSimilarity != null ? "  ·  " + L.t("KSZTAŁT") + ": " + r.shapeSimilarity + "%" : "");
             y = hintBox(canvas, w, y, pad, l1, col, l2, 0xFFDDDDDD);
+        }
+        if (LiveAudioData.showTempo && LiveAudioData.liveRate > 0) {
+            float avg = LiveAudioData.averageRate();
+            String l = "🗣 " + L.t("TEMPO") + " " + Math.round(LiveAudioData.liveRate) + " " + L.t("sylab/min")
+                    + (avg > 0 ? "  ·  " + L.t("średnio") + " " + Math.round(avg) : "");
+            y = hintBox(canvas, w, y, pad, l, 0xFFB388FF, null, 0);
         }
         if (LiveAudioData.showPauses) {
             List<LiveAudioData.Pause> pz = LiveAudioData.pausesSnapshot();

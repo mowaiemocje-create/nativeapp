@@ -36,7 +36,24 @@ public class MapActivity extends Activity {
         loading.setGravity(android.view.Gravity.CENTER);
         root.addView(loading, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // Zawsze widoczny przycisk zamkniecia mapy (prawy gorny rog, pod paskiem mapy)
+        android.widget.TextView closeBtn = new android.widget.TextView(this);
+        closeBtn.setText("✕");
+        closeBtn.setTextSize(18f);
+        closeBtn.setTextColor(0xFFFFFFFF);
+        closeBtn.setGravity(android.view.Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable cbg = new android.graphics.drawable.GradientDrawable();
+        cbg.setColor(0xCCE8820C);
+        cbg.setCornerRadius(100f);
+        closeBtn.setBackground(cbg);
+        float dd = getResources().getDisplayMetrics().density;
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams((int) (44 * dd), (int) (44 * dd), android.view.Gravity.TOP | android.view.Gravity.END);
+        clp.topMargin = (int) (64 * dd);
+        clp.rightMargin = (int) (10 * dd);
+        closeBtn.setOnClickListener(v -> finish());
+        root.addView(closeBtn, clp);
         setContentView(root);
+        registerBack();
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -54,7 +71,26 @@ public class MapActivity extends Activity {
                 callback.invoke(origin, true, false);
             }
         });
+        // "← Wróć" na mapie (history.back / index.html) = zamkniecie mapy i powrot do aplikacji
+        web.addJavascriptInterface(new Object() {
+            @android.webkit.JavascriptInterface public void close() { runOnUiThread(() -> finish()); }
+        }, "PitchRecApp");
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (url == null) return false;
+                if (url.startsWith("tel:") || url.startsWith("sms:") || url.startsWith("mailto:") || url.startsWith("geo:")) {
+                    try { startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))); } catch (Exception e) { }
+                    return true;
+                }
+                // powrot do strony glownej PWA = powrot do aplikacji
+                if (mapShown && url.startsWith(PWA_BASE) && (url.contains("index.html") || url.equals(PWA_BASE + "/") || url.equals(PWA_BASE))) {
+                    finish();
+                    return true;
+                }
+                return false;
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 // Krok 1: strona z tej samej domeny -> wpisujemy logowanie do localStorage
@@ -62,6 +98,7 @@ public class MapActivity extends Activity {
                 // Krok 2: KAZDA strona inna niz pomocnicza (manifest.json) to juz mapa — serwer
                 // przekierowuje "map.html" na "/map" (bez .html), dlatego nie sprawdzamy nazwy.
                 if (injected && url != null && !url.contains("manifest.json")) {
+                    view.evaluateJavascript("try{history.back=function(){PitchRecApp.close();};}catch(e){}", null);
                     showMap(view, loading);
                     return;
                 }
@@ -96,10 +133,25 @@ public class MapActivity extends Activity {
         return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'";
     }
 
-    // Wstecz = zawsze powrot do aplikacji (bez cofania sie po stronach w WebView)
+    // Wstecz = zawsze powrot do aplikacji (bez cofania sie po stronach w WebView).
+    // Android 13+ (targetSdk 36) uzywa nowego mechanizmu "przewidywanego powrotu" — tam
+    // onBackPressed() nie jest juz wolane, dlatego rejestrujemy tez OnBackInvokedCallback.
     @Override
     public void onBackPressed() {
         finish();
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) { finish(); return true; }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    private void registerBack() {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, this::finish);
+        }
     }
 
     @Override

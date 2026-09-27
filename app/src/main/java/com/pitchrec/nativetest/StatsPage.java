@@ -77,8 +77,6 @@ public class StatsPage {
         }
         LinearLayout summary = Ui.card(a);
         root.addView(summary);
-        LinearLayout activity = Ui.card(a);
-        root.addView(activity);
         LinearLayout review = Ui.card(a);
         review.setVisibility(View.GONE);
         root.addView(review);
@@ -91,7 +89,6 @@ public class StatsPage {
         Map<String, Integer> localCounts = new LinkedHashMap<>();
         for (Rec r : local) if (r.cat != null && !r.cat.isEmpty()) localCounts.put(r.cat, localCounts.getOrDefault(r.cat, 0) + 1);
         fillSummary(summary, local, -1);
-        fillActivity(activity, local);
         fillCats(cats, localCounts, null, L.t("z nagrań na tym telefonie"));
         fillMilestones(miles, localCounts, local.size());
 

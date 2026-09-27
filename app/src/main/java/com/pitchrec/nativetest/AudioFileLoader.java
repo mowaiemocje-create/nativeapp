@@ -49,6 +49,30 @@ public class AudioFileLoader {
         LiveAudioData.finishAnalysis();
     }
 
+    // Porcje mowy z pliku wzorca — wyciete DOKLADNIE jak przy ocenie na zywo (ten sam VAD,
+    // te same okna RMS 2048 probek, ta sama segmentacja Norms), z zachowanym RMS kazdej porcji.
+    public static java.util.List<Norms.Segment> normSegments(File file) throws IOException {
+        short[] s = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
+        VadDetector vad = new VadDetector();
+        Norms nm = new Norms();
+        nm.keepBuffers = true;
+        float[] win = new float[YIN_WINDOW];
+        int frames = s.length / YIN_WINDOW;
+        for (int f = 0; f < frames; f++) {
+            double sum = 0;
+            for (int j = 0; j < YIN_WINDOW; j++) { float v = s[f * YIN_WINDOW + j] / 32768f; win[j] = v; sum += v * v; }
+            float rms = (float) Math.sqrt(sum / YIN_WINDOW);
+            float f0 = YinPitchDetector.detect(win);
+            double t = (f + 1) * YIN_WINDOW / (double) LiveAudioData.SAMPLE_RATE;
+            boolean speech = vad.frame(t, rms, rms > 0.003f ? f0 : -1f);
+            nm.frame(t, rms, speech);
+        }
+        nm.finish(frames * YIN_WINDOW / (double) LiveAudioData.SAMPLE_RATE);
+        java.util.List<Norms.Segment> out = new java.util.ArrayList<>();
+        for (Norms.Segment sg : nm.segmentsSnapshot()) if (sg.buf != null && sg.end - sg.start >= 0.5) out.add(sg);
+        return out;
+    }
+
     // RMS kolejnych okien 2048 probek (~21,5/s) — do kalibracji norm z nagrania wzorcowego
     public static float[] rmsFrames(File file) throws IOException {
         short[] s = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);

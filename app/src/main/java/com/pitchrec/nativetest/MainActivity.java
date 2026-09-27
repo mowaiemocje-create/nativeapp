@@ -983,6 +983,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.showPauses = p.getBoolean("show_pauses", true);
         LiveAudioData.showNorms = p.getBoolean("show_norms", true);
         LiveAudioData.showArrows = p.getBoolean("show_arrows", true);
+        LiveAudioData.showTempo = p.getBoolean("show_tempo", true);
         Norms.load(p);
         applyKeepScreenOnSetting();
     }
@@ -1004,6 +1005,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putBoolean("show_pauses", LiveAudioData.showPauses)
                 .putBoolean("show_norms", LiveAudioData.showNorms)
                 .putBoolean("show_arrows", LiveAudioData.showArrows)
+                .putBoolean("show_tempo", LiveAudioData.showTempo)
                 .apply();
         if (pitchWaveView != null) pitchWaveView.refreshStyle();
     }
@@ -1074,6 +1076,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
         hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
         hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
+        hints.addView(toggleRow("🗣 " + L.t("Tempo mowy (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
         hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
         c.addView(hints);
@@ -1207,15 +1210,22 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         c.addView(sectionHeader(L.t("CZUŁOŚĆ OCENY")));
         android.widget.LinearLayout q = Ui.card(this);
-        q.addView(normStepper(L.t("Próg ciszy na starcie"), Norms.quietThresh * 100, 5, 90, 5, "%.0f%%", v -> Norms.quietThresh = v / 100f));
+        if (Norms.calibrated) {
+            TextView ci = Ui.text(this, "✓ " + L.f("Skalibrowano z {0} próbek wzorca — ocena porównuje kursanta z wzorcem.", Norms.calSamples), 12f, R.color.pr_accent);
+            ci.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            ci.setPadding(0, 0, 0, (int) (6 * d));
+            q.addView(ci);
+        } else {
+            q.addView(normStepper(L.t("Próg ciszy na starcie"), Norms.quietThresh * 100, 5, 90, 5, "%.0f%%", v -> Norms.quietThresh = v / 100f));
+        }
         q.addView(normStepper(L.t("Tolerancja"), Norms.tolerance * 100, 5, 30, 1, "±%.0f%%", v -> Norms.tolerance = v / 100f));
-        q.addView(normStepper(L.t("Szczyt / cisza (wzorzec)"), Norms.pkRatio, 2, 50, 0.5f, "×%.1f", v -> Norms.pkRatio = v));
+        if (!Norms.calibrated) q.addView(normStepper(L.t("Szczyt / cisza (wzorzec)"), Norms.pkRatio, 2, 50, 0.5f, "×%.1f", v -> Norms.pkRatio = v));
         q.addView(hint(Norms.shapeRef != null ? "✓ " + L.t("Zapisany kształt wzorca — porównanie podobieństwa jest włączone.") : L.t("Brak wzorca kształtu — nagraj wzorzec, aby porównywać podobieństwo.")));
         c.addView(q);
 
         c.addView(sectionHeader(L.t("KALIBRACJA Z NAGRANIA")));
         android.widget.LinearLayout cal = Ui.card(this);
-        cal.addView(hint(L.t("Trener nagrywa jedną wzorcową porcję mowy (z ciszą na początku), a potem wybiera ją tutaj — czasy faz i kształt zostaną wyliczone automatycznie.")));
+        cal.addView(hint(L.t("Nagraj 3–5 wzorcowych porcji mowy (z pauzą przed każdą) — w jednym albo w kilku nagraniach — i wybierz je tutaj. Aplikacja wytnie porcje tak samo jak przy ocenie, wyliczy czasy faz i progi, a próbki wzorca dostaną 100%.")));
         Button pick = Ui.button(this, "🎙 " + L.t("Kalibruj z nagrania"), R.color.pr_accent, true);
         pick.setOnClickListener(v -> pickCalibrationRecording());
         cal.addView(pick, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -1259,44 +1269,63 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void pickCalibrationRecording() {
+        if (LiveAudioData.isRecordingActive) { Toast.makeText(this, L.t("Zatrzymaj nagrywanie, żeby skalibrować normy"), Toast.LENGTH_SHORT).show(); return; }
         File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
         if (files == null || files.length == 0) { Toast.makeText(this, L.t("Brak nagrań"), Toast.LENGTH_SHORT).show(); return; }
         java.util.Arrays.sort(files, (x, y) -> Long.compare(y.lastModified(), x.lastModified()));
         int n = Math.min(files.length, 30);
         String[] labels = new String[n];
-        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM HH:mm", Locale.US);
+        boolean[] checked = new boolean[n];
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM HH:mm:ss", Locale.US);
         for (int i = 0; i < n; i++) {
             RecMeta m = RecMeta.load(this, files[i].getName());
             labels[i] = df.format(new java.util.Date(files[i].lastModified())) + (m.cat.isEmpty() ? "" : " · " + L.cat(m.cat));
         }
-        new AlertDialog.Builder(this).setTitle(L.t("Wybierz nagranie wzorcowe"))
-                .setItems(labels, (dlg, which) -> calibrateFrom(files[which]))
+        new AlertDialog.Builder(this).setTitle(L.t("Wybierz nagrania wzorcowe (można kilka)"))
+                .setMultiChoiceItems(labels, checked, (dlg, which, on) -> checked[which] = on)
+                .setPositiveButton(L.t("Kalibruj"), (dlg, w) -> {
+                    java.util.List<File> sel = new java.util.ArrayList<>();
+                    for (int i = 0; i < n; i++) if (checked[i]) sel.add(files[i]);
+                    if (sel.isEmpty()) { Toast.makeText(this, L.t("Nie wybrano nagrań"), Toast.LENGTH_SHORT).show(); return; }
+                    calibrateFrom(sel);
+                })
                 .setNegativeButton(getString(R.string.btn_cancel), null).show();
     }
 
-    private void calibrateFrom(File f) {
+    private void calibrateFrom(java.util.List<File> sel) {
         Toast.makeText(this, "⏳ " + L.t("Analizuję nagranie…"), Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            Norms.Calib cb = null;
-            try { cb = Norms.calibrate(AudioFileLoader.rmsFrames(f)); } catch (Exception e) { }
-            final Norms.Calib res = cb;
+            java.util.List<float[]> bufs = new java.util.ArrayList<>();
+            java.util.List<Integer> pres = new java.util.ArrayList<>();
+            for (File f : sel) {
+                try {
+                    for (Norms.Segment sg : AudioFileLoader.normSegments(f)) { bufs.add(sg.buf); pres.add(sg.preLen); }
+                } catch (Exception e) { }
+            }
+            // kopia zapasowa ustawien — "Anuluj" przywraca poprzednie normy
+            android.content.SharedPreferences p = prefs();
+            final Norms.Calib res = bufs.isEmpty() ? null : Norms.calibrateSegments(bufs, pres);
             runOnUiThread(() -> {
                 if (res == null) {
+                    Norms.load(p);
                     new AlertDialog.Builder(this).setTitle(L.t("NORMY")).setMessage(L.t("Nagranie zbyt ciche albo za krótkie — nagraj wzorzec bliżej mikrofonu.")).setPositiveButton("OK", null).show();
                     return;
                 }
-                String msg = String.format(Locale.US, "1 · %s: %.1f s\n2 · %s: %.1f s\n3 · %s: %.1f s\n4 · %s: %.1f s\n%s: %.0f%%\n%s: ×%.1f",
-                        L.t("Faza leniwa (cichy start)"), res.ph1, L.t("Narastanie"), res.ph2, L.t("Plateau"), res.plateau, L.t("Opadanie"), res.ph3,
-                        L.t("Próg ciszy na starcie"), res.quiet * 100, L.t("Szczyt / cisza (wzorzec)"), res.pk);
+                StringBuilder sc = new StringBuilder();
+                for (int v : res.scoresAfter) { if (sc.length() > 0) sc.append(", "); sc.append(v).append('%'); }
+                String msg = L.f("Znalezione próbki wzorca: {0}", res.samples) + "\n"
+                        + L.f("Wynik próbek wzorca po kalibracji: {0}", sc) + "\n\n"
+                        + String.format(Locale.US, "2 · %s: %.1f s\n3 · %s: %.1f s\n4 · %s: %.1f s\n%s: ×%.1f",
+                        L.t("Narastanie"), res.ph2, L.t("Plateau"), res.plateau, L.t("Opadanie"), res.ph3,
+                        L.t("Szczyt / cisza (wzorzec)"), Norms.mPk)
+                        + "\n\n" + L.t("Wskazówka: nagraj 3–5 próbek (mogą być w jednym nagraniu, oddzielone pauzą) — ocena będzie stabilniejsza.");
                 new AlertDialog.Builder(this).setTitle(L.t("Wynik kalibracji")).setMessage(msg)
                         .setPositiveButton(L.t("Zastosuj"), (dd, w) -> {
-                            Norms.ph1 = res.ph1; Norms.ph2 = res.ph2; Norms.ph3 = res.ph3;
-                            Norms.quietThresh = res.quiet; Norms.pkRatio = res.pk; Norms.shapeRef = res.shape;
-                            Norms.save(prefs());
+                            Norms.save(p);
                             renderNormsPage();
                             Toast.makeText(this, "✓ " + L.t("Zastosowano"), Toast.LENGTH_SHORT).show();
                         })
-                        .setNegativeButton(getString(R.string.btn_cancel), null).show();
+                        .setNegativeButton(getString(R.string.btn_cancel), (dd, w) -> Norms.load(p)).show();
             });
         }).start();
     }
@@ -1535,6 +1564,31 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     public interface StrCb { void done(String s); }
 
+    // Zapasowo: nagranie z tego telefonu w tej samej kategorii, wyslane w ciagu 30 min od
+    // utworzenia rekordu w NS — jego opis (system mowy) jest systemem oryginalu.
+    private String matchLocalByTime(String body, File[] files) {
+        if (files == null) return "";
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(body);
+            if (o.optJSONObject("record") != null) o = o.optJSONObject("record");
+            String created = o.optString("created_at", "");
+            if (created.isEmpty()) return "";
+            long ts = java.time.OffsetDateTime.parse(created.replace(" ", "T")).toInstant().toEpochMilli();
+            org.json.JSONObject cat = o.optJSONObject("record_category");
+            String catName = cat != null ? cat.optString("name_pl", cat.optString("name", "")) : "";
+            String best = "";
+            long bestD = 30 * 60 * 1000L;
+            for (File f : files) {
+                RecMeta m = RecMeta.load(this, f.getName());
+                if (m.sys.isEmpty() || !"sent".equals(m.ns) || !m.fixRecordId.isEmpty()) continue;
+                if (!catName.isEmpty() && !catName.equalsIgnoreCase(m.cat)) continue;
+                long d = Math.abs(f.lastModified() - ts);
+                if (d < bestD) { bestD = d; best = m.sys; }
+            }
+            return best;
+        } catch (Exception e) { return ""; }
+    }
+
     private void resolveFixSys(String recordId, StrCb cb) {
         String cached = FIX_SYS_CACHE.get(recordId);
         if (cached != null) { cb.done(cached); return; }
@@ -1549,6 +1603,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok && r.body != null) {
                 java.util.regex.Matcher mm = SYS_IN_NAME.matcher(r.body);
                 if (mm.find()) sys = mm.group(1);
+                if (sys.isEmpty()) sys = matchLocalByTime(r.body, files);
             }
             if (r.ok) FIX_SYS_CACHE.put(recordId, sys);
             cb.done(sys);
