@@ -333,6 +333,7 @@ public class PitchWaveView extends View {
         // duzo bardziej widoczne niz dla fali (prosta, precyzyjna linia/tekst reaguje
         // znacznie gorzej na dyskretne skoki niz organicznie "rosnaca" fala).
         drawLiveRulerAndGrid(canvas, w, fullH);
+        drawLiveHints(canvas, w, dp(RULER_HEIGHT_DP));
 
         if (playheadSample >= 0 && lastVisibleSampleRange > 0) {
             float rulerHeight = dp(RULER_HEIGHT_DP);
@@ -479,7 +480,7 @@ public class PitchWaveView extends View {
             double visA = visibleStartSample / (double) LiveAudioData.SAMPLE_RATE;
             double visB = (visibleStartSample + visibleSampleRange) / (double) LiveAudioData.SAMPLE_RATE;
             for (LiveAudioData.Pause pa : LiveAudioData.pausesSnapshot()) { if (pa.end >= visA && pa.start <= visB) pz.add(pa); }
-            for (LiveAudioData.Pause pa : pz) {
+            for (LiveAudioData.Pause pa : LiveAudioData.showPauses ? pz : new java.util.ArrayList<LiveAudioData.Pause>()) {
                 float x0 = (float) ((pa.start * LiveAudioData.SAMPLE_RATE - visibleStartSample) / visibleSampleRange * w);
                 float x1 = (float) ((pa.end * LiveAudioData.SAMPLE_RATE - visibleStartSample) / visibleSampleRange * w);
                 if (x1 < 0 || x0 > w) continue;
@@ -528,6 +529,186 @@ public class PitchWaveView extends View {
                 }
             }
             canvas.drawPath(pitchPath, pitchPaint);
+
+            if (LiveAudioData.showNorms) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.showArrows) drawArrows(canvas, w, h, rulerHeight, pitchPts, pz, visibleStartSample, visibleSampleRange);
         }
+    }
+
+    // ── STRZALKI TRENDU INTONACJI (port z PitchRec PWA) ──
+    // Ciagle fragmenty linii pitch dzielone na okna ~3,5 s; w kazdym oknie regresja liniowa
+    // f(t): wzrost > 3%/s = strzalka w gore (zielona), spadek = w dol (niebieska), inaczej plaska.
+    private final Paint arrowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private void drawArrows(Canvas canvas, int w, int h, float top, List<LiveAudioData.PitchPoint> pts,
+                            List<LiveAudioData.Pause> pz, long visStart, float visRange) {
+        List<List<LiveAudioData.PitchPoint>> segs = new java.util.ArrayList<>();
+        List<LiveAudioData.PitchPoint> cur = new java.util.ArrayList<>();
+        long last = Long.MIN_VALUE;
+        long maxGap = (long) (PITCH_GAP_S * LiveAudioData.SAMPLE_RATE);
+        for (LiveAudioData.PitchPoint p : pts) {
+            double t = p.sampleIndex / (double) LiveAudioData.SAMPLE_RATE;
+            boolean inPause = false;
+            for (LiveAudioData.Pause pa : pz) if (t >= pa.start && t <= pa.end) { inPause = true; break; }
+            boolean brk = p.freq <= 0 || p.freq < PMIN || p.freq > PMAX || inPause || (last != Long.MIN_VALUE && p.sampleIndex - last > maxGap);
+            if (p.freq > 0) last = p.sampleIndex;
+            if (brk) {
+                if (cur.size() > 5) segs.add(cur);
+                cur = new java.util.ArrayList<>();
+                if (p.freq <= 0 || inPause) continue;
+            }
+            cur.add(p);
+        }
+        if (cur.size() > 5) segs.add(cur);
+
+        float arrowY = top + h * 0.82f;
+        double angle = Math.PI / 7;
+        float secPx = w / (visRange / LiveAudioData.SAMPLE_RATE);
+        for (List<LiveAudioData.PitchPoint> seg : segs) {
+            List<LiveAudioData.PitchPoint> vis = new java.util.ArrayList<>();
+            for (LiveAudioData.PitchPoint p : seg) {
+                float x = ((p.sampleIndex - visStart) / visRange) * w;
+                if (x >= 0 && x <= w) vis.add(p);
+            }
+            if (vis.size() < 3) continue;
+            float xs = ((vis.get(0).sampleIndex - visStart) / visRange) * w;
+            float xe = ((vis.get(vis.size() - 1).sampleIndex - visStart) / visRange) * w;
+            if (xe - xs < dp(8)) continue;
+            int chunks = Math.max(1, (int) Math.ceil((xe - xs) / (3.5f * secPx)));
+            int per = Math.max(1, vis.size() / chunks);
+            float[] cx = new float[chunks + 1];
+            cx[0] = xs + dp(4);
+            for (int c = 0; c < chunks; c++) cx[c + 1] = Math.min(xe - dp(4), xs + dp(4) + (c + 1) * (xe - xs - dp(8)) / chunks);
+            float y = arrowY;
+            for (int c = 0; c < chunks; c++) {
+                int i0 = c * per, i1 = Math.min(vis.size() - 1, (c + 1) * per);
+                int dir = chunkDir(vis.subList(i0, i1 + 1));
+                float dx = cx[c + 1] - cx[c];
+                float dy = (float) (dx * Math.tan(angle));
+                float ye = y + (dir > 0 ? -dy : dir < 0 ? dy : 0);
+                int col = dir > 0 ? 0xFF00E5A0 : dir < 0 ? 0xFF00CFFF : 0xFF8888BB;
+                float thick = Math.max(dp(2.5f), Math.min(dp(5), dx / 30f));
+                float head = Math.max(dp(8), Math.min(dp(16), dx / 6f));
+                arrowPaint.setColor(col);
+                arrowPaint.setAlpha(225);
+                arrowPaint.setStyle(Paint.Style.STROKE);
+                arrowPaint.setStrokeWidth(thick);
+                arrowPaint.setStrokeCap(Paint.Cap.ROUND);
+                canvas.drawLine(cx[c], y, cx[c + 1], ye, arrowPaint);
+                double ga = Math.atan2(ye - y, cx[c + 1] - cx[c]), ha = Math.PI / 5;
+                canvas.drawLine(cx[c + 1], ye, (float) (cx[c + 1] - Math.cos(ga - ha) * head), (float) (ye - Math.sin(ga - ha) * head), arrowPaint);
+                canvas.drawLine(cx[c + 1], ye, (float) (cx[c + 1] - Math.cos(ga + ha) * head), (float) (ye - Math.sin(ga + ha) * head), arrowPaint);
+                if (c == 0) {
+                    arrowPaint.setStyle(Paint.Style.FILL);
+                    canvas.drawCircle(cx[0], y, thick * 0.9f, arrowPaint);
+                }
+                y = ye;
+            }
+        }
+    }
+
+    private static int chunkDir(List<LiveAudioData.PitchPoint> pts) {
+        int n = pts.size();
+        if (n < 2) return 0;
+        double sx = 0, sy = 0, sxy = 0, sx2 = 0;
+        for (LiveAudioData.PitchPoint p : pts) {
+            double x = p.sampleIndex / (double) LiveAudioData.SAMPLE_RATE;
+            sx += x; sy += p.freq; sxy += x * p.freq; sx2 += x * x;
+        }
+        double den = n * sx2 - sx * sx;
+        double sl = den > 0 ? (n * sxy - sx * sy) / den : 0;
+        double mean = sy / n;
+        double sp = Math.abs(sl) / mean * 100;
+        return sp < 3 ? 0 : sl > 0 ? 1 : -1;
+    }
+
+    // ── OCENA EMISJI NA WYKRESIE: nad kazda porcja mowy pastylka z wynikiem (jak w PitchRec) ──
+    private final Paint normPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint normTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private static int scoreColor(int score) {
+        return score >= 100 ? 0xFF00F5A8 : score >= 70 ? 0xFFE8820C : score >= 45 ? 0xFFFFC107 : 0xFFFF5050;
+    }
+
+    private void drawNormLabels(Canvas canvas, int w, float top, long visStart, float visRange) {
+        normTextPaint.setTextSize(dp(11));
+        normTextPaint.setFakeBoldText(true);
+        for (Norms.Segment sg : LiveAudioData.norms.segmentsSnapshot()) {
+            float x0 = (float) ((sg.start * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
+            float x1 = (float) ((sg.end * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
+            if (x1 < 0 || x0 > w) continue;
+            int col = scoreColor(sg.result.score);
+            normPaint.setColor((col & 0x00FFFFFF) | 0xCC000000);
+            normPaint.setStyle(Paint.Style.FILL);
+            // pasek pod podzialka na dlugosc porcji
+            canvas.drawRect(Math.max(0, x0), top + dp(2), Math.min(w, x1), top + dp(5), normPaint);
+            String lbl = sg.result.score + "%";
+            float tw = normTextPaint.measureText(lbl);
+            float cx = Math.max(tw / 2 + dp(6), Math.min(w - tw / 2 - dp(6), (x0 + x1) / 2f));
+            normPaint.setColor(0xB0000000);
+            canvas.drawRoundRect(new android.graphics.RectF(cx - tw / 2 - dp(5), top + dp(7), cx + tw / 2 + dp(5), top + dp(23)), dp(8), dp(8), normPaint);
+            normTextPaint.setColor(col);
+            canvas.drawText(lbl, cx - tw / 2, top + dp(19), normTextPaint);
+        }
+    }
+
+    // ── PODPOWIEDZI W CZASIE NAGRYWANIA (rysowane co klatke, na wierzchu) ──
+    private final Paint hintBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint hintText = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private void drawLiveHints(Canvas canvas, int w, float top) {
+        if (!LiveAudioData.isRecordingActive) return;
+        float y = top + dp(28);
+        float pad = dp(8);
+        hintText.setFakeBoldText(true);
+        Norms.Result r = LiveAudioData.norms.live;
+        if (LiveAudioData.showNorms && r != null && System.currentTimeMillis() - LiveAudioData.norms.liveAtMs < 2500) {
+            int col = scoreColor(r.score);
+            String l1 = L.t("EMISJA") + " " + r.score + "%  ·  " + L.f(r.detail, r.args);
+            String q = r.hasQuiet == null ? L.t("WEJŚCIE") + ": …" : r.hasQuiet ? L.t("WEJŚCIE") + ": " + L.t("łagodne ✓") : L.t("WEJŚCIE") + ": " + L.t("za głośno ✗");
+            String l2 = q + (r.shapeSimilarity != null ? "  ·  " + L.t("KSZTAŁT") + ": " + r.shapeSimilarity + "%" : "");
+            y = hintBox(canvas, w, y, pad, l1, col, l2, 0xFFDDDDDD);
+        }
+        if (LiveAudioData.showPauses) {
+            List<LiveAudioData.Pause> pz = LiveAudioData.pausesSnapshot();
+            if (!pz.isEmpty()) {
+                LiveAudioData.Pause pa = pz.get(pz.size() - 1);
+                double nowS = LiveAudioData.getTotalSamplesWritten() / (double) LiveAudioData.SAMPLE_RATE;
+                if (nowS - pa.end < 3.0) {
+                    boolean ok = pa.ok();
+                    String l = String.format(Locale.US, "⏸ %s %.2f s ", L.t("PAUZA"), pa.dur()) + (ok ? "✓" : pa.dur() < LiveAudioData.pauseMinS ? L.t("za krótka") : L.t("za długa"))
+                            + String.format(Locale.US, "  (%.1f–%.1f s)", LiveAudioData.pauseMinS, LiveAudioData.pauseMaxS);
+                    hintBox(canvas, w, y, pad, l, ok ? 0xFF00FF8A : 0xFFFF6464, null, 0);
+                }
+            }
+        }
+    }
+
+    private float hintBox(Canvas canvas, int w, float y, float pad, String l1, int c1, String l2, int c2) {
+        hintText.setTextSize(dp(13));
+        float w1 = hintText.measureText(l1);
+        float w2 = 0;
+        if (l2 != null) { hintText.setTextSize(dp(11)); w2 = hintText.measureText(l2); }
+        float bw = Math.min(w - dp(16), Math.max(w1, w2) + pad * 2);
+        float bh = dp(l2 != null ? 40 : 24);
+        hintBg.setColor(0xC0000000);
+        canvas.drawRoundRect(new android.graphics.RectF(dp(8), y, dp(8) + bw, y + bh), dp(10), dp(10), hintBg);
+        hintBg.setColor(c1);
+        canvas.drawRect(dp(8), y + dp(6), dp(11), y + bh - dp(6), hintBg);
+        hintText.setTextSize(dp(13));
+        hintText.setColor(c1);
+        canvas.drawText(ellipsize(l1, bw - pad * 2), dp(8) + pad, y + dp(17), hintText);
+        if (l2 != null) {
+            hintText.setTextSize(dp(11));
+            hintText.setColor(c2);
+            canvas.drawText(ellipsize(l2, bw - pad * 2), dp(8) + pad, y + dp(33), hintText);
+        }
+        return y + bh + dp(6);
+    }
+
+    private String ellipsize(String s, float max) {
+        if (hintText.measureText(s) <= max) return s;
+        while (s.length() > 3 && hintText.measureText(s + "…") > max) s = s.substring(0, s.length() - 1);
+        return s + "…";
     }
 }

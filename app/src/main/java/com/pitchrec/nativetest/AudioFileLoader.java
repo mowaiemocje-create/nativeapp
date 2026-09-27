@@ -39,23 +39,27 @@ public class AudioFileLoader {
 
                     float freq = YinPitchDetector.detect(yinWindow);
                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
-                    // Wykrywanie glosu czlowieka i pauz (VAD) — patrz VadDetector
-                    LiveAudioData.analyzeVoice(windowStartSample + YIN_WINDOW, rms, freq);
-                    if (freq > 70 && freq < 1000 && rms > 0.006f) {
-                        float smoothed = lastSmoothedFreq > 0
-                                ? lastSmoothedFreq * 0.88f + freq * 0.12f
-                                : freq;
-                        lastSmoothedFreq = smoothed;
-                        LiveAudioData.appendPitch(windowStartSample, smoothed);
-                    } else {
-                        LiveAudioData.appendPitch(windowStartSample, -1);
-                        lastSmoothedFreq = 0f; // po ciszy nowa porcja mowy od prawdziwego tonu
-                    }
+                    // VAD + pauzy, ciagla linia pitch (PitchTracker) i ocena emisji wg norm
+                    LiveAudioData.processFrame(windowStartSample, rms, freq, YinPitchDetector.lastRelaxed);
                     yinFillCount = 0;
                 }
             }
             samplePos += len;
         }
+        LiveAudioData.finishAnalysis();
+    }
+
+    // RMS kolejnych okien 2048 probek (~21,5/s) — do kalibracji norm z nagrania wzorcowego
+    public static float[] rmsFrames(File file) throws IOException {
+        short[] s = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
+        int n = s.length / YIN_WINDOW;
+        float[] out = new float[n];
+        for (int f = 0; f < n; f++) {
+            double sum = 0;
+            for (int j = 0; j < YIN_WINDOW; j++) { float v = s[f * YIN_WINDOW + j] / 32768f; sum += v * v; }
+            out[f] = (float) Math.sqrt(sum / YIN_WINDOW);
+        }
+        return out;
     }
 
     // Dekoduje WAV, wykrywajac liczbe kanalow z naglowka (offset 22-23) — importowane

@@ -10,7 +10,13 @@ public class YinPitchDetector {
 
     // Zwraca wykrytą częstotliwość w Hz, albo -1 jeśli nie wykryto (cisza / brak tonu).
     // buf: próbki znormalizowane do zakresu [-1, 1] (tak jak Web Audio Float32 time-domain data).
+    // Wynik "luzniejszy" z ostatniego wywolania detect(): gdy scisly prog YIN (0,20) nie
+    // znalazl tonu, bierzemy globalne minimum, jesli jest wyrazne (< 0,35) — standardowy
+    // wariant YIN. Uzywane tylko do rysowania ciaglej linii pitch (NIE do wykrywania mowy).
+    public static float lastRelaxed = -1;
+
     public static float detect(float[] buf) {
+        lastRelaxed = -1;
         int n = buf.length;
         float rms = 0;
         for (int i = 0; i < n; i++) rms += buf[i] * buf[i];
@@ -44,11 +50,23 @@ public class YinPitchDetector {
                     float a = yc[tau - 1], b = yc[tau], c = yc[tau + 1];
                     float denom = 2 * (2 * b - a - c);
                     if (denom > 0) {
-                        return SR / (tau - (c - a) / denom);
+                        lastRelaxed = SR / (tau - (c - a) / denom);
+                        return lastRelaxed;
                     }
                 }
-                return (float) SR / tau;
+                lastRelaxed = (float) SR / tau;
+                return lastRelaxed;
             }
+        }
+        int best = -1;
+        float bestV = 0.35f;
+        for (int tau = minL + 1; tau < maxL; tau++) {
+            if (yc[tau] < bestV && yc[tau] <= yc[tau - 1] && yc[tau] <= yc[tau + 1]) { bestV = yc[tau]; best = tau; }
+        }
+        if (best > 0) {
+            float a = yc[best - 1], b = yc[best], c = yc[best + 1];
+            float denom = 2 * (2 * b - a - c);
+            lastRelaxed = denom > 0 ? SR / (best - (c - a) / denom) : (float) SR / best;
         }
         return -1;
     }

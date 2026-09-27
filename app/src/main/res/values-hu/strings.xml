@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">New Speech Mp3 REC</string>
+
+    <string name="status_ready">Kész</string>
+    <string name="status_recording">Felvétel… (lezárhatod a képernyőt)</string>
+    <string name="status_paused">Szünet — koppints a grafikonra, majd PLAY</string>
+    <string name="status_processing">Feldolgozás…</string>
+    <string name="status_playing">Lejátszás…</string>
+    <string name="status_indicated">Kijelölve: %1$s</string>
+    <string name="btn_play">▶ PLAY</string>
+    <string name="btn_pause_play">⏸ PLAY</string>
+    <string name="btn_rec">● REC</string>
+    <string name="btn_stop">■ STOP</string>
+    <string name="btn_resume">● FOLYTATÁS</string>
+    <string name="btn_pause">⏸ SZÜNET</string>
+    <string name="label_mic">MIC</string>
+    <string name="label_zoom">ZOOM</string>
+    <string name="label_level">SZINT</string>
+
+    <string name="nav_daw">DAW</string>
+    <string name="nav_recordings">FELVÉTELEK</string>
+    <string name="nav_correction">JAVÍTÁS</string>
+    <string name="nav_diary">NAPLÓ</string>
+    <string name="nav_stats">STAT</string>
+    <string name="nav_settings">BEÁLLÍTÁSOK</string>
+
+    <string name="settings_title">Beállítások</string>
+    <string name="settings_format">Felvétel formátuma:</string>
+    <string name="settings_noise_gate">Zajkapu (elnyomja a halk háttérzajt)</string>
+    <string name="settings_keep_screen_on">Ne kapcsoljon ki a képernyő felvétel közben</string>
+    <string name="settings_pitch_width">Hangmagasság-vonal vastagsága:</string>
+    <string name="settings_pitch_color">Hangmagasság-vonal színe:</string>
+    <string name="settings_grid_width">Rács vastagsága:</string>
+    <string name="settings_grid_color">Rács színe:</string>
+    <string name="settings_daw_bg_color">DAW háttérszín:</string>
+    <string name="settings_wave_color">Hullám színe:</string>
+    <string name="settings_language">Nyelv:</string>
+    <string name="btn_close">Bezárás</string>
+    <string name="pick_color_title">Válassz színt</string>
+
+    <string name="recordings_title">Felvételek</string>
+    <string name="recordings_empty">Nincsenek felvételek</string>
+    <string name="btn_send_all">☁ Összes küldése</string>
+    <string name="btn_download_all">⬇ Összes letöltése</string>
+    <string name="btn_import_file">📁 Fájl feltöltése</string>
+    <string name="no_category">Kategória nélkül</string>
+    <string name="author_placeholder">Én</string>
+    <string name="btn_send_ns">☁ Küldés NS-be</string>
+    <string name="btn_daw_short">▶ DAW</string>
+    <string name="btn_delete_short">✕ Törlés</string>
+    <string name="delete_confirm_title">Törlöd a felvételt?</string>
+    <string name="btn_delete">Törlés</string>
+    <string name="btn_cancel">Mégse</string>
+    <string name="requires_login">Bejelentkezés szükséges</string>
+    <string name="deleted_toast">Törölve</string>
+    <string name="imported_toast">Importálva: %1$s</string>
+    <string name="import_error_toast">Importálási hiba: %1$s</string>
+    <string name="nav_recordings_full">📁\nFelvételek</string>
+    <string name="nav_correction_full">✓\nJavítás</string>
+    <string name="nav_diary_full">📖\nNapló</string>
+    <string name="nav_stats_full">📊\nStatisztika</string>
+    <string name="nav_settings_full">⚙\nBeállítások</string>
+</resources>

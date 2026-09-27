@@ -36,7 +36,7 @@ public final class Places {
         MAP.put("_shop", new P("🏪","Sklepy",new String[]{"Zapytaj w {n} o godziny otwarcia","Dowiedz się co mają w ofercie w {n}","Zapytaj w {n} o aktualną promocję"},new String[]{"Ask at {n} about opening hours","Ask about current promotions at {n}"},new String[]{"Zeptejte se v {n} na otevírací dobu","Zeptejte se v {n} na aktuální akci"}));
         MAP.put("_office", new P("🏢","Telefon do miasta",new String[]{"Zadzwoń do {n} i zapytaj o godziny otwarcia","Zapytaj w {n} jakie dokumenty są potrzebne"},new String[]{"Call {n} and ask about opening hours"},new String[]{"Zavolejte do {n} a zeptejte se na otevírací dobu"}));
     }
-    private static final java.util.Map<String,String[]> GEN_SK=new java.util.HashMap<>(), GEN_DE=new java.util.HashMap<>(), GEN_ES=new java.util.HashMap<>();
+    private static final java.util.Map<String,String[]> GEN_SK=new java.util.HashMap<>(), GEN_DE=new java.util.HashMap<>(), GEN_ES=new java.util.HashMap<>(), GEN_HU=new java.util.HashMap<>();
     static {
         GEN_SK.put("Restauracja Kelner", new String[]{"Opýtajte sa v {n}, čo dnes odporúčajú"});
         GEN_SK.put("Sklepy", new String[]{"Opýtajte sa v {n} na otváracie hodiny","Opýtajte sa v {n} na aktuálnu akciu"});
@@ -55,6 +55,12 @@ public final class Places {
         GEN_ES.put("Telefon do miasta", new String[]{"Llama a {n} y pregunta por el horario"});
         GEN_ES.put("Wystąpienie", new String[]{"Cuenta en voz alta junto a {n} unas frases sobre tu día"});
         GEN_ES.put("Przechodzień", new String[]{"Pregunta a un transeúnte junto a {n} cómo llegar al centro"});
+        GEN_HU.put("Restauracja Kelner", new String[]{"Kérdezd meg a(z) {n} helyen, mit ajánlanak ma","Kérdezz rá a napi menüre a(z) {n} helyen"});
+        GEN_HU.put("Sklepy", new String[]{"Kérdezd meg a(z) {n} helyen a nyitvatartást","Kérdezz tanácsot egy termékről a(z) {n} helyen"});
+        GEN_HU.put("Telefon do miasta", new String[]{"Hívd fel a(z) {n} helyet, és kérdezz a nyitvatartásról"});
+        GEN_HU.put("Wystąpienie", new String[]{"Mondj el hangosan pár mondatot a napodról a(z) {n} mellett"});
+        GEN_HU.put("Przechodzień", new String[]{"Kérdezz meg egy járókelőt a(z) {n} közelében, merre van a központ"});
+        GEN_HU.put("Monolog / Czytanie", new String[]{"Kérdezd meg a(z) {n} helyen, milyen könyvet ajánlanak"});
         GEN_ES.put("Monolog / Czytanie", new String[]{"Pregunta en {n} qué libro recomiendan"});
     }
     public static P get(String type){ P p=MAP.get(type); return p!=null?p:MAP.get("_shop"); }
@@ -64,6 +70,7 @@ public final class Places {
         else if("sk".equals(l)) t=GEN_SK.getOrDefault(p.cat,GEN_SK.get("Sklepy"));
         else if("de".equals(l)) t=GEN_DE.getOrDefault(p.cat,GEN_DE.get("Sklepy"));
         else if("es".equals(l)) t=GEN_ES.getOrDefault(p.cat,GEN_ES.get("Sklepy"));
+        else if("hu".equals(l)) t=GEN_HU.getOrDefault(p.cat,GEN_HU.get("Sklepy"));
         else t=p.pl;
         return t[Math.abs(seed)%t.length].replace("{n}",name);
     }

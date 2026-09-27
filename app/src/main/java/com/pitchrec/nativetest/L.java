@@ -8,9 +8,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
-// Tlumaczenia interfejsu (PL, EN, CS, SK, DE, ES).
+// Tlumaczenia interfejsu (PL, EN, CS, SK, DE, ES, HU).
 // Kluczem jest polski tekst — L.t("Zapisz") zwraca tekst w jezyku wybranym w Ustawieniach.
-// Tabela: assets/i18n.tsv (kolumny: pl, en, cs, sk, de, es). Emoji / symbole na poczatku i
+// Tabela: assets/i18n.tsv (kolumny: pl, en, cs, sk, de, es, hu). Emoji / symbole na poczatku i
 // spacje na koncach sa zachowywane automatycznie ("⏳ Wczytywanie…" -> "⏳ Loading…").
 // Brak tlumaczenia -> SK bierze CS, reszta EN, a na koncu oryginalny polski tekst.
 public final class L {
@@ -36,8 +36,8 @@ public final class L {
                 if (line.isEmpty() || line.startsWith("#")) continue;
                 String[] p = line.split("\t", -1);
                 if (p.length < 2) continue;
-                String[] v = new String[6];
-                for (int i = 0; i < 6; i++) v[i] = i < p.length ? p[i].replace("\\n", "\n") : "";
+                String[] v = new String[7];
+                for (int i = 0; i < 7; i++) v[i] = i < p.length ? p[i].replace("\\n", "\n") : "";
                 TABLE.put(v[0].trim(), v);
             }
         } catch (Exception e) { /* brak tabeli -> polski */ }
@@ -55,6 +55,7 @@ public final class L {
             case "sk": return 3;
             case "de": return 4;
             case "es": return 5;
+            case "hu": return 6;
             default: return 0;
         }
     }

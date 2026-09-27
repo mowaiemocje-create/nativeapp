@@ -252,31 +252,15 @@ public class BackgroundRecorderService extends Service {
 
                                     float freq = YinPitchDetector.detect(yinWindow);
                                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
-                                    // Wykrywanie glosu czlowieka i pauz (VAD) — patrz VadDetector
-                                    LiveAudioData.analyzeVoice(windowStartSample + YIN_WINDOW, rms, freq);
-
-                                    if (freq > 70 && freq < 1000 && rms > 0.006f) {
-                                        // Wygladzanie wykladnicze (fSm), dokladnie jak w
-                                        // oryginalnym JS — bez tego kazde okno dawalo
-                                        // "surowy" wynik YIN, co przy naturalnym szumie
-                                        // analizy wygladalo jak nagle skoki.
-                                        float smoothed = lastSmoothedFreq > 0
-                                                ? lastSmoothedFreq * 0.88f + freq * 0.12f
-                                                : freq;
-                                        lastSmoothedFreq = smoothed;
-                                        LiveAudioData.appendPitch(windowStartSample, smoothed);
-                                    } else {
-                                        LiveAudioData.appendPitch(windowStartSample, -1);
-                                        // Po ciszy/pauzie nowa porcja mowy startuje od
-                                        // PRAWDZIWEJ wartosci, nie "dojezdza" od tonu sprzed pauzy.
-                                        lastSmoothedFreq = 0f;
-                                    }
+                                    // VAD + pauzy, ciagla linia pitch (PitchTracker) i ocena emisji wg norm
+                                    LiveAudioData.processFrame(windowStartSample, rms, freq, YinPitchDetector.lastRelaxed);
                                     yinFillCount = 0;
                                 }
                             }
                             samplePos += read;
                         }
                     }
+                    LiveAudioData.finishAnalysis(); // domkniecie ostatniej porcji mowy / linii pitch
                 }
             }, "PitchRecAudioReadThread");
             recordThread.start();

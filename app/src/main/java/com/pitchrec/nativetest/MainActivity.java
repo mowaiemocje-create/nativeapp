@@ -545,7 +545,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 nsAuthCheckedAt = System.currentTimeMillis();
                 NsClient.loadCategories(r.token, r.email);
                 prefs().edit().remove("map_name").apply();
-                loadMapNameFromNs();
+                loadProfileFromNs(true);
                 updateNavForLogin();
                 refreshAccountSection();
                 Toast.makeText(this, L.t("✓ Zalogowano do NewSpeech"), Toast.LENGTH_SHORT).show();
@@ -614,7 +614,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             String st = nsAuthState;
             if ("none".equals(st) || "expired".equals(st)) st = "checking";
             if ("ok".equals(st)) {
-                status.setText(L.t("✓ Zalogowano: ") + nsEmail());
+                String ph = prefs().getString("map_phone", "");
+                status.setText(L.t("✓ Zalogowano: ") + nsEmail() + (ph.isEmpty() ? "" : "\n📞 " + ph));
                 status.setTextColor(getResources().getColor(R.color.pr_accent));
             } else if ("offline".equals(st)) {
                 status.setText(L.t("⚠ Brak połączenia z NS — logowanie niepotwierdzone (") + nsEmail() + ")");
@@ -664,6 +665,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     // ── WYSYLKA DO NS ──
+    // ID rekordu w NS — pozniej po nim rozpoznajemy system mowy przy poprawce
+    private void rememberNsId(File f, String body) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(body);
+            if (o.optJSONObject("record") != null) o = o.optJSONObject("record");
+            String id = o.optString("id", "");
+            if (id.isEmpty()) return;
+            RecMeta m = RecMeta.load(this, f.getName());
+            m.nsRecordId = id;
+            m.save(this, f.getName());
+        } catch (Exception e) { }
+    }
+
     private void markNs(File f, String status) {
         RecMeta m = RecMeta.load(this, f.getName());
         m.ns = status;
@@ -693,6 +707,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         NsClient.Callback cb = r -> {
             if (r.ok) {
                 markNs(file, "sent");
+                if (!isFix) rememberNsId(file, r.body);
                 setStatus(isFix ? L.t("☁✓ Poprawka wysłana! Czeka na ocenę trenera.") : L.t("☁✓ NS: wysłano (") + L.cat(meta.cat) + ")");
                 Toast.makeText(this, isFix ? L.t("☁✓ Poprawka wysłana") : L.t("☁✓ Wysłano do NS"), Toast.LENGTH_SHORT).show();
                 if (isFix) fixListCache = null;
@@ -761,6 +776,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         NsClient.Callback cb = r -> {
             if (r.ok) {
                 markNs(f, "sent");
+                rememberNsId(f, r.body);
                 sendNext(todo, idx + 1, okCount + 1);
             } else {
                 if (r.isAuthError()) markSessionExpired(); else markNs(f, "error");
@@ -787,10 +803,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (fix != null) {
             init.cat = fix[1];
             init.fixRecordId = fix[0];
-            banner = L.t("🔄 Nagrywasz poprawkę dla: ") + fix[1];
+            init.fixSys = fix[2];
+            banner = L.t("🔄 Nagrywasz poprawkę dla: ") + L.cat(fix[1]) + (fix[2].isEmpty() ? "" : " · " + L.t("system") + " " + fix[2]);
             // zapamietujemy od razu na pliku — nawet "Zamknij" nie zgubi informacji, ze to poprawka
             RecMeta pre = RecMeta.load(this, file.getName());
             pre.fixRecordId = fix[0];
+            pre.fixSys = fix[2];
             pre.save(this, file.getName());
         }
         final boolean isFix = fix != null;
@@ -868,16 +886,38 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         return n.isEmpty() ? "Kursant" : n;
     }
 
-    private void loadMapNameFromNs() {
-        if (!isLoggedIn() || !prefs().getString("map_name", "").isEmpty()) return;
-        NsClient.request("GET", "/users/me", nsToken(), nsEmail(), null, null, r -> {
+    // Profil z NewSpeech (jak nsFetchProfile w PWA): imie i nazwisko -> imie kursanta w opisie
+    // nagrania + nazwa na mapie, telefon -> "Chetnie porozmawiam", miasto -> dziennik.
+    // force = po swiezym zalogowaniu nadpisujemy imie danymi z konta.
+    private void loadMapNameFromNs() { loadProfileFromNs(false); }
+
+    private void loadProfileFromNs(boolean force) {
+        if (!isLoggedIn()) return;
+        String uid = nsUserId();
+        String path = uid.isEmpty() ? "/users/me" : "/users/" + uid;
+        NsClient.request("GET", path, nsToken(), nsEmail(), null, null, r -> {
             if (!r.ok) return;
             try {
                 org.json.JSONObject d = new org.json.JSONObject(r.body);
-                String n = d.optString("name", "");
-                if (n.isEmpty()) n = d.optString("first_name", "");
-                if (!n.isEmpty()) prefs().edit().putString("map_name", n).apply();
-            } catch (Exception e) { }
+                if (d.optJSONObject("user") != null) d = d.optJSONObject("user");
+                String full = (d.optString("first_name", "") + " " + d.optString("last_name", "")).trim();
+                if (full.isEmpty()) full = d.optString("name", "").trim();
+                String phone = d.optString("phone", "").trim();
+                if (phone.isEmpty()) phone = d.optString("phone_number", "").trim();
+                if ("null".equals(phone)) phone = "";
+                String city = d.optString("city", "").trim();
+                if ("null".equals(city)) city = "";
+                if (uid.isEmpty() && !d.optString("id", "").isEmpty()) prefs().edit().putString("ns_user_id", d.optString("id", "")).apply();
+                android.content.SharedPreferences.Editor e = prefs().edit();
+                if (!full.isEmpty()) {
+                    e.putString("map_name", full);
+                    if (force || prefs().getString("student_name", "").isEmpty()) e.putString("student_name", full);
+                }
+                if (!phone.isEmpty() && (force || prefs().getString("map_phone", "").isEmpty())) e.putString("map_phone", phone);
+                if (!city.isEmpty()) e.putString("ns_city", city);
+                e.apply();
+                if ("set".equals(currentPage)) renderSettingsPage();
+            } catch (Exception ex) { }
         });
     }
 
@@ -940,6 +980,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         selectedFormat = p.getString("format", "mp3"); // domyslnie MP3
         LiveAudioData.pauseMinS = p.getFloat("pause_min", 1.0f);
         LiveAudioData.pauseMaxS = p.getFloat("pause_max", 2.5f);
+        LiveAudioData.showPauses = p.getBoolean("show_pauses", true);
+        LiveAudioData.showNorms = p.getBoolean("show_norms", true);
+        LiveAudioData.showArrows = p.getBoolean("show_arrows", true);
+        Norms.load(p);
         applyKeepScreenOnSetting();
     }
 
@@ -957,6 +1001,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putString("format", selectedFormat)
                 .putFloat("pause_min", LiveAudioData.pauseMinS)
                 .putFloat("pause_max", LiveAudioData.pauseMaxS)
+                .putBoolean("show_pauses", LiveAudioData.showPauses)
+                .putBoolean("show_norms", LiveAudioData.showNorms)
+                .putBoolean("show_arrows", LiveAudioData.showArrows)
                 .apply();
         if (pitchWaveView != null) pitchWaveView.refreshStyle();
     }
@@ -990,7 +1037,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         Button normBtn = Ui.button(this, "🎯  " + L.t("NORMY"), R.color.pr_purple, false);
         normBtn.setTextSize(13f);
         normBtn.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
-        normBtn.setOnClickListener(v -> comingSoon(L.t("Normy")));
+        normBtn.setOnClickListener(v -> renderNormsPage());
         tiles.addView(normBtn, Ui.weight(1f, 0));
         android.widget.LinearLayout.LayoutParams tlp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
         tlp.bottomMargin = (int) (8 * d);
@@ -1021,6 +1068,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         rec.addView(gpsRow);
         c.addView(rec);
 
+        // 3b) Podpowiedzi na wykresie i w statystykach
+        c.addView(sectionHeader(L.t("PODPOWIEDZI")));
+        android.widget.LinearLayout hints = Ui.card(this);
+        hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
+        hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
+        hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
+        hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
+        hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
+        c.addView(hints);
+
         // 4) Analiza pauz
         c.addView(sectionHeader(L.t("PAUZY — ZAKRES PRAWIDŁOWY")));
         android.widget.LinearLayout pz = Ui.card(this);
@@ -1032,8 +1089,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(pz);
 
         // 5) Wyglad DAW
-        c.addView(sectionHeader(L.t("WYGLĄD DAW")));
-        android.widget.LinearLayout daw = Ui.card(this);
+        android.widget.LinearLayout dawCard = Ui.card(this);
+        android.widget.LinearLayout dawHead = Ui.row(this);
+        TextView dawTitle = Ui.text(this, "🎨  " + L.t("WYGLĄD DAW") + "  ·  " + L.t("kolory i linie"), 13f, R.color.pr_text);
+        dawTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        dawHead.addView(dawTitle, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        dawHead.addView(Ui.text(this, dawLookOpen ? "▲" : "▼", 14f, R.color.pr_accent));
+        dawHead.setPadding(0, (int) (4 * d), 0, (int) (4 * d));
+        dawHead.setOnClickListener(v -> { dawLookOpen = !dawLookOpen; renderSettingsPage(); });
+        dawCard.addView(dawHead);
+        c.addView(dawCard);
+        android.widget.LinearLayout daw = new android.widget.LinearLayout(this);
+        daw.setOrientation(android.widget.LinearLayout.VERTICAL);
+        daw.setPadding(0, (int) (10 * d), 0, 0);
+        if (dawLookOpen) dawCard.addView(daw);
         TextView pitchWidthLabel = Ui.text(this, String.format(Locale.getDefault(), L.t("Grubość linii pitch: %.0f"), LiveAudioData.pitchLineWidthDp), 13f, R.color.pr_text);
         daw.addView(pitchWidthLabel);
         SliderView pitchWidthSlider = new SliderView(this);
@@ -1061,7 +1130,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         addColorRow(daw, Ui.text(this, L.t("Kolor siatki"), 13f, R.color.pr_text), LiveAudioData.gridLineColor, color -> { LiveAudioData.gridLineColor = color; saveDawSettings(); });
         addColorRow(daw, Ui.text(this, L.t("Kolor tła DAW"), 13f, R.color.pr_text), LiveAudioData.dawBackgroundColor, color -> { LiveAudioData.dawBackgroundColor = color; saveDawSettings(); });
         addColorRow(daw, Ui.text(this, L.t("Kolor fali"), 13f, R.color.pr_text), LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
-        c.addView(daw);
 
         // 6) Mapa i dostepnosc do rozmowy
         c.addView(sectionHeader(L.t("MAPA I DOSTĘPNOŚĆ")));
@@ -1090,7 +1158,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(sectionHeader(L.t("JĘZYK")));
         android.widget.LinearLayout lang = Ui.card(this);
         String cur = getSavedLanguage(this);
-        String[][] langs = {{"pl", L.t("🇵🇱 Polski")}, {"en", L.t("🇬🇧 English")}, {"cs", L.t("🇨🇿 Čeština")}, {"sk", L.t("🇸🇰 Slovenčina")}, {"de", L.t("🇩🇪 Deutsch")}, {"es", L.t("🇪🇸 Español")}};
+        String[][] langs = {{"pl", "🇵🇱 Polski"}, {"en", "🇬🇧 English"}, {"cs", "🇨🇿 Čeština"}, {"sk", "🇸🇰 Slovenčina"}, {"de", "🇩🇪 Deutsch"}, {"es", "🇪🇸 Español"}, {"hu", "🇭🇺 Magyar"}};
         android.widget.LinearLayout lr = null;
         for (int i = 0; i < langs.length; i++) {
             if (i % 2 == 0) { lr = Ui.row(this); lang.addView(lr); if (i > 0) lr.setPadding(0, (int) (6 * d), 0, 0); }
@@ -1108,6 +1176,155 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         about.setPadding(0, (int) (10 * d), 0, 0);
         c.addView(about);
         c.addView(Ui.spacer(this, 20));
+    }
+
+    private boolean dawLookOpen = false;
+
+    // ── NORMY (jak train.html w PitchRec): czasy 4 faz emisji, prog ciszy, tolerancja,
+    // stosunek szczyt/cisza; kalibracja z nagrania wzorcowego trenera ──
+    private void renderNormsPage() {
+        android.widget.LinearLayout c = findViewById(R.id.setContent);
+        c.removeAllViews();
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout head = Ui.row(this);
+        Button back = Ui.button(this, "← " + L.t("USTAWIENIA"), R.color.pr_muted, false);
+        back.setOnClickListener(v -> renderSettingsPage());
+        head.addView(back);
+        c.addView(head);
+        c.addView(pageTitle("🎯 " + L.t("NORMY")));
+
+        android.widget.LinearLayout info = Ui.card(this);
+        info.addView(hint(L.t("Każda porcja mowy jest oceniana w 4 fazach: 1) łagodne wejście, 2) narastanie, 3) plateau — utrzymanie, 4) opadanie — wyciszenie. Wynik pojawia się na wykresie nad porcją mowy i na żywo w czasie nagrywania.")));
+        info.addView(new PhaseDiagram(this));
+        c.addView(info);
+
+        c.addView(sectionHeader(L.t("CZASY FAZ")));
+        android.widget.LinearLayout t = Ui.card(this);
+        t.addView(normStepper("1 · " + L.t("Faza leniwa (cichy start)"), Norms.ph1, 0.5f, 3.0f, 0.1f, "%.1f s", v -> Norms.ph1 = v));
+        t.addView(normStepper("2 · " + L.t("Narastanie"), Norms.ph2, 0.5f, 4.0f, 0.1f, "%.1f s", v -> Norms.ph2 = v));
+        t.addView(normStepper("4 · " + L.t("Opadanie"), Norms.ph3, 0.1f, 1.5f, 0.1f, "%.1f s", v -> Norms.ph3 = v));
+        c.addView(t);
+
+        c.addView(sectionHeader(L.t("CZUŁOŚĆ OCENY")));
+        android.widget.LinearLayout q = Ui.card(this);
+        q.addView(normStepper(L.t("Próg ciszy na starcie"), Norms.quietThresh * 100, 5, 90, 5, "%.0f%%", v -> Norms.quietThresh = v / 100f));
+        q.addView(normStepper(L.t("Tolerancja"), Norms.tolerance * 100, 5, 30, 1, "±%.0f%%", v -> Norms.tolerance = v / 100f));
+        q.addView(normStepper(L.t("Szczyt / cisza (wzorzec)"), Norms.pkRatio, 2, 50, 0.5f, "×%.1f", v -> Norms.pkRatio = v));
+        q.addView(hint(Norms.shapeRef != null ? "✓ " + L.t("Zapisany kształt wzorca — porównanie podobieństwa jest włączone.") : L.t("Brak wzorca kształtu — nagraj wzorzec, aby porównywać podobieństwo.")));
+        c.addView(q);
+
+        c.addView(sectionHeader(L.t("KALIBRACJA Z NAGRANIA")));
+        android.widget.LinearLayout cal = Ui.card(this);
+        cal.addView(hint(L.t("Trener nagrywa jedną wzorcową porcję mowy (z ciszą na początku), a potem wybiera ją tutaj — czasy faz i kształt zostaną wyliczone automatycznie.")));
+        Button pick = Ui.button(this, "🎙 " + L.t("Kalibruj z nagrania"), R.color.pr_accent, true);
+        pick.setOnClickListener(v -> pickCalibrationRecording());
+        cal.addView(pick, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        c.addView(cal);
+
+        Button reset = Ui.button(this, "↺ " + L.t("Przywróć domyślne"), R.color.pr_warn, false);
+        reset.setOnClickListener(v -> { Norms.resetDefaults(); Norms.save(prefs()); renderNormsPage(); });
+        android.widget.LinearLayout.LayoutParams rl = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        rl.topMargin = (int) (8 * d);
+        c.addView(reset, rl);
+        c.addView(Ui.spacer(this, 20));
+        View sv = findViewById(R.id.setPage);
+        if (sv instanceof android.widget.ScrollView) ((android.widget.ScrollView) sv).scrollTo(0, 0);
+    }
+
+    public interface FloatSetter { void set(float v); }
+
+    private android.widget.LinearLayout normStepper(String label, float value, float min, float max, float step, String fmt, FloatSetter setter) {
+        android.widget.LinearLayout r = Ui.row(this);
+        r.setPadding(0, (int) Ui.dp(this, 4), 0, (int) Ui.dp(this, 4));
+        r.addView(Ui.text(this, label, 13f, R.color.pr_text), new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button minus = Ui.button(this, "−", R.color.pr_muted, false);
+        Button plus = Ui.button(this, "+", R.color.pr_accent, false);
+        TextView val = Ui.text(this, String.format(Locale.US, fmt, value), 14f, R.color.pr_accent);
+        val.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        val.setGravity(android.view.Gravity.CENTER);
+        final float[] cur = {value};
+        View.OnClickListener st = b -> {
+            cur[0] = Math.max(min, Math.min(max, Math.round((cur[0] + (b == plus ? step : -step)) / step) * step));
+            setter.set(cur[0]);
+            Norms.save(prefs());
+            val.setText(String.format(Locale.US, fmt, cur[0]));
+        };
+        minus.setOnClickListener(st);
+        plus.setOnClickListener(st);
+        int sz = (int) Ui.dp(this, 38);
+        r.addView(minus, new android.widget.LinearLayout.LayoutParams(sz, sz));
+        r.addView(val, new android.widget.LinearLayout.LayoutParams((int) Ui.dp(this, 70), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        r.addView(plus, new android.widget.LinearLayout.LayoutParams(sz, sz));
+        return r;
+    }
+
+    private void pickCalibrationRecording() {
+        File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files == null || files.length == 0) { Toast.makeText(this, L.t("Brak nagrań"), Toast.LENGTH_SHORT).show(); return; }
+        java.util.Arrays.sort(files, (x, y) -> Long.compare(y.lastModified(), x.lastModified()));
+        int n = Math.min(files.length, 30);
+        String[] labels = new String[n];
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM HH:mm", Locale.US);
+        for (int i = 0; i < n; i++) {
+            RecMeta m = RecMeta.load(this, files[i].getName());
+            labels[i] = df.format(new java.util.Date(files[i].lastModified())) + (m.cat.isEmpty() ? "" : " · " + L.cat(m.cat));
+        }
+        new AlertDialog.Builder(this).setTitle(L.t("Wybierz nagranie wzorcowe"))
+                .setItems(labels, (dlg, which) -> calibrateFrom(files[which]))
+                .setNegativeButton(getString(R.string.btn_cancel), null).show();
+    }
+
+    private void calibrateFrom(File f) {
+        Toast.makeText(this, "⏳ " + L.t("Analizuję nagranie…"), Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            Norms.Calib cb = null;
+            try { cb = Norms.calibrate(AudioFileLoader.rmsFrames(f)); } catch (Exception e) { }
+            final Norms.Calib res = cb;
+            runOnUiThread(() -> {
+                if (res == null) {
+                    new AlertDialog.Builder(this).setTitle(L.t("NORMY")).setMessage(L.t("Nagranie zbyt ciche albo za krótkie — nagraj wzorzec bliżej mikrofonu.")).setPositiveButton("OK", null).show();
+                    return;
+                }
+                String msg = String.format(Locale.US, "1 · %s: %.1f s\n2 · %s: %.1f s\n3 · %s: %.1f s\n4 · %s: %.1f s\n%s: %.0f%%\n%s: ×%.1f",
+                        L.t("Faza leniwa (cichy start)"), res.ph1, L.t("Narastanie"), res.ph2, L.t("Plateau"), res.plateau, L.t("Opadanie"), res.ph3,
+                        L.t("Próg ciszy na starcie"), res.quiet * 100, L.t("Szczyt / cisza (wzorzec)"), res.pk);
+                new AlertDialog.Builder(this).setTitle(L.t("Wynik kalibracji")).setMessage(msg)
+                        .setPositiveButton(L.t("Zastosuj"), (dd, w) -> {
+                            Norms.ph1 = res.ph1; Norms.ph2 = res.ph2; Norms.ph3 = res.ph3;
+                            Norms.quietThresh = res.quiet; Norms.pkRatio = res.pk; Norms.shapeRef = res.shape;
+                            Norms.save(prefs());
+                            renderNormsPage();
+                            Toast.makeText(this, "✓ " + L.t("Zastosowano"), Toast.LENGTH_SHORT).show();
+                        })
+                        .setNegativeButton(getString(R.string.btn_cancel), null).show();
+            });
+        }).start();
+    }
+
+    // Maly schemat 4 faz (ksztalt obwiedni wzorca) z czasami z ustawien
+    private static class PhaseDiagram extends View {
+        private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        PhaseDiagram(android.content.Context c) {
+            super(c);
+            setLayoutParams(new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) Ui.dp(c, 90)));
+        }
+        @Override protected void onDraw(android.graphics.Canvas cv) {
+            float w = getWidth(), h = getHeight(), dd = getResources().getDisplayMetrics().density;
+            float plat = Math.max(0.5f, Norms.ph2 * 0.6f);
+            float tot = Norms.ph1 + Norms.ph2 + plat + Norms.ph3;
+            float x1 = w * Norms.ph1 / tot, x2 = x1 + w * Norms.ph2 / tot, x3 = x2 + w * plat / tot;
+            float base = h - 16 * dd, topY = 10 * dd, quietY = base - (base - topY) * 0.15f;
+            int[] cols = {0xFF8888BB, 0xFFE8820C, 0xFF00C853, 0xFF00CFFF};
+            float[][] xs = {{0, x1}, {x1, x2}, {x2, x3}, {x3, w}};
+            for (int i = 0; i < 4; i++) { p.setColor((cols[i] & 0x00FFFFFF) | 0x30000000); p.setStyle(android.graphics.Paint.Style.FILL); cv.drawRect(xs[i][0], topY, xs[i][1], base, p); }
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo(0, quietY); path.lineTo(x1, quietY); path.lineTo(x2, topY); path.lineTo(x3, topY); path.lineTo(w, base - 4 * dd);
+            p.setStyle(android.graphics.Paint.Style.STROKE); p.setStrokeWidth(3 * dd); p.setColor(0xFFE8820C);
+            cv.drawPath(path, p);
+            p.setStyle(android.graphics.Paint.Style.FILL); p.setTextSize(10 * dd); p.setFakeBoldText(true);
+            String[] n = {"1", "2", "3", "4"};
+            for (int i = 0; i < 4; i++) { p.setColor(cols[i]); cv.drawText(n[i], (xs[i][0] + xs[i][1]) / 2 - 3 * dd, h - 3 * dd, p); }
+        }
     }
 
     private TextView sectionHeader(String text) {
@@ -1270,6 +1487,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 wk.setPadding(0, (int) (2 * d), 0, 0);
                 card.addView(wk);
             }
+            TextView sysTv = Ui.text(this, "🗣 " + L.t("System mowy") + ": …", 12f, R.color.pr_purple);
+            sysTv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            sysTv.setPadding(0, (int) (6 * d), 0, 0);
+            card.addView(sysTv);
+            resolveFixSys(fe.id, sys -> sysTv.setText(sys.isEmpty()
+                    ? "🗣 " + L.t("System mowy") + ": ? — " + L.t("nagraj w tym samym systemie co oryginał")
+                    : "🗣 " + L.t("System mowy") + ": " + sys + " — " + L.t("poprawka musi być w tym samym systemie")));
             card.addView(Ui.spacer(this, 10));
             Button rec = Ui.button(this, L.t("🎤 Nagraj poprawkę"), R.color.pr_accent, true);
             rec.setOnClickListener(v -> startFixRecording(fe.id, fe.categoryName));
@@ -1286,11 +1510,49 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Tryb poprawki: zapamietany w ustawieniach (z czasem), zeby przetrwal np. zamkniecie
     // aplikacji w trakcie nagrywania. Starszy niz 3 h jest ignorowany (bezpiecznik jak w PWA).
     private void startFixRecording(String recordId, String catName) {
-        prefs().edit().putString("fix_record_id", recordId).putString("fix_cat", catName)
+        prefs().edit().putString("fix_record_id", recordId).putString("fix_cat", catName).remove("fix_sys")
                 .putLong("fix_saved_at", System.currentTimeMillis()).apply();
         showPage("daw");
-        setStatus(L.t("🔄 Nagrywasz poprawkę dla: ") + catName + L.t("  (dotknij, aby anulować)"));
-        Toast.makeText(this, L.t("Nagraj poprawkę — REC"), Toast.LENGTH_SHORT).show();
+        setStatus(L.t("🔄 Nagrywasz poprawkę dla: ") + L.cat(catName) + L.t("  (dotknij, aby anulować)"));
+        resolveFixSys(recordId, sys -> {
+            if (!recordId.equals(prefs().getString("fix_record_id", ""))) return;
+            prefs().edit().putString("fix_sys", sys).apply();
+            String msg = sys.isEmpty()
+                    ? L.t("Nagraj poprawkę w TYM SAMYM systemie mowy, co nagranie z błędem.")
+                    : L.f("Poprawkę nagraj w systemie {0} — takim samym jak w nagraniu z błędem. Inny system nie będzie dostępny.", sys);
+            new AlertDialog.Builder(this).setTitle("🔄 " + L.t("Nagraj poprawkę") + (sys.isEmpty() ? "" : " · " + sys))
+                    .setMessage(msg).setPositiveButton("OK", null).show();
+            setStatus(L.t("🔄 Nagrywasz poprawkę dla: ") + L.cat(catName) + (sys.isEmpty() ? "" : " · " + sys) + L.t("  (dotknij, aby anulować)"));
+        });
+    }
+
+    // System mowy (Basic/U1/U1K/FIX/K1/K2/Full) nagrania, ktore trzeba poprawic.
+    // 1) nagranie z tego telefonu (zapamietane ID z NS), 2) nazwa pliku w NS — PitchRec
+    // zapisuje system w nazwie (np. "Sklepy_3-maj-2026-(14h-5m-2s)-U1K-stres.mp3").
+    private static final java.util.Map<String, String> FIX_SYS_CACHE = new java.util.HashMap<>();
+    private static final java.util.regex.Pattern SYS_IN_NAME = java.util.regex.Pattern.compile(
+            "s(?:\\)|%29|\\\\u0029)-(Basic|U1K|U1|FIX|K1|K2|Full)(?=[^A-Za-z0-9]|$)");
+
+    public interface StrCb { void done(String s); }
+
+    private void resolveFixSys(String recordId, StrCb cb) {
+        String cached = FIX_SYS_CACHE.get(recordId);
+        if (cached != null) { cb.done(cached); return; }
+        File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files != null) for (File f : files) {
+            RecMeta m = RecMeta.load(this, f.getName());
+            if (recordId.equals(m.nsRecordId) && !m.sys.isEmpty()) { FIX_SYS_CACHE.put(recordId, m.sys); cb.done(m.sys); return; }
+        }
+        if (!isLoggedIn()) { cb.done(""); return; }
+        NsClient.request("GET", "/records/" + recordId, nsToken(), nsEmail(), null, null, r -> {
+            String sys = "";
+            if (r.ok && r.body != null) {
+                java.util.regex.Matcher mm = SYS_IN_NAME.matcher(r.body);
+                if (mm.find()) sys = mm.group(1);
+            }
+            if (r.ok) FIX_SYS_CACHE.put(recordId, sys);
+            cb.done(sys);
+        });
     }
 
     private String[] loadFixTarget() {
@@ -1298,11 +1560,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String id = p.getString("fix_record_id", null);
         if (id == null || id.isEmpty()) return null;
         if (System.currentTimeMillis() - p.getLong("fix_saved_at", 0L) > 3 * 60 * 60 * 1000L) { clearFixTarget(); return null; }
-        return new String[]{id, p.getString("fix_cat", "")};
+        return new String[]{id, p.getString("fix_cat", ""), p.getString("fix_sys", "")};
     }
 
     private void clearFixTarget() {
-        prefs().edit().remove("fix_record_id").remove("fix_cat").remove("fix_saved_at").apply();
+        prefs().edit().remove("fix_record_id").remove("fix_cat").remove("fix_sys").remove("fix_saved_at").apply();
     }
 
     private android.widget.LinearLayout tile(String icon, String label, int colorRes, View.OnClickListener l) {

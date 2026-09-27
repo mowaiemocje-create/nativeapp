@@ -58,6 +58,25 @@ public class LiveAudioData {
 
     // ── Wykrywanie glosu i pauz (VAD, jak w PitchRec PWA v288) ──
     public static final VadDetector vad = new VadDetector();
+    public static final PitchTracker tracker = new PitchTracker();
+    public static final Norms norms = new Norms();
+    // Podpowiedzi na wykresie — wlaczane/wylaczane w Ustawieniach
+    public static volatile boolean showPauses = true, showNorms = true, showArrows = true;
+    private static final PitchTracker.Sink PITCH_SINK = LiveAudioData::appendPitch;
+
+    // JEDNO miejsce analizy okna (2048 probek) — wspolne dla nagrywania na zywo i wczytanego
+    // pliku: VAD + pauzy, ciagla linia pitch, ocena emisji wg norm.
+    public static void processFrame(long windowStartSample, float rms, float strictF0, float relaxedF0) {
+        long end = windowStartSample + 2048;
+        boolean speech = analyzeVoice(end, rms, strictF0);
+        tracker.frame(windowStartSample, rms, strictF0, relaxedF0, PITCH_SINK);
+        norms.frame(end / (double) SAMPLE_RATE, rms, speech);
+    }
+
+    public static void finishAnalysis() {
+        tracker.flush(PITCH_SINK);
+        norms.finish(getTotalSamplesWritten() / (double) SAMPLE_RATE);
+    }
     public static volatile float pauseMinS = 1.0f, pauseMaxS = 2.5f; // prawidlowy zakres pauzy (Ustawienia)
     public static class Pause {
         public final double start, end;
@@ -68,17 +87,17 @@ public class LiveAudioData {
     private static final List<Pause> pauses = new ArrayList<>();
 
     // Wolane dla kazdego okna analizy (YIN, 2048 probek) — z nagrywania i z wczytanego pliku.
-    public static void analyzeVoice(long windowEndSample, float rms, float f0) {
-        vad.frame(windowEndSample / (double) SAMPLE_RATE, rms, rms > 0.003f ? f0 : -1f);
+    public static boolean analyzeVoice(long windowEndSample, float rms, float f0) {
+        boolean speech = vad.frame(windowEndSample / (double) SAMPLE_RATE, rms, rms > 0.003f ? f0 : -1f);
         double[] pp = vad.pendingPause;
-        if (pp == null) return;
+        if (pp == null) return speech;
         vad.pendingPause = null;
         float[] env;
         int e0;
         synchronized (lock) {
             e0 = Math.max(0, (int) ((pp[0] - 1.0) * SAMPLE_RATE / ENVELOPE_CHUNK));
             int e1 = Math.min(envelopeSize, (int) (pp[1] * SAMPLE_RATE / ENVELOPE_CHUNK) + 1);
-            if (e1 - e0 < 8) return;
+            if (e1 - e0 < 8) return speech;
             env = new float[e1 - e0];
             System.arraycopy(envelope, e0, env, 0, e1 - e0);
         }
@@ -89,6 +108,7 @@ public class LiveAudioData {
                 if (pauses.size() > 400) pauses.remove(0);
             }
         }
+        return speech;
     }
 
     public static List<Pause> pausesSnapshot() {
@@ -97,6 +117,8 @@ public class LiveAudioData {
 
     public static void reset() {
         vad.reset();
+        tracker.reset();
+        norms.reset();
         synchronized (lock) {
             pauses.clear();
             envelope = new float[4096];
@@ -138,19 +160,12 @@ public class LiveAudioData {
     public static void appendPitch(long sampleIndex, float freq) {
         synchronized (lock) {
             if (freq > 0) {
-                if (!pitchPts.isEmpty()) {
-                    PitchPoint last = pitchPts.get(pitchPts.size() - 1);
-                    if (last.freq > 0 && sampleIndex - last.sampleIndex <= SAMPLE_RATE / 20) {
-                        pitchPts.set(pitchPts.size() - 1, new PitchPoint(last.sampleIndex, freq));
-                        return;
-                    }
-                }
                 pitchPts.add(new PitchPoint(sampleIndex, freq));
             } else if (!pitchPts.isEmpty() && pitchPts.get(pitchPts.size() - 1).freq > 0) {
                 pitchPts.add(new PitchPoint(sampleIndex, -1));
             }
-            if (pitchPts.size() > 18000) {
-                for (int i = 0; i < 2000; i++) pitchPts.remove(0);
+            if (pitchPts.size() > 40000) {
+                pitchPts.subList(0, 4000).clear();
             }
         }
     }

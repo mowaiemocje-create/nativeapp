@@ -1,349 +1,409 @@
-# pl	en	cs	sk	de	es
-Łącznie	Total	Celkem	Celkom	Insgesamt	Total
-Telefony	Phone calls	Telefony	Telefonáty	Telefonate	Llamadas
-Miasto	City	Město	Mesto	Stadt	Ciudad
-ZAMKNIJ — zapisz bez opisu	CLOSE — save without description	ZAVŘÍT — uložit bez popisu	ZAVRIEŤ — uložiť bez popisu	SCHLIESSEN — ohne Beschreibung speichern	CERRAR — guardar sin descripción
-ZAMKNIJ	CLOSE	ZAVŘÍT	ZAVRIEŤ	SCHLIESSEN	CERRAR
-IMIĘ KURSANTA	STUDENT NAME	JMÉNO KURZISTY	MENO KURZISTU	NAME DES TEILNEHMERS	NOMBRE DEL ALUMNO
-np. Anna K.	e.g. Anna K.	např. Anna K.	napr. Anna K.	z. B. Anna K.	p. ej. Anna K.
-KATEGORIA	CATEGORY	KATEGORIE	KATEGÓRIA	KATEGORIE	CATEGORÍA
-SYSTEM NOWEJ MOWY	NEW SPEECH SYSTEM	SYSTÉM NOVÉ ŘEČI	SYSTÉM NOVEJ REČI	NEUE-SPRACHE-SYSTEM	SISTEMA NUEVA HABLA
-LOKALIZACJA GPS	GPS LOCATION	POLOHA GPS	POLOHA GPS	GPS-STANDORT	UBICACIÓN GPS
-Brak zgody na lokalizację — kliknij, aby zezwolić	No location permission — tap to allow	Chybí povolení polohy — klepněte pro povolení	Chýba povolenie polohy — ťuknite pre povolenie	Keine Standortfreigabe — tippen zum Erlauben	Sin permiso de ubicación — toca para permitir
-Pobieranie GPS…	Getting GPS…	Získávám GPS…	Získavam GPS…	GPS wird ermittelt…	Obteniendo GPS…
-GPS niedostępny — kliknij, aby spróbować ponownie	GPS unavailable — tap to try again	GPS nedostupné — klepněte pro nový pokus	GPS nedostupné — ťuknite pre nový pokus	GPS nicht verfügbar — tippen zum Wiederholen	GPS no disponible — toca para reintentar
-EMOCJE W TEJ SYTUACJI	EMOTIONS IN THIS SITUATION	EMOCE V TÉTO SITUACI	EMÓCIE V TEJTO SITUÁCII	GEFÜHLE IN DIESER SITUATION	EMOCIONES EN ESTA SITUACIÓN
-NOTATKA	NOTE	POZNÁMKA	POZNÁMKA	NOTIZ	NOTA
-opcjonalnie…	optional…	volitelné…	voliteľné…	optional…	opcional…
-ZAPISZ ✓	SAVE ✓	ULOŽIT ✓	ULOŽIŤ ✓	SPEICHERN ✓	GUARDAR ✓
-Kategoria	Category	Kategorie	Kategória	Kategorie	Categoría
-Imię kursanta	Student name	Jméno kurzisty	Meno kurzistu	Name des Teilnehmers	Nombre del alumno
-Emocje (gwiazdki 1-5)	Emotions (1-5 stars)	Emoce (1-5 hvězdiček)	Emócie (1-5 hviezdičiek)	Gefühle (1-5 Sterne)	Emociones (1-5 estrellas)
-GPS — poczekaj lub kliknij pole GPS	GPS — wait or tap the GPS field	GPS — počkejte nebo klepněte na pole GPS	GPS — počkajte alebo ťuknite na pole GPS	GPS — warten oder GPS-Feld antippen	GPS — espera o toca el campo GPS
-Wymagane	Required	Povinné	Povinné	Erforderlich	Obligatorio
-Brak GPS z czasu nagrywania — kliknij, aby pobrać	No GPS from recording time — tap to get it	Chybí GPS z doby nahrávání — klepněte pro získání	Chýba GPS z času nahrávania — ťuknite pre získanie	Kein GPS aus der Aufnahmezeit — tippen zum Abrufen	Sin GPS del momento de grabación — toca para obtenerlo
-Wczytywanie dziennika…	Loading diary…	Načítám deník…	Načítavam denník…	Tagebuch wird geladen…	Cargando diario…
-Nie udało się wczytać dziennika. Sprawdź połączenie z internetem.	Could not load the diary. Check your internet connection.	Deník se nepodařilo načíst. Zkontrolujte připojení k internetu.	Denník sa nepodarilo načítať. Skontrolujte pripojenie k internetu.	Tagebuch konnte nicht geladen werden. Prüfe die Internetverbindung.	No se pudo cargar el diario. Comprueba la conexión a internet.
-Spróbuj ponownie	Try again	Zkusit znovu	Skúsiť znova	Erneut versuchen	Reintentar
-DZIENNIK	DIARY	DENÍK	DENNÍK	TAGEBUCH	DIARIO
-HISTORIA	HISTORY	HISTORIE	HISTÓRIA	VERLAUF	HISTORIAL
-Trener już sprawdził ten wpis — edycja zablokowana	The trainer has already reviewed this entry — editing locked	Trenér už tento záznam zkontroloval — úpravy zablokovány	Tréner už tento záznam skontroloval — úpravy zablokované	Der Trainer hat diesen Eintrag bereits geprüft — Bearbeitung gesperrt	El entrenador ya revisó esta entrada — edición bloqueada
-Dzisiejszy wpis już istnieje — możesz go poprawić i zapisać ponownie.	Today's entry already exists — you can edit it and save again.	Dnešní záznam už existuje — můžete ho upravit a znovu uložit.	Dnešný záznam už existuje — môžete ho upraviť a znova uložiť.	Der heutige Eintrag existiert bereits — du kannst ihn bearbeiten und erneut speichern.	La entrada de hoy ya existe — puedes corregirla y guardarla de nuevo.
-ĆWICZENIA RELAKSACYJNE DZISIAJ	RELAXATION EXERCISES TODAY	RELAXAČNÍ CVIČENÍ DNES	RELAXAČNÉ CVIČENIA DNES	ENTSPANNUNGSÜBUNGEN HEUTE	EJERCICIOS DE RELAJACIÓN HOY
-Trening Jacobsona	Jacobson training	Jacobsonův trénink	Jacobsonov tréning	Jacobson-Training	Entrenamiento de Jacobson
-Skanowanie ciała	Body scan	Skenování těla	Skenovanie tela	Body-Scan	Escaneo corporal
-SUKCESY DZISIAJ	SUCCESSES TODAY	ÚSPĚCHY DNES	ÚSPECHY DNES	ERFOLGE HEUTE	ÉXITOS HOY
-Każde "tak" się liczy	Every "yes" counts	Každé "ano" se počítá	Každé "áno" sa počíta	Jedes "Ja" zählt	Cada "sí" cuenta
-CO BYŁO INNE DZIŚ NIŻ WCZORAJ? (opcjonalnie)	WHAT WAS DIFFERENT TODAY THAN YESTERDAY? (optional)	CO BYLO DNES JINAK NEŽ VČERA? (volitelné)	ČO BOLO DNES INAK AKO VČERA? (voliteľné)	WAS WAR HEUTE ANDERS ALS GESTERN? (optional)	¿QUÉ FUE DIFERENTE HOY QUE AYER? (opcional)
-COŚ JESZCZE CHCESZ DOPISAĆ? (opcjonalnie)	ANYTHING ELSE TO ADD? (optional)	CHCETE JEŠTĚ NĚCO DOPSAT? (volitelné)	CHCETE EŠTE NIEČO DOPÍSAŤ? (voliteľné)	MÖCHTEST DU NOCH ETWAS ERGÄNZEN? (optional)	¿ALGO MÁS QUE AÑADIR? (opcional)
-DODATKOWE INFORMACJE	ADDITIONAL INFORMATION	DOPLŇUJÍCÍ INFORMACE	DOPLŇUJÚCE INFORMÁCIE	ZUSÄTZLICHE INFORMATIONEN	INFORMACIÓN ADICIONAL
-MIEJSCOWOŚĆ	TOWN	OBEC	OBEC	ORT	LOCALIDAD
-SYTUACJE DLA MNIE TRUDNE (można kilka)	SITUATIONS DIFFICULT FOR ME (multiple allowed)	SITUACE PRO MĚ TĚŽKÉ (lze více)	SITUÁCIE PRE MŇA ŤAŽKÉ (možno viac)	FÜR MICH SCHWIERIGE SITUATIONEN (mehrere möglich)	SITUACIONES DIFÍCILES PARA MÍ (varias)
-SYTUACJE DLA MNIE ŁATWE (można kilka)	SITUATIONS EASY FOR ME (multiple allowed)	SITUACE PRO MĚ SNADNÉ (lze více)	SITUÁCIE PRE MŇA ĽAHKÉ (možno viac)	FÜR MICH LEICHTE SITUATIONEN (mehrere möglich)	SITUACIONES FÁCILES PARA MÍ (varias)
-Poziom zmęczenia (0-10)	Tiredness level (0-10)	Úroveň únavy (0-10)	Úroveň únavy (0-10)	Müdigkeit (0-10)	Nivel de cansancio (0-10)
-Ilość snu (godz.)	Sleep (hours)	Spánek (hod.)	Spánok (hod.)	Schlaf (Std.)	Sueño (horas)
-Ilość wypitych kaw	Cups of coffee	Počet vypitých káv	Počet vypitých káv	Anzahl Kaffees	Cafés tomados
-CZY BYŁ SPOŻYWANY ALKOHOL? (można kilka)	ANY ALCOHOL? (multiple allowed)	BYL KONZUMOVÁN ALKOHOL? (lze více)	BOL KONZUMOVANÝ ALKOHOL? (možno viac)	WURDE ALKOHOL GETRUNKEN? (mehrere möglich)	¿SE CONSUMIÓ ALCOHOL? (varias)
-Nie	No	Ne	Nie	Nein	No
-Tak	Yes	Ano	Áno	Ja	Sí
-Czy była aktywność fizyczna?	Any physical activity?	Byla fyzická aktivita?	Bola fyzická aktivita?	Gab es körperliche Aktivität?	¿Hubo actividad física?
-Poziom motywacji do ćwiczeń (0-10)	Motivation to practise (0-10)	Motivace ke cvičení (0-10)	Motivácia k cvičeniu (0-10)	Übungsmotivation (0-10)	Motivación para practicar (0-10)
-Z KIM DZIŚ SUKCESY	WHO WERE TODAY'S SUCCESSES WITH	S KÝM DNES ÚSPĚCHY	S KÝM DNES ÚSPECHY	MIT WEM HEUTE ERFOLGE	CON QUIÉN TUVISTE ÉXITOS HOY
-ROZMOWY BEZ NAGRANIA	CONVERSATIONS WITHOUT RECORDING	ROZHOVORY BEZ NAHRÁVKY	ROZHOVORY BEZ NAHRÁVKY	GESPRÄCHE OHNE AUFNAHME	CONVERSACIONES SIN GRABACIÓN
-TELEFONY BEZ NAGRANIA	PHONE CALLS WITHOUT RECORDING	TELEFONÁTY BEZ NAHRÁVKY	TELEFONÁTY BEZ NAHRÁVKY	TELEFONATE OHNE AUFNAHME	LLAMADAS SIN GRABACIÓN
-CZY DZIŚ STRACIŁEŚ KONTROLĘ NAD NOWĄ MOWĄ?	DID YOU LOSE CONTROL OF THE NEW SPEECH TODAY?	ZTRATIL JSI DNES KONTROLU NAD NOVOU ŘEČÍ?	STRATIL SI DNES KONTROLU NAD NOVOU REČOU?	HAST DU HEUTE DIE KONTROLLE ÜBER DIE NEUE SPRACHE VERLOREN?	¿PERDISTE HOY EL CONTROL DEL NUEVO HABLA?
-SAMOPOCZUCIE DZISIAJ	HOW YOU FEEL TODAY	DNEŠNÍ NÁLADA	DNEŠNÁ NÁLADA	BEFINDEN HEUTE	CÓMO TE SIENTES HOY
-ZAPISZ ZMIANY W DZIENNIKU	SAVE DIARY CHANGES	ULOŽIT ZMĚNY V DENÍKU	ULOŽIŤ ZMENY V DENNÍKU	ÄNDERUNGEN IM TAGEBUCH SPEICHERN	GUARDAR CAMBIOS DEL DIARIO
-ZAPISZ WPIS DZIENNIKA	SAVE DIARY ENTRY	ULOŽIT ZÁZNAM DENÍKU	ULOŽIŤ ZÁZNAM DENNÍKA	TAGEBUCHEINTRAG SPEICHERN	GUARDAR ENTRADA DEL DIARIO
-CO WPŁYNĘŁO NA SAMOPOCZUCIE?	WHAT AFFECTED HOW YOU FEEL?	CO OVLIVNILO NÁLADU?	ČO OVPLYVNILO NÁLADU?	WAS HAT DEIN BEFINDEN BEEINFLUSST?	¿QUÉ INFLUYÓ EN CÓMO TE SIENTES?
-Nie możesz edytować tego wpisu, trener już go sprawdził.	You can't edit this entry, the trainer has already reviewed it.	Tento záznam nemůžete upravit, trenér ho už zkontroloval.	Tento záznam nemôžete upraviť, tréner ho už skontroloval.	Du kannst diesen Eintrag nicht bearbeiten, der Trainer hat ihn bereits geprüft.	No puedes editar esta entrada, el entrenador ya la revisó.
-Z kim dziś sukcesy	Who were today's successes with	S kým dnes úspěchy	S kým dnes úspechy	Mit wem heute Erfolge	Con quién tuviste éxitos hoy
-Rozmowy bez nagrania	Conversations without recording	Rozhovory bez nahrávky	Rozhovory bez nahrávky	Gespräche ohne Aufnahme	Conversaciones sin grabación
-Telefony bez nagrania	Phone calls without recording	Telefonáty bez nahrávky	Telefonáty bez nahrávky	Telefonate ohne Aufnahme	Llamadas sin grabación
-Czy straciłeś kontrolę nad nową mową	Did you lose control of the new speech	Ztratil jsi kontrolu nad novou řečí	Stratil si kontrolu nad novou rečou	Hast du die Kontrolle über die neue Sprache verloren	¿Perdiste el control del nuevo habla?
-Samopoczucie dzisiaj	How you feel today	Dnešní nálada	Dnešná nálada	Befinden heute	Cómo te sientes hoy
-Uzupełnij brakujące pola:	Fill in the missing fields:	Doplňte chybějící pole:	Doplňte chýbajúce polia:	Fülle die fehlenden Felder aus:	Completa los campos que faltan:
-Zapisywanie…	Saving…	Ukládám…	Ukladám…	Speichern…	Guardando…
-Wpis dziennika zaktualizowany!	Diary entry updated!	Záznam deníku aktualizován!	Záznam denníka aktualizovaný!	Tagebucheintrag aktualisiert!	¡Entrada del diario actualizada!
-Zapisano ✓	Saved ✓	Uloženo ✓	Uložené ✓	Gespeichert ✓	Guardado ✓
-Dziękujemy — wpis z dnia	Thank you — the entry from	Děkujeme — záznam ze dne	Ďakujeme — záznam zo dňa	Danke — der Eintrag vom	Gracias — la entrada del
-jest zapisany w NewSpeech.	is saved in NewSpeech.	je uložen v NewSpeech.	je uložený v NewSpeech.	ist in NewSpeech gespeichert.	está guardada en NewSpeech.
-Błąd zapisu dziennika	Diary save error	Chyba uložení deníku	Chyba uloženia denníka	Fehler beim Speichern des Tagebuchs	Error al guardar el diario
-Nie udało się wczytać historii.	Could not load history.	Historii se nepodařilo načíst.	Históriu sa nepodarilo načítať.	Verlauf konnte nicht geladen werden.	No se pudo cargar el historial.
-Brak wcześniejszych wpisów dziennika.	No earlier diary entries.	Žádné starší záznamy deníku.	Žiadne staršie záznamy denníka.	Keine früheren Tagebucheinträge.	No hay entradas anteriores del diario.
-sprawdzone	reviewed	zkontrolováno	skontrolované	geprüft	revisado
-czeka na ocenę	awaiting review	čeká na hodnocení	čaká na hodnotenie	wartet auf Bewertung	pendiente de evaluación
-HISTORIA DZIENNIKA	DIARY HISTORY	HISTORIE DENÍKU	HISTÓRIA DENNÍKA	TAGEBUCHVERLAUF	HISTORIAL DEL DIARIO
-Zamknij	Close	Zavřít	Zavrieť	Schließen	Cerrar
-Zapisz	Save	Uložit	Uložiť	Speichern	Guardar
-Anulować poprawkę?	Cancel the correction?	Zrušit opravu?	Zrušiť opravu?	Korrektur abbrechen?	¿Cancelar la corrección?
-Kolejne nagranie będzie zwykłym nagraniem, nie poprawką dla:	The next recording will be a normal recording, not a correction for:	Další nahrávka bude běžná, ne oprava pro:	Ďalšia nahrávka bude bežná, nie oprava pre:	Die nächste Aufnahme ist eine normale Aufnahme, keine Korrektur für:	La próxima grabación será normal, no una corrección para:
-Anuluj poprawkę	Cancel correction	Zrušit opravu	Zrušiť opravu	Korrektur abbrechen	Cancelar corrección
-Zostaw	Keep	Ponechat	Ponechať	Behalten	Mantener
-Nagrywasz poprawkę dla:	Recording a correction for:	Nahráváte opravu pro:	Nahrávate opravu pre:	Du nimmst eine Korrektur auf für:	Grabando una corrección para:
-dotknij, aby anulować)	tap to cancel)	klepněte pro zrušení)	ťuknite pre zrušenie)	tippen zum Abbrechen)	toca para cancelar)
-Zatrzymaj nagrywanie, żeby zmienić format	Stop recording to change the format	Pro změnu formátu zastavte nahrávání	Pre zmenu formátu zastavte nahrávanie	Aufnahme stoppen, um das Format zu ändern	Detén la grabación para cambiar el formato
-KOREKTA	CORRECTIONS	KOREKCE	KOREKCIA	KORREKTUR	CORRECCIONES
-STATYSTYKI	STATISTICS	STATISTIKY	ŠTATISTIKY	STATISTIK	ESTADÍSTICAS
-Aby otworzyć sekcję	To open the section	Pro otevření sekce	Na otvorenie sekcie	Um den Bereich	Para abrir la sección
-zaloguj się do NewSpeech.	log in to NewSpeech.	se přihlaste do NewSpeech.	sa prihláste do NewSpeech.	zu öffnen, melde dich bei NewSpeech an.	inicia sesión en NewSpeech.
-Sprawdzam logowanie…	Checking login…	Ověřuji přihlášení…	Overujem prihlásenie…	Anmeldung wird geprüft…	Comprobando sesión…
-Jesteś zalogowany ✓\n\nSekcja	You are logged in ✓\n\nThe section	Jste přihlášeni ✓\n\nSekce	Ste prihlásený ✓\n\nSekcia	Du bist angemeldet ✓\n\nDer Bereich	Has iniciado sesión ✓\n\nLa sección
-jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.	is being prepared and will appear in the next app version.	se připravuje a objeví se v další verzi aplikace.	sa pripravuje a objaví sa v ďalšej verzii aplikácie.	ist in Vorbereitung und kommt in der nächsten App-Version.	está en preparación y aparecerá en la próxima versión.
-Twoja sesja NewSpeech wygasła. Zaloguj się ponownie.	Your NewSpeech session has expired. Please log in again.	Vaše relace NewSpeech vypršela. Přihlaste se znovu.	Vaša relácia NewSpeech vypršala. Prihláste sa znova.	Deine NewSpeech-Sitzung ist abgelaufen. Bitte erneut anmelden.	Tu sesión de NewSpeech ha caducado. Inicia sesión de nuevo.
-Brak połączenia z NewSpeech.\nSprawdź internet i spróbuj ponownie.	No connection to NewSpeech.\nCheck your internet and try again.	Žádné spojení s NewSpeech.\nZkontrolujte internet a zkuste to znovu.	Žiadne spojenie s NewSpeech.\nSkontrolujte internet a skúste znova.	Keine Verbindung zu NewSpeech.\nPrüfe das Internet und versuche es erneut.	Sin conexión con NewSpeech.\nComprueba internet e inténtalo de nuevo.
-Wymagane logowanie	Login required	Vyžadováno přihlášení	Vyžaduje sa prihlásenie	Anmeldung erforderlich	Inicio de sesión necesario
-Przejdź do logowania	Go to login	Přejít k přihlášení	Prejsť na prihlásenie	Zur Anmeldung	Ir a iniciar sesión
-Sesja NewSpeech wygasła — zaloguj się ponownie w Ustawieniach	NewSpeech session expired — log in again in Settings	Relace NewSpeech vypršela — přihlaste se znovu v Nastavení	Relácia NewSpeech vypršala — prihláste sa znova v Nastaveniach	NewSpeech-Sitzung abgelaufen — in den Einstellungen erneut anmelden	Sesión de NewSpeech caducada — inicia sesión de nuevo en Ajustes
-Wpisz email i hasło	Enter email and password	Zadejte e-mail a heslo	Zadajte e-mail a heslo	E-Mail und Passwort eingeben	Introduce correo y contraseña
-Łączenie…	Connecting…	Připojuji…	Pripájam…	Verbinde…	Conectando…
-Zalogowano do NewSpeech	Logged in to NewSpeech	Přihlášeno do NewSpeech	Prihlásené do NewSpeech	Bei NewSpeech angemeldet	Sesión iniciada en NewSpeech
-KONTO NEWSPEECH	NEWSPEECH ACCOUNT	ÚČET NEWSPEECH	ÚČET NEWSPEECH	NEWSPEECH-KONTO	CUENTA NEWSPEECH
-Zalogowano:	Logged in:	Přihlášeno:	Prihlásené:	Angemeldet:	Sesión iniciada:
-Brak połączenia z NS — logowanie niepotwierdzone (	No connection to NS — login not confirmed (	Žádné spojení s NS — přihlášení nepotvrzeno (	Žiadne spojenie s NS — prihlásenie nepotvrdené (	Keine Verbindung zu NS — Anmeldung nicht bestätigt (	Sin conexión con NS — sesión no confirmada (
-Sprawdzam logowanie… (	Checking login… (	Ověřuji přihlášení… (	Overujem prihlásenie… (	Anmeldung wird geprüft… (	Comprobando sesión… (
-Wyloguj	Log out	Odhlásit	Odhlásiť	Abmelden	Cerrar sesión
-Sesja wygasła — zaloguj się ponownie	Session expired — log in again	Relace vypršela — přihlaste se znovu	Relácia vypršala — prihláste sa znova	Sitzung abgelaufen — erneut anmelden	Sesión caducada — inicia sesión de nuevo
-Nie jesteś zalogowany	You are not logged in	Nejste přihlášeni	Nie ste prihlásený	Du bist nicht angemeldet	No has iniciado sesión
-Hasło	Password	Heslo	Heslo	Passwort	Contraseña
-Zaloguj	Log in	Přihlásit	Prihlásiť	Anmelden	Iniciar sesión
-Po zalogowaniu pojawią się Korekta, Dziennik i Statystyki, a w Nagraniach zadziała „Wyślij NS”.	After logging in, Corrections, Diary and Statistics appear, and "Send NS" works in Recordings.	Po přihlášení se objeví Korekce, Deník a Statistiky a v Nahrávkách bude fungovat „Odeslat NS”.	Po prihlásení sa objavia Korekcia, Denník a Štatistiky a v Nahrávkach bude fungovať „Odoslať NS”.	Nach der Anmeldung erscheinen Korrektur, Tagebuch und Statistik, und in Aufnahmen funktioniert „An NS senden“.	Tras iniciar sesión aparecerán Correcciones, Diario y Estadísticas, y en Grabaciones funcionará «Enviar NS».
-Kategoria nagrania	Recording category	Kategorie nahrávky	Kategória nahrávky	Aufnahmekategorie	Categoría de la grabación
-Aby wysłać nagranie do NewSpeech, zaloguj się.	Log in to send the recording to NewSpeech.	Pro odeslání nahrávky do NewSpeech se přihlaste.	Na odoslanie nahrávky do NewSpeech sa prihláste.	Melde dich an, um die Aufnahme an NewSpeech zu senden.	Inicia sesión para enviar la grabación a NewSpeech.
-Nieznana kategoria:	Unknown category:	Neznámá kategorie:	Neznáma kategória:	Unbekannte Kategorie:	Categoría desconocida:
-Wysyłanie poprawki…	Sending correction…	Odesílám opravu…	Odosielam opravu…	Korrektur wird gesendet…	Enviando corrección…
-Wysyłanie do NS…	Sending to NS…	Odesílám do NS…	Odosielam do NS…	Wird an NS gesendet…	Enviando a NS…
-Poprawka wysłana! Czeka na ocenę trenera.	Correction sent! Waiting for the trainer's review.	Oprava odeslána! Čeká na hodnocení trenéra.	Oprava odoslaná! Čaká na hodnotenie trénera.	Korrektur gesendet! Wartet auf die Bewertung des Trainers.	¡Corrección enviada! Pendiente de evaluación del entrenador.
-NS: wysłano (	NS: sent (	NS: odesláno (	NS: odoslané (	NS: gesendet (	NS: enviado (
-Poprawka wysłana	Correction sent	Oprava odeslána	Oprava odoslaná	Korrektur gesendet	Corrección enviada
-Wysłano do NS	Sent to NS	Odesláno do NS	Odoslané do NS	An NS gesendet	Enviado a NS
-Poprawka odrzucona z powodu limitu	Correction rejected due to limit	Oprava odmítnuta kvůli limitu	Oprava odmietnutá kvôli limitu	Korrektur wegen Limit abgelehnt	Corrección rechazada por el límite
-Limit nagrań	Recording limit	Limit nahrávek	Limit nahrávok	Aufnahmelimit	Límite de grabaciones
-Wysłanie poprawki nie powiodło się z powodu limitu nagrań (	Sending the correction failed due to the recording limit (	Odeslání opravy selhalo kvůli limitu nahrávek (	Odoslanie opravy zlyhalo kvôli limitu nahrávok (	Senden der Korrektur wegen Aufnahmelimit fehlgeschlagen (	El envío de la corrección falló por el límite de grabaciones (
-Poprawki powinny być możliwe bez limitu — jeśli to się powtarza, zgłoś to trenerowi.	Corrections should have no limit — if this repeats, tell your trainer.	Opravy by měly být bez limitu — pokud se to opakuje, řekněte to trenérovi.	Opravy by mali byť bez limitu — ak sa to opakuje, povedzte to trénerovi.	Korrekturen sollten ohne Limit möglich sein — wenn das wieder passiert, melde es dem Trainer.	Las correcciones no deberían tener límite — si se repite, avisa a tu entrenador.
-Dzienny limit NOWYCH nagrań wyczerpany	Daily limit of NEW recordings reached	Denní limit NOVÝCH nahrávek vyčerpán	Denný limit NOVÝCH nahrávok vyčerpaný	Tageslimit für NEUE Aufnahmen erreicht	Límite diario de grabaciones NUEVAS alcanzado
-Serwer NS:	NS server:	Server NS:	Server NS:	NS-Server:	Servidor NS:
-Dzienny limit dotyczy tylko nowych nagrań. Poprawki odrzuconych nagrań nie mają limitu (sekcja Korekta).	The daily limit applies only to new recordings. Corrections of rejected recordings have no limit (Corrections section).	Denní limit platí jen pro nové nahrávky. Opravy zamítnutých nahrávek limit nemají (sekce Korekce).	Denný limit platí len pre nové nahrávky. Opravy zamietnutých nahrávok nemajú limit (sekcia Korekcia).	Das Tageslimit gilt nur für neue Aufnahmen. Korrekturen abgelehnter Aufnahmen haben kein Limit (Bereich Korrektur).	El límite diario solo se aplica a grabaciones nuevas. Las correcciones no tienen límite (sección Correcciones).
-NS:	NS:	NS:	NS:	NS:	NS:
-Błąd wysyłki:	Send error:	Chyba odeslání:	Chyba odoslania:	Sendefehler:	Error de envío:
-Aby wysłać nagrania do NewSpeech, zaloguj się.	Log in to send recordings to NewSpeech.	Pro odeslání nahrávek do NewSpeech se přihlaste.	Na odoslanie nahrávok do NewSpeech sa prihláste.	Melde dich an, um Aufnahmen an NewSpeech zu senden.	Inicia sesión para enviar grabaciones a NewSpeech.
-Najpierw opisz nagrania (📝 Opisz)	Describe the recordings first (📝 Describe)	Nejdřív nahrávky popište (📝 Popsat)	Najprv nahrávky popíšte (📝 Popísať)	Beschreibe zuerst die Aufnahmen (📝 Beschreiben)	Primero describe las grabaciones (📝 Describir)
-Wszystkie nagrania są już wysłane	All recordings have already been sent	Všechny nahrávky už jsou odeslané	Všetky nahrávky sú už odoslané	Alle Aufnahmen wurden bereits gesendet	Todas las grabaciones ya se enviaron
-nagrań bez opisu zostanie pominiętych.	recordings without a description will be skipped.	nahrávek bez popisu bude přeskočeno.	nahrávok bez popisu bude preskočených.	Aufnahmen ohne Beschreibung werden übersprungen.	grabaciones sin descripción se omitirán.
-Wysłać	Send	Odeslat	Odoslať	Senden:	¿Enviar
-nagrań do NS?	recordings to NS?	nahrávek do NS?	nahrávok do NS?	Aufnahmen an NS?	grabaciones a NS?
-Każde nagranie trafi do NS w kategorii ze swojego opisu.	Each recording goes to NS in the category from its description.	Každá nahrávka půjde do NS v kategorii ze svého popisu.	Každá nahrávka pôjde do NS v kategórii zo svojho popisu.	Jede Aufnahme geht in der Kategorie aus ihrer Beschreibung an NS.	Cada grabación irá a NS en la categoría de su descripción.
-Wyślij	Send	Odeslat	Odoslať	Senden	Enviar
-Wysłano	Sent	Odesláno	Odoslané	Gesendet:	Enviadas
-nagrań do NS	recordings to NS	nahrávek do NS	nahrávok do NS	Aufnahmen an NS	grabaciones a NS
-Wysyłanie	Sending	Odesílám	Odosielam	Sende	Enviando
-zatrzymano:	stopped:	zastaveno:	zastavené:	gestoppt:	detenido:
-Zatrzymano wysyłkę:	Sending stopped:	Odesílání zastaveno:	Odosielanie zastavené:	Senden gestoppt:	Envío detenido:
-ZAPISZ POPRAWKĘ	SAVE CORRECTION	ULOŽIT OPRAVU	ULOŽIŤ OPRAVU	KORREKTUR SPEICHERN	GUARDAR CORRECCIÓN
-ZAPISZ NAGRANIE	SAVE RECORDING	ULOŽIT NAHRÁVKU	ULOŽIŤ NAHRÁVKU	AUFNAHME SPEICHERN	GUARDAR GRABACIÓN
-Poprawka zapisana (	Correction saved (	Oprava uložena (	Oprava uložená (	Korrektur gespeichert (	Corrección guardada (
-Zapisano (	Saved (	Uloženo (	Uložené (	Gespeichert (	Guardado (
-Zapisano bez opisu — opisz i wyślij w NAGRANIACH	Saved without description — describe and send in RECORDINGS	Uloženo bez popisu — popište a odešlete v NAHRÁVKÁCH	Uložené bez popisu — popíšte a odošlite v NAHRÁVKACH	Ohne Beschreibung gespeichert — in AUFNAHMEN beschreiben und senden	Guardado sin descripción — descríbelo y envíalo en GRABACIONES
-OPISZ NAGRANIE	DESCRIBE RECORDING	POPSAT NAHRÁVKU	POPÍSAŤ NAHRÁVKU	AUFNAHME BESCHREIBEN	DESCRIBIR GRABACIÓN
-Nie udało się zmienić dostępności:	Could not change availability:	Dostupnost se nepodařilo změnit:	Dostupnosť sa nepodarilo zmeniť:	Verfügbarkeit konnte nicht geändert werden:	No se pudo cambiar la disponibilidad:
-Mapa nagrań jest dostępna po zalogowaniu do NewSpeech.	The recordings map is available after logging in to NewSpeech.	Mapa nahrávek je dostupná po přihlášení do NewSpeech.	Mapa nahrávok je dostupná po prihlásení do NewSpeech.	Die Aufnahmekarte ist nach der Anmeldung bei NewSpeech verfügbar.	El mapa de grabaciones está disponible tras iniciar sesión en NewSpeech.
-Wysłać do NewSpeech?	Send to NewSpeech?	Odeslat do NewSpeech?	Odoslať do NewSpeech?	An NewSpeech senden?	¿Enviar a NewSpeech?
-Nagranie zostało zapisane. Wysłać je teraz do NS?	The recording was saved. Send it to NS now?	Nahrávka byla uložena. Odeslat ji teď do NS?	Nahrávka bola uložená. Odoslať ju teraz do NS?	Die Aufnahme wurde gespeichert. Jetzt an NS senden?	La grabación se guardó. ¿Enviarla ahora a NS?
-Później	Later	Později	Neskôr	Später	Más tarde
-USTAWIENIA	SETTINGS	NASTAVENÍ	NASTAVENIA	EINSTELLUNGEN	AJUSTES
-MAPA NAGRAŃ	RECORDINGS MAP	MAPA NAHRÁVEK	MAPA NAHRÁVOK	AUFNAHMEKARTE	MAPA DE GRABACIONES
-NORMY	NORMS	NORMY	NORMY	NORMEN	NORMAS
-Normy	Norms	Normy	Normy	Normen	Normas
-NAGRYWANIE	RECORDING	NAHRÁVÁNÍ	NAHRÁVANIE	AUFNAHME	GRABACIÓN
-Format nagrania	Recording format	Formát nahrávky	Formát nahrávky	Aufnahmeformat	Formato de grabación
-MP3 — mniejsze pliki, szybsza wysyłka	MP3 — smaller files, faster upload	MP3 — menší soubory, rychlejší odeslání	MP3 — menšie súbory, rýchlejšie odoslanie	MP3 — kleinere Dateien, schnelleres Senden	MP3 — archivos más pequeños, envío más rápido
-WAV — pełna jakość, duże pliki	WAV — full quality, large files	WAV — plná kvalita, velké soubory	WAV — plná kvalita, veľké súbory	WAV — volle Qualität, große Dateien	WAV — calidad completa, archivos grandes
-Automatyczna głośność (0 dB)	Automatic volume (0 dB)	Automatická hlasitost (0 dB)	Automatická hlasitosť (0 dB)	Automatische Lautstärke (0 dB)	Volumen automático (0 dB)
-Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)	Quiet recordings are boosted to 0 dB after saving (no distortion)	Tiché nahrávky se po uložení zesílí na 0 dB (bez zkreslení)	Tiché nahrávky sa po uložení zosilnia na 0 dB (bez skreslenia)	Leise Aufnahmen werden nach dem Speichern auf 0 dB angehoben (ohne Verzerrung)	Las grabaciones bajas se suben a 0 dB al guardar (sin distorsión)
-Wyłączone — nagranie zostaje bez zmian	Off — the recording stays unchanged	Vypnuto — nahrávka zůstane beze změny	Vypnuté — nahrávka zostane bez zmeny	Aus — die Aufnahme bleibt unverändert	Desactivado — la grabación no cambia
-Ekran nie gaśnie (wyłączony wygaszacz)	Keep screen on (screen saver off)	Obrazovka nezhasne (spořič vypnut)	Obrazovka nezhasne (šetrič vypnutý)	Bildschirm bleibt an (Bildschirmschoner aus)	Pantalla siempre encendida
-Bramka szumów (tłumi cichy szum tła)	Noise gate (reduces quiet background noise)	Šumová brána (tlumí tichý šum pozadí)	Šumová brána (tlmí tichý šum pozadia)	Noise Gate (dämpft leises Hintergrundrauschen)	Puerta de ruido (reduce el ruido de fondo)
-Lokalizacja GPS	GPS location	Poloha GPS	Poloha GPS	GPS-Standort	Ubicación GPS
-zezwolono ✓	allowed ✓	povoleno ✓	povolené ✓	erlaubt ✓	permitido ✓
-brak zgody — dotknij, aby zezwolić	not allowed — tap to allow	nepovoleno — klepněte pro povolení	nepovolené — ťuknite pre povolenie	nicht erlaubt — tippen zum Erlauben	sin permiso — toca para permitir
-PAUZY — ZAKRES PRAWIDŁOWY	PAUSES — CORRECT RANGE	PAUZY — SPRÁVNÝ ROZSAH	PAUZY — SPRÁVNY ROZSAH	PAUSEN — KORREKTER BEREICH	PAUSAS — RANGO CORRECTO
-Pauza między porcjami mowy %.1f–%.1f s liczy się jako prawidłowa (regulacja 1–4 s)	A pause between speech portions of %.1f–%.1f s counts as correct (adjustable 1–4 s)	Pauza mezi úseky řeči %.1f–%.1f s se počítá jako správná (nastavení 1–4 s)	Pauza medzi úsekmi reči %.1f–%.1f s sa počíta ako správna (nastavenie 1–4 s)	Eine Pause zwischen Sprechabschnitten von %.1f–%.1f s gilt als korrekt (einstellbar 1–4 s)	Una pausa entre partes del habla de %.1f–%.1f s cuenta como correcta (ajustable 1–4 s)
-WYGLĄD DAW	DAW APPEARANCE	VZHLED DAW	VZHĽAD DAW	DAW-DARSTELLUNG	APARIENCIA DAW
-Grubość linii pitch: %.0f	Pitch line width: %.0f	Tloušťka čáry pitch: %.0f	Hrúbka čiary pitch: %.0f	Pitch-Linienstärke: %.0f	Grosor de la línea de tono: %.0f
-Kolor linii pitch	Pitch line color	Barva čáry pitch	Farba čiary pitch	Pitch-Linienfarbe	Color de la línea de tono
-Grubość siatki (poziome i pionowe): ×%.1f	Grid width (horizontal and vertical): ×%.1f	Tloušťka mřížky (vodorovná i svislá): ×%.1f	Hrúbka mriežky (vodorovná aj zvislá): ×%.1f	Rasterstärke (horizontal und vertikal): ×%.1f	Grosor de la cuadrícula (horizontal y vertical): ×%.1f
-Kolor siatki	Grid color	Barva mřížky	Farba mriežky	Rasterfarbe	Color de la cuadrícula
-Kolor tła DAW	DAW background color	Barva pozadí DAW	Farba pozadia DAW	DAW-Hintergrundfarbe	Color de fondo DAW
-Kolor fali	Waveform color	Barva vlny	Farba vlny	Wellenfarbe	Color de la onda
-MAPA I DOSTĘPNOŚĆ	MAP AND AVAILABILITY	MAPA A DOSTUPNOST	MAPA A DOSTUPNOSŤ	KARTE UND VERFÜGBARKEIT	MAPA Y DISPONIBILIDAD
-Pokazuj mnie na mapie na żywo (Sklepy, Przechodzień)	Show me live on the map (Shops, Passerby)	Zobrazovat mě živě na mapě (Obchody, Kolemjdoucí)	Zobrazovať ma naživo na mape (Obchody, Okoloidúci)	Mich live auf der Karte zeigen (Geschäfte, Passant)	Mostrarme en directo en el mapa (Tiendas, Transeúnte)
-Na mapie jako:	On the map as:	Na mapě jako:	Na mape ako:	Auf der Karte als:	En el mapa como:
-Telefon (opcjonalnie, widoczny dla kursantów)	Phone (optional, visible to students)	Telefon (volitelné, viditelný pro kurzisty)	Telefón (voliteľné, viditeľný pre kurzistov)	Telefon (optional, für Teilnehmer sichtbar)	Teléfono (opcional, visible para alumnos)
-Chętnie porozmawiam	Happy to talk	Rád si popovídám	Rád sa porozprávam	Gerne zum Gespräch bereit	Disponible para hablar
-WŁ	ON	ZAP	ZAP	AN	SÍ
-WYŁ	OFF	VYP	VYP	AUS	NO
-Dostępność do rozmowy wymaga zalogowania do NewSpeech.	Availability to talk requires logging in to NewSpeech.	Dostupnost k rozhovoru vyžaduje přihlášení do NewSpeech.	Dostupnosť na rozhovor vyžaduje prihlásenie do NewSpeech.	Gesprächsbereitschaft erfordert die Anmeldung bei NewSpeech.	La disponibilidad para hablar requiere iniciar sesión en NewSpeech.
-Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach.	Visible on the map as available to talk — turns off by itself after 2 hours.	Viditelný na mapě jako dostupný k rozhovoru — vypne se sám po 2 hodinách.	Viditeľný na mape ako dostupný na rozhovor — vypne sa sám po 2 hodinách.	Auf der Karte als gesprächsbereit sichtbar — schaltet sich nach 2 Stunden ab.	Visible en el mapa como disponible — se desactiva solo tras 2 horas.
-Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).	Turn on when you can talk on the phone with another student (turns off after 2 h).	Zapněte, když můžete telefonovat s jiným kurzistou (vypne se po 2 h).	Zapnite, keď môžete telefonovať s iným kurzistom (vypne sa po 2 h).	Einschalten, wenn du mit einem anderen Teilnehmer telefonieren kannst (aus nach 2 Std.).	Actívalo cuando puedas hablar por teléfono con otro alumno (se apaga tras 2 h).
-JĘZYK	LANGUAGE	JAZYK	JAZYK	SPRACHE	IDIOMA
-Odświeżanie…	Refreshing…	Obnovuji…	Obnovujem…	Aktualisiere…	Actualizando…
-Wczytywanie…	Loading…	Načítám…	Načítavam…	Wird geladen…	Cargando…
-sprawdź internet (↻ odśwież)	check internet (↻ refresh)	zkontrolujte internet (↻ obnovit)	skontrolujte internet (↻ obnoviť)	Internet prüfen (↻ aktualisieren)	comprueba internet (↻ actualizar)
-Zaktualizowano	Updated	Aktualizováno	Aktualizované	Aktualisiert	Actualizado
-odświeża się co minutę	refreshes every minute	obnovuje se každou minutu	obnovuje sa každú minútu	aktualisiert sich jede Minute	se actualiza cada minuto
-Brak nagrań do poprawy. Wszystko zaliczone albo czeka na pierwszą ocenę.	No recordings to correct. Everything passed or is waiting for the first review.	Žádné nahrávky k opravě. Vše splněno nebo čeká na první hodnocení.	Žiadne nahrávky na opravu. Všetko splnené alebo čaká na prvé hodnotenie.	Keine Aufnahmen zu korrigieren. Alles bestanden oder wartet auf die erste Bewertung.	No hay grabaciones que corregir. Todo aprobado o pendiente de la primera evaluación.
-Pokazuję	Showing	Zobrazuji	Zobrazujem	Angezeigt:	Mostrando
-od najstarszych	oldest first	od nejstarších	od najstarších	älteste zuerst	de la más antigua
-nie zaliczone	not passed	nesplněno	nesplnené	nicht bestanden	no aprobada
-Wszystkie elementy techniki ocenione dobrze, ale całość nie została zaliczona. Częsty powód: nagranie było słabej jakości (zbyt cicho, szum, przerwa) i trener nie mógł go w pełni ocenić. Spróbuj nagrać jeszcze raz w spokojniejszym miejscu.	All technique elements were rated well, but the recording was not passed. A common reason: poor recording quality (too quiet, noise, gap) so the trainer could not fully assess it. Try recording again in a quieter place.	Všechny prvky techniky byly hodnoceny dobře, ale celek nebyl splněn. Častý důvod: nahrávka byla nekvalitní (příliš tichá, šum, výpadek) a trenér ji nemohl plně ohodnotit. Zkuste nahrát znovu na klidnějším místě.	Všetky prvky techniky boli hodnotené dobre, ale celok nebol splnený. Častý dôvod: nahrávka bola nekvalitná (príliš tichá, šum, výpadok) a tréner ju nemohol plne ohodnotiť. Skúste nahrať znova na pokojnejšom mieste.	Alle Technikelemente wurden gut bewertet, aber die Aufnahme wurde nicht bestanden. Häufiger Grund: schlechte Aufnahmequalität (zu leise, Rauschen, Lücke), sodass der Trainer sie nicht voll bewerten konnte. Nimm an einem ruhigeren Ort erneut auf.	Todos los elementos de la técnica se evaluaron bien, pero la grabación no se aprobó. Motivo frecuente: mala calidad (muy baja, ruido, corte) y el entrenador no pudo evaluarla por completo. Intenta grabar de nuevo en un lugar más tranquilo.
-Słabe elementy:	Weak elements:	Slabé prvky:	Slabé prvky:	Schwache Elemente:	Elementos débiles:
-Nagraj poprawkę	Record correction	Nahrát opravu	Nahrať opravu	Korrektur aufnehmen	Grabar corrección
-Pokaż kolejne	Show next	Zobrazit další	Zobraziť ďalšie	Weitere anzeigen	Mostrar siguientes
-Nagraj poprawkę — REC	Record correction — REC	Nahrát opravu — REC	Nahrať opravu — REC	Korrektur aufnehmen — REC	Grabar corrección — REC
-w przygotowaniu, pojawi się w kolejnej wersji aplikacji.	in preparation, coming in the next app version.	připravuje se, objeví se v další verzi aplikace.	pripravuje sa, objaví sa v ďalšej verzii aplikácie.	in Vorbereitung, kommt in der nächsten App-Version.	en preparación, llegará en la próxima versión.
-NAGRYWA	RECORDING	NAHRÁVÁ	NAHRÁVA	AUFNAHME	GRABANDO
-ZAPIS…	SAVING…	UKLÁDÁM…	UKLADÁM…	SPEICHERN…	GUARDANDO…
-PAUZA	PAUSED	PAUZA	PAUZA	PAUSE	PAUSA
-Brak zgody na mikrofon	No microphone permission	Chybí povolení mikrofonu	Chýba povolenie mikrofónu	Keine Mikrofonberechtigung	Sin permiso de micrófono
-Nagrano	Recorded	Nahráno	Nahrané	Aufgenommen:	Grabado
-s — zapisano	s — saved	s — uloženo	s — uložené	s — gespeichert	s — guardado
-GOTOWY	READY	PŘIPRAVEN	PRIPRAVENÝ	BEREIT	LISTO
-Błąd:	Error:	Chyba:	Chyba:	Fehler:	Error:
-Błąd zapisu:	Save error:	Chyba uložení:	Chyba uloženia:	Speicherfehler:	Error al guardar:
-Podgląd MP3 podczas pauzy nie jest wspierany — zatrzymaj nagranie	MP3 preview during pause is not supported — stop the recording	Náhled MP3 během pauzy není podporován — zastavte nahrávání	Náhľad MP3 počas pauzy nie je podporovaný — zastavte nahrávanie	MP3-Vorschau während der Pause wird nicht unterstützt — Aufnahme stoppen	La vista previa MP3 en pausa no es compatible — detén la grabación
-Błąd podglądu:	Preview error:	Chyba náhledu:	Chyba náhľadu:	Vorschaufehler:	Error de vista previa:
-Wczytano nagranie	Recording loaded	Nahrávka načtena	Nahrávka načítaná	Aufnahme geladen	Grabación cargada
-Błąd wczytywania:	Loading error:	Chyba načítání:	Chyba načítania:	Ladefehler:	Error al cargar:
-Błąd odtwarzania:	Playback error:	Chyba přehrávání:	Chyba prehrávania:	Wiedergabefehler:	Error de reproducción:
-NAGRANIA	RECORDINGS	NAHRÁVKY	NAHRÁVKY	AUFNAHMEN	GRABACIONES
-Wyślij wszystkie	Send all	Odeslat vše	Odoslať všetko	Alle senden	Enviar todas
-Pobierz wszystkie	Download all	Stáhnout vše	Stiahnuť všetko	Alle herunterladen	Descargar todas
-Wgraj plik	Upload file	Nahrát soubor	Nahrať súbor	Datei hochladen	Subir archivo
-poprawka ·	correction ·	oprava ·	oprava ·	Korrektur ·	corrección ·
-bez opisu	no description	bez popisu	bez popisu	ohne Beschreibung	sin descripción
-Opisz i wyślij	Describe and send	Popsat a odeslat	Popísať a odoslať	Beschreiben und senden	Describir y enviar
-Opisz	Describe	Popsat	Popísať	Beschreiben	Describir
-Wyślij ponownie	Send again	Odeslat znovu	Odoslať znova	Erneut senden	Reenviar
-Wyślij NS	Send NS	Odeslat NS	Odoslať NS	An NS senden	Enviar NS
-Usuń	Delete	Smazat	Zmazať	Löschen	Eliminar
-Brak nagrań	No recordings	Žádné nahrávky	Žiadne nahrávky	Keine Aufnahmen	No hay grabaciones
-Udostępnij wszystkie nagrania	Share all recordings	Sdílet všechny nahrávky	Zdieľať všetky nahrávky	Alle Aufnahmen teilen	Compartir todas las grabaciones
-Udostępnij nagranie	Share recording	Sdílet nahrávku	Zdieľať nahrávku	Aufnahme teilen	Compartir grabación
-Błąd udostępniania:	Sharing error:	Chyba sdílení:	Chyba zdieľania:	Fehler beim Teilen:	Error al compartir:
-Brak połączenia z serwerem NewSpeech	No connection to the NewSpeech server	Žádné spojení se serverem NewSpeech	Žiadne spojenie so serverom NewSpeech	Keine Verbindung zum NewSpeech-Server	Sin conexión con el servidor de NewSpeech
-Błąd	Error	Chyba	Chyba	Fehler	Error
-Serwer nie zwrócił tokenu logowania	The server did not return a login token	Server nevrátil přihlašovací token	Server nevrátil prihlasovací token	Der Server hat kein Anmeldetoken zurückgegeben	El servidor no devolvió el token de sesión
-Nieprawidłowy email lub hasło	Incorrect email or password	Nesprávný e-mail nebo heslo	Nesprávny e-mail alebo heslo	Falsche E-Mail oder falsches Passwort	Correo o contraseña incorrectos
-Błąd serwera	Server error	Chyba serveru	Chyba servera	Serverfehler	Error del servidor
-Brak połączenia z serwerem	No connection to the server	Žádné spojení se serverem	Žiadne spojenie so serverom	Keine Verbindung zum Server	Sin conexión con el servidor
-z nagrań na tym telefonie	from recordings on this phone	z nahrávek v tomto telefonu	z nahrávok v tomto telefóne	aus Aufnahmen auf diesem Telefon	de las grabaciones de este teléfono
-pełna historia z NewSpeech	full history from NewSpeech	celá historie z NewSpeech	celá história z NewSpeech	vollständiger Verlauf aus NewSpeech	historial completo de NewSpeech
-HARMONOGRAM	SCHEDULE	HARMONOGRAM	HARMONOGRAM	ZEITPLAN	CALENDARIO
-Wczytywanie harmonogramu…	Loading schedule…	Načítám harmonogram…	Načítavam harmonogram…	Zeitplan wird geladen…	Cargando calendario…
-Brak harmonogramu — trener nie ustalił jeszcze wymagań.	No schedule — the trainer hasn't set requirements yet.	Žádný harmonogram — trenér zatím nestanovil požadavky.	Žiadny harmonogram — tréner zatiaľ nestanovil požiadavky.	Kein Zeitplan — der Trainer hat noch keine Anforderungen festgelegt.	Sin calendario — el entrenador aún no fijó requisitos.
-Nie udało się wczytać harmonogramu.	Could not load the schedule.	Harmonogram se nepodařilo načíst.	Harmonogram sa nepodarilo načítať.	Zeitplan konnte nicht geladen werden.	No se pudo cargar el calendario.
-Harmonogram wykonany!	Schedule completed!	Harmonogram splněn!	Harmonogram splnený!	Zeitplan erfüllt!	¡Calendario completado!
-Brakuje {0} zaliczonych nagrań	{0} passed recordings missing	Chybí {0} splněných nahrávek	Chýba {0} splnených nahrávok	Es fehlen {0} bestandene Aufnahmen	Faltan {0} grabaciones aprobadas
-do wizyty {0} — zostało {1} dni	until the visit on {0} — {1} days left	do návštěvy {0} — zbývá {1} dní	do návštevy {0} — zostáva {1} dní	bis zum Termin am {0} — noch {1} Tage	hasta la visita del {0} — quedan {1} días
-termin wizyty minął ({0})	the visit date has passed ({0})	termín návštěvy uplynul ({0})	termín návštevy uplynul ({0})	der Termin ist vorbei ({0})	la fecha de la visita pasó ({0})
-zaliczone {0} z {1} · wysłane {2}	passed {0} of {1} · sent {2}	splněno {0} z {1} · odesláno {2}	splnené {0} z {1} · odoslané {2}	bestanden {0} von {1} · gesendet {2}	aprobadas {0} de {1} · enviadas {2}
-Świetnie! W tym tempie zdążysz przed terminem ({0} dni zostało).	Great! At this pace you'll make it before the deadline ({0} days left).	Skvělé! Tímto tempem to stihnete před termínem (zbývá {0} dní).	Skvelé! Týmto tempom to stihnete pred termínom (zostáva {0} dní).	Super! In diesem Tempo schaffst du es vor dem Termin (noch {0} Tage).	¡Genial! A este ritmo llegarás antes de la fecha ({0} días restantes).
-Aby zdążyć, potrzebujesz ok. {0} nagrań dziennie.	To make it, you need about {0} recordings a day.	Abyste to stihli, potřebujete asi {0} nahrávek denně.	Aby ste to stihli, potrebujete asi {0} nahrávok denne.	Um es zu schaffen, brauchst du etwa {0} Aufnahmen pro Tag.	Para llegar necesitas unas {0} grabaciones al día.
-CO JESZCZE TRZEBA NAGRAĆ	WHAT STILL NEEDS RECORDING	CO JE JEŠTĚ TŘEBA NAHRÁT	ČO EŠTE TREBA NAHRAŤ	WAS NOCH AUFGENOMMEN WERDEN MUSS	QUÉ FALTA GRABAR
-zaliczone	passed	splněno	splnené	bestanden	aprobada
-brakuje {0}	{0} missing	chybí {0}	chýba {0}	fehlen {0}	faltan {0}
-z {1}	of {1}	z {1}	z {1}	von {1}	de {1}
-czeka na ocenę / do poprawy	awaiting review / to correct	čeká na hodnocení / k opravě	čaká na hodnotenie / na opravu	wartet auf Bewertung / zu korrigieren	pendiente de evaluación / por corregir
-CO POPRAWIĆ W NASTĘPNYM NAGRANIU	WHAT TO IMPROVE IN THE NEXT RECORDING	CO ZLEPŠIT V PŘÍŠTÍ NAHRÁVCE	ČO ZLEPŠIŤ V ĎALŠEJ NAHRÁVKE	WAS DU IN DER NÄCHSTEN AUFNAHME VERBESSERN KANNST	QUÉ MEJORAR EN LA PRÓXIMA GRABACIÓN
-Z ostatniej oceny trenera:	From the trainer's last review:	Z posledního hodnocení trenéra:	Z posledného hodnotenia trénera:	Aus der letzten Bewertung des Trainers:	De la última evaluación del entrenador:
-INSPIRACJE NA DZIŚ	IDEAS FOR TODAY	INSPIRACE NA DNES	INŠPIRÁCIE NA DNES	IDEEN FÜR HEUTE	IDEAS PARA HOY
-Miejsca w pobliżu i pomysły, co nagrać.	Nearby places and ideas for what to record.	Místa v okolí a nápady, co nahrát.	Miesta v okolí a nápady, čo nahrať.	Orte in der Nähe und Ideen, was du aufnehmen kannst.	Lugares cercanos e ideas de qué grabar.
-Pokaż miejsca w pobliżu	Show nearby places	Zobrazit místa v okolí	Zobraziť miesta v okolí	Orte in der Nähe zeigen	Mostrar lugares cercanos
-Włącz lokalizację i spróbuj ponownie.	Turn on location and try again.	Zapněte polohu a zkuste to znovu.	Zapnite polohu a skúste znova.	Standort einschalten und erneut versuchen.	Activa la ubicación e inténtalo de nuevo.
-GPS niedostępny. Włącz lokalizację i spróbuj ponownie.	GPS unavailable. Turn on location and try again.	GPS nedostupné. Zapněte polohu a zkuste to znovu.	GPS nedostupné. Zapnite polohu a skúste znova.	GPS nicht verfügbar. Standort einschalten und erneut versuchen.	GPS no disponible. Activa la ubicación e inténtalo de nuevo.
-Szukam miejsc w pobliżu…	Searching nearby places…	Hledám místa v okolí…	Hľadám miesta v okolí…	Suche Orte in der Nähe…	Buscando lugares cercanos…
-Nie znaleziono miejsc w pobliżu.	No places found nearby.	V okolí nebyla nalezena žádná místa.	V okolí sa nenašli žiadne miesta.	Keine Orte in der Nähe gefunden.	No se encontraron lugares cercanos.
-Nie udało się pobrać miejsc — sprawdź internet.	Could not load places — check your internet.	Místa se nepodařilo načíst — zkontrolujte internet.	Miesta sa nepodarilo načítať — skontrolujte internet.	Orte konnten nicht geladen werden — Internet prüfen.	No se pudieron cargar lugares — comprueba internet.
-MIEJSCA W POBLIŻU ({0})	NEARBY PLACES ({0})	MÍSTA V OKOLÍ ({0})	MIESTA V OKOLÍ ({0})	ORTE IN DER NÄHE ({0})	LUGARES CERCANOS ({0})
-Pokaż kolejne {0} (zostało {1})	Show next {0} ({1} left)	Zobrazit dalších {0} (zbývá {1})	Zobraziť ďalších {0} (zostáva {1})	Nächste {0} anzeigen (noch {1})	Mostrar {0} más (quedan {1})
-w tym tygodniu	this week	tento týden	tento týždeň	diese Woche	esta semana
-dni z rzędu	days in a row	dní v řadě	dní za sebou	Tage in Folge	días seguidos
-łącznie w NS	total in NS	celkem v NS	celkom v NS	gesamt in NS	total en NS
-łącznie	total	celkem	celkom	gesamt	total
-Najczęściej w tym tygodniu: {0} ({1}x)	Most often this week: {0} ({1}x)	Nejčastěji tento týden: {0} ({1}x)	Najčastejšie tento týždeň: {0} ({1}x)	Am häufigsten diese Woche: {0} ({1}x)	Lo más frecuente esta semana: {0} ({1}x)
-AKTYWNOŚĆ — OSTATNIE 5 TYGODNI	ACTIVITY — LAST 5 WEEKS	AKTIVITA — POSLEDNÍCH 5 TÝDNŮ	AKTIVITA — POSLEDNÝCH 5 TÝŽDŇOV	AKTIVITÄT — LETZTE 5 WOCHEN	ACTIVIDAD — ÚLTIMAS 5 SEMANAS
-dni z rzędu — tak trzymaj!	days in a row — keep it up!	dní v řadě — jen tak dál!	dní za sebou — len tak ďalej!	Tage in Folge — weiter so!	días seguidos — ¡sigue así!
-Rośniesz! Ten tydzień: {0}, poprzedni: {1}	You're growing! This week: {0}, last: {1}	Rostete! Tento týden: {0}, minulý: {1}	Rastiete! Tento týždeň: {0}, minulý: {1}	Du wächst! Diese Woche: {0}, letzte: {1}	¡Estás creciendo! Esta semana: {0}, la anterior: {1}
-Wróć do treningu — jedno nagranie dziś to już sukces!	Get back to training — one recording today is already a success!	Vraťte se k tréninku — jedna nahrávka dnes je už úspěch!	Vráťte sa k tréningu — jedna nahrávka dnes je už úspech!	Zurück zum Training — eine Aufnahme heute ist schon ein Erfolg!	Vuelve al entrenamiento — ¡una grabación hoy ya es un éxito!
-Utrzymaj tempo — w tym tygodniu: {0}	Keep the pace — this week: {0}	Udržte tempo — tento týden: {0}	Udržte tempo — tento týždeň: {0}	Halte das Tempo — diese Woche: {0}	Mantén el ritmo — esta semana: {0}
-tyg.	wk	týd.	týž.	Wo.	sem.
-tydz.	wk	týd.	týž.	Wo.	sem.
-ten tydz.	this wk	tento týd.	tento týž.	diese Wo.	esta sem.
-OCENA TRENERA	TRAINER'S REVIEW	HODNOCENÍ TRENÉRA	HODNOTENIE TRÉNERA	BEWERTUNG DES TRAINERS	EVALUACIÓN DEL ENTRENADOR
-ocenionych	reviewed	hodnoceno	hodnotené	bewertet	evaluadas
-zaliczonych	passed	splněno	splnené	bestanden	aprobadas
-skuteczność	success rate	úspěšnost	úspešnosť	Erfolgsquote	efectividad
-NAGRANIA WG KATEGORII	RECORDINGS BY CATEGORY	NAHRÁVKY PODLE KATEGORIE	NAHRÁVKY PODĽA KATEGÓRIE	AUFNAHMEN NACH KATEGORIE	GRABACIONES POR CATEGORÍA
-Brak nagrań z kategorią.	No recordings with a category.	Žádné nahrávky s kategorií.	Žiadne nahrávky s kategóriou.	Keine Aufnahmen mit Kategorie.	No hay grabaciones con categoría.
-Źródło:	Source:	Zdroj:	Zdroj:	Quelle:	Fuente:
-OSIĄGNIĘCIA	ACHIEVEMENTS	ÚSPĚCHY	ÚSPECHY	ERFOLGE	LOGROS
-Nagraj w kategorii {0} — brakuje jeszcze {1} zaliczonych.	Record in {0} — {1} passed still missing.	Nahrajte v kategorii {0} — chybí ještě {1} splněných.	Nahrajte v kategórii {0} — chýba ešte {1} splnených.	Nimm in {0} auf — es fehlen noch {1} bestandene.	Graba en {0} — faltan aún {1} aprobadas.
-Kategoria {0} czeka — jeszcze {1} nagrań i będzie zaliczona!	{0} is waiting — {1} more recordings and it's done!	Kategorie {0} čeká — ještě {1} nahrávek a bude splněna!	Kategória {0} čaká — ešte {1} nahrávok a bude splnená!	{0} wartet — noch {1} Aufnahmen und sie ist geschafft!	{0} te espera — ¡{1} grabaciones más y estará completa!
-Mała sesja w kategorii {0}? Potrzebujesz {1} zaliczonych.	A short session in {0}? You need {1} passed.	Krátká session v kategorii {0}? Potřebujete {1} splněných.	Krátka session v kategórii {0}? Potrebujete {1} splnených.	Eine kurze Session in {0}? Du brauchst {1} bestandene.	¿Una sesión corta en {0}? Necesitas {1} aprobadas.
-Dobry początek dnia! Już {0} nagrań za Tobą 💪	Great start to the day! {0} recordings done already 💪	Dobrý začátek dne! Už {0} nahrávek za vámi 💪	Dobrý začiatok dňa! Už {0} nahrávok za vami 💪	Guter Start in den Tag! Schon {0} Aufnahmen geschafft 💪	¡Buen comienzo del día! Ya llevas {0} grabaciones 💪
-Świetnie, że zaczynasz dzień od nagrań!	Great that you start the day with recordings!	Skvělé, že den začínáte nahrávkami!	Skvelé, že deň začínate nahrávkami!	Toll, dass du den Tag mit Aufnahmen beginnst!	¡Genial que empieces el día grabando!
-Dzień dobry! Dobry moment na pierwsze nagranie dnia.	Good morning! A good moment for the first recording of the day.	Dobré ráno! Dobrá chvíle na první nahrávku dne.	Dobré ráno! Dobrá chvíľa na prvú nahrávku dňa.	Guten Morgen! Ein guter Moment für die erste Aufnahme des Tages.	¡Buenos días! Buen momento para la primera grabación del día.
-Rano głos jest najczystszy — to dobry czas na nagrania.	Your voice is clearest in the morning — a good time to record.	Ráno je hlas nejčistší — dobrý čas na nahrávky.	Ráno je hlas najčistejší — dobrý čas na nahrávky.	Morgens ist die Stimme am klarsten — gute Zeit für Aufnahmen.	Por la mañana la voz está más clara — buen momento para grabar.
-Już {0} nagrań dzisiaj — tak dalej!	{0} recordings today already — keep going!	Už {0} nahrávek dnes — jen tak dál!	Už {0} nahrávok dnes — len tak ďalej!	Schon {0} Aufnahmen heute — weiter so!	Ya {0} grabaciones hoy — ¡sigue así!
-Dobre tempo jak na środek dnia 👍	Good pace for midday 👍	Dobré tempo na poledne 👍	Dobré tempo na obed 👍	Gutes Tempo für die Tagesmitte 👍	Buen ritmo para mediodía 👍
-Połowa dnia — może czas na chwilę nagrań?	Midday — maybe time for a few recordings?	Polovina dne — možná čas na pár nahrávek?	Polovica dňa — možno čas na pár nahrávok?	Tagesmitte — vielleicht Zeit für ein paar Aufnahmen?	Mediodía — ¿quizá tiempo para unas grabaciones?
-Krótka przerwa na nagranie dobrze zrobi.	A short break for a recording will do you good.	Krátká pauza na nahrávku vám prospěje.	Krátka prestávka na nahrávku vám prospeje.	Eine kurze Aufnahmepause tut gut.	Una pausa corta para grabar te hará bien.
-Popołudniowy postęp: {0} nagrań 🎯	Afternoon progress: {0} recordings 🎯	Odpolední pokrok: {0} nahrávek 🎯	Popoludňajší pokrok: {0} nahrávok 🎯	Fortschritt am Nachmittag: {0} Aufnahmen 🎯	Progreso de la tarde: {0} grabaciones 🎯
-Niezły wynik na dziś, jeszcze chwila i będzie więcej.	Nice result today, a bit more and there'll be more.	Pěkný výsledek na dnešek, ještě chvilku a bude víc.	Pekný výsledok na dnes, ešte chvíľku a bude viac.	Gutes Ergebnis heute, noch ein bisschen und es wird mehr.	Buen resultado hoy, un poco más y habrá más.
-Popołudnie to dobry czas na nagranie przed wieczorem.	Afternoon is a good time to record before the evening.	Odpoledne je dobrý čas na nahrávku před večerem.	Popoludnie je dobrý čas na nahrávku pred večerom.	Der Nachmittag ist gut für eine Aufnahme vor dem Abend.	La tarde es buen momento para grabar antes de la noche.
-Jeszcze nic dzisiaj? Mała sesja teraz się przyda.	Nothing yet today? A short session now will help.	Dnes ještě nic? Krátká session teď se hodí.	Dnes ešte nič? Krátka session teraz sa hodí.	Heute noch nichts? Eine kurze Session jetzt hilft.	¿Nada hoy todavía? Una sesión corta ahora vendrá bien.
-Dzisiaj zrobione: {0} nagrań — gratulacje!	Done today: {0} recordings — congratulations!	Dnes hotovo: {0} nahrávek — gratulujeme!	Dnes hotovo: {0} nahrávok — gratulujeme!	Heute geschafft: {0} Aufnahmen — Glückwunsch!	Hecho hoy: {0} grabaciones — ¡enhorabuena!
-Dobry dzień za Tobą, {0} nagrań w skrzynce.	A good day behind you, {0} recordings in the box.	Dobrý den za vámi, {0} nahrávek hotovo.	Dobrý deň za vami, {0} nahrávok hotových.	Ein guter Tag, {0} Aufnahmen im Kasten.	Un buen día, {0} grabaciones hechas.
-Wieczór to ostatnia szansa na dzisiejsze nagranie.	Evening is the last chance for today's recording.	Večer je poslední šance na dnešní nahrávku.	Večer je posledná šanca na dnešnú nahrávku.	Der Abend ist die letzte Chance für die heutige Aufnahme.	La noche es la última oportunidad para grabar hoy.
-Jeszcze jedno nagranie przed snem?	One more recording before bed?	Ještě jedna nahrávka před spaním?	Ešte jedna nahrávka pred spaním?	Noch eine Aufnahme vor dem Schlafen?	¿Una grabación más antes de dormir?
-Powiedziałeś coś na głos poza domem?	Did you say something out loud outside home?	Řekl jsi něco nahlas mimo domov?	Povedal si niečo nahlas mimo domu?	Hast du außer Haus etwas laut gesagt?	¿Dijiste algo en voz alta fuera de casa?
-Zacząłeś rozmowę jako pierwszy?	Did you start a conversation first?	Začal jsi rozhovor jako první?	Začal si rozhovor ako prvý?	Hast du ein Gespräch als Erster begonnen?	¿Iniciaste una conversación primero?
-Zamówiłeś coś / zapytałeś w sklepie?	Did you order / ask something in a shop?	Objednal jsi něco / zeptal ses v obchodě?	Objednal si niečo / spýtal si sa v obchode?	Hast du etwas bestellt / im Geschäft gefragt?	¿Pediste algo / preguntaste en una tienda?
-Odebrałeś / wykonałeś telefon?	Did you answer / make a phone call?	Přijal jsi / uskutečnil telefonát?	Prijal si / uskutočnil telefonát?	Hast du einen Anruf angenommen / getätigt?	¿Contestaste / hiciste una llamada?
-Mowa spontaniczna, brak ESBS	Spontaneous speech, no ESBS	Spontánní řeč, bez ESBS	Spontánna reč, bez ESBS	Spontane Sprache, kein ESBS	Habla espontánea, sin ESBS
-Jąkanie	Stuttering	Koktání	Zajakávanie	Stottern	Tartamudeo
-Blok	Block	Blok	Blok	Block	Bloqueo
-Kamuflaż	Camouflage	Kamufláž	Kamufláž	Tarnung	Camuflaje
-Zdrowie / fizyczne	Health / physical	Zdraví / fyzické	Zdravie / fyzické	Gesundheit / körperlich	Salud / físico
-Sprawy niezw. z mową	Non-speech matters	Věci nesouvisející s řečí	Veci nesúvisiace s rečou	Nicht sprachbezogene Dinge	Asuntos no relacionados con el habla
-Trudność w mowie	Speech difficulty	Obtíž v řeči	Ťažkosť v reči	Sprechschwierigkeit	Dificultad en el habla
-Sukces związany z mową	Speech-related success	Úspěch spojený s řečí	Úspech spojený s rečou	Sprachbezogener Erfolg	Éxito relacionado con el habla
-Emocje nie związane z mową	Emotions not related to speech	Emoce nesouvisející s řečí	Emócie nesúvisiace s rečou	Gefühle ohne Sprachbezug	Emociones no relacionadas con el habla
-Sklepy	Shops	Obchody	Obchody	Geschäfte	Tiendas
-Przechodzień	Passerby	Kolemjdoucí	Okoloidúci	Passant	Transeúnte
-Telefon do miasta	Phone call to a business	Telefon do města	Telefonát do mesta	Anruf bei Firmen	Llamada a comercios
-Telefon rodzina/znajomi	Phone family/friends	Telefon rodina/známí	Telefón rodina/známi	Telefon Familie/Freunde	Llamada familia/amigos
-Restauracja Kelner	Restaurant waiter	Restaurace číšník	Reštaurácia čašník	Restaurant Kellner	Restaurante camarero
-Wystąpienie	Public speaking	Vystoupení	Vystúpenie	Auftritt	Discurso público
-Praca / Szkoła	Work / School	Práce / Škola	Práca / Škola	Arbeit / Schule	Trabajo / Escuela
-Rodzina	Family	Rodina	Rodina	Familie	Familia
-Przyjaciele	Friends	Přátelé	Priatelia	Freunde	Amigos
-W grupie	In a group	Ve skupině	V skupine	In der Gruppe	En grupo
-Piwo	Beer	Pivo	Pivo	Bier	Cerveza
-Wino	Wine	Víno	Víno	Wein	Vino
-Wódka	Vodka	Vodka	Vodka	Wodka	Vodka
-Koniak	Cognac	Koňak	Koňak	Cognac	Coñac
-Inne	Other	Jiné	Iné	Andere	Otro
-Monolog / Czytanie	Monologue / Reading	Monolog / Čtení	Monológ / Čítanie	Monolog / Lesen	Monólogo / Lectura
-Miasto - inne	City - other	Město - jiné	Mesto - iné	Stadt - andere	Ciudad - otros
-Zerówka	Level zero	Nultý stupeň	Nultý stupeň	Stufe Null	Nivel cero
-Phone do Kursanta/Trenera	Phone to Student/Trainer	Telefon kurzistovi/trenérovi	Telefón kurzistovi/trénerovi	Anruf an Teilnehmer/Trainer	Llamada a alumno/entrenador
-wyśmienite	excellent	výborná	výborná	ausgezeichnet	excelente
-bardzo dobre	very good	velmi dobrá	veľmi dobrá	sehr gut	muy bien
-dobre	good	dobrá	dobrá	gut	bien
-słabe	poor	slabá	slabá	schwach	mal
-smutek	sadness	smutek	smútok	Traurigkeit	tristeza
-STATS	STATS	STATS	ŠTATS	STATS	ESTAD.
-Formularz Google: wysłano ✓	Google Form: sent ✓	Formulář Google: odesláno ✓	Formulár Google: odoslané ✓	Google-Formular: gesendet ✓	Formulario de Google: enviado ✓
-Formularz Google nie wysłany	Google Form not sent	Formulář Google neodeslán	Formulár Google neodoslaný	Google-Formular nicht gesendet	Formulario de Google no enviado
-ponowię automatycznie	will retry automatically	zkusím znovu automaticky	skúsim znova automaticky	wird automatisch wiederholt	se reintentará automáticamente
+# pl	en	cs	sk	de	es	hu
+Łącznie	Total	Celkem	Celkom	Insgesamt	Total	Összesen
+Telefony	Phone calls	Telefony	Telefonáty	Telefonate	Llamadas	Telefonhívások
+Miasto	City	Město	Mesto	Stadt	Ciudad	Város
+ZAMKNIJ — zapisz bez opisu	CLOSE — save without description	ZAVŘÍT — uložit bez popisu	ZAVRIEŤ — uložiť bez popisu	SCHLIESSEN — ohne Beschreibung speichern	CERRAR — guardar sin descripción	BEZÁRÁS — mentés leírás nélkül
+ZAMKNIJ	CLOSE	ZAVŘÍT	ZAVRIEŤ	SCHLIESSEN	CERRAR	BEZÁRÁS
+IMIĘ KURSANTA	STUDENT NAME	JMÉNO KURZISTY	MENO KURZISTU	NAME DES TEILNEHMERS	NOMBRE DEL ALUMNO	A TANULÓ NEVE
+np. Anna K.	e.g. Anna K.	např. Anna K.	napr. Anna K.	z. B. Anna K.	p. ej. Anna K.	pl. Anna K.
+KATEGORIA	CATEGORY	KATEGORIE	KATEGÓRIA	KATEGORIE	CATEGORÍA	KATEGÓRIA
+SYSTEM NOWEJ MOWY	NEW SPEECH SYSTEM	SYSTÉM NOVÉ ŘEČI	SYSTÉM NOVEJ REČI	NEUE-SPRACHE-SYSTEM	SISTEMA NUEVA HABLA	ÚJ BESZÉD RENDSZER
+LOKALIZACJA GPS	GPS LOCATION	POLOHA GPS	POLOHA GPS	GPS-STANDORT	UBICACIÓN GPS	GPS HELYZET
+Brak zgody na lokalizację — kliknij, aby zezwolić	No location permission — tap to allow	Chybí povolení polohy — klepněte pro povolení	Chýba povolenie polohy — ťuknite pre povolenie	Keine Standortfreigabe — tippen zum Erlauben	Sin permiso de ubicación — toca para permitir	Nincs helyengedély — koppints az engedélyezéshez
+Pobieranie GPS…	Getting GPS…	Získávám GPS…	Získavam GPS…	GPS wird ermittelt…	Obteniendo GPS…	GPS lekérése…
+GPS niedostępny — kliknij, aby spróbować ponownie	GPS unavailable — tap to try again	GPS nedostupné — klepněte pro nový pokus	GPS nedostupné — ťuknite pre nový pokus	GPS nicht verfügbar — tippen zum Wiederholen	GPS no disponible — toca para reintentar	GPS nem elérhető — koppints az újrapróbáláshoz
+EMOCJE W TEJ SYTUACJI	EMOTIONS IN THIS SITUATION	EMOCE V TÉTO SITUACI	EMÓCIE V TEJTO SITUÁCII	GEFÜHLE IN DIESER SITUATION	EMOCIONES EN ESTA SITUACIÓN	ÉRZELMEK EBBEN A HELYZETBEN
+NOTATKA	NOTE	POZNÁMKA	POZNÁMKA	NOTIZ	NOTA	JEGYZET
+opcjonalnie…	optional…	volitelné…	voliteľné…	optional…	opcional…	opcionális…
+ZAPISZ ✓	SAVE ✓	ULOŽIT ✓	ULOŽIŤ ✓	SPEICHERN ✓	GUARDAR ✓	MENTÉS ✓
+Kategoria	Category	Kategorie	Kategória	Kategorie	Categoría	Kategória
+Imię kursanta	Student name	Jméno kurzisty	Meno kurzistu	Name des Teilnehmers	Nombre del alumno	A tanuló neve
+Emocje (gwiazdki 1-5)	Emotions (1-5 stars)	Emoce (1-5 hvězdiček)	Emócie (1-5 hviezdičiek)	Gefühle (1-5 Sterne)	Emociones (1-5 estrellas)	Érzelmek (1-5 csillag)
+GPS — poczekaj lub kliknij pole GPS	GPS — wait or tap the GPS field	GPS — počkejte nebo klepněte na pole GPS	GPS — počkajte alebo ťuknite na pole GPS	GPS — warten oder GPS-Feld antippen	GPS — espera o toca el campo GPS	GPS — várj, vagy koppints a GPS mezőre
+Wymagane	Required	Povinné	Povinné	Erforderlich	Obligatorio	Kötelező
+Brak GPS z czasu nagrywania — kliknij, aby pobrać	No GPS from recording time — tap to get it	Chybí GPS z doby nahrávání — klepněte pro získání	Chýba GPS z času nahrávania — ťuknite pre získanie	Kein GPS aus der Aufnahmezeit — tippen zum Abrufen	Sin GPS del momento de grabación — toca para obtenerlo	Nincs GPS a felvétel idejéből — koppints a lekéréshez
+Wczytywanie dziennika…	Loading diary…	Načítám deník…	Načítavam denník…	Tagebuch wird geladen…	Cargando diario…	Napló betöltése…
+Nie udało się wczytać dziennika. Sprawdź połączenie z internetem.	Could not load the diary. Check your internet connection.	Deník se nepodařilo načíst. Zkontrolujte připojení k internetu.	Denník sa nepodarilo načítať. Skontrolujte pripojenie k internetu.	Tagebuch konnte nicht geladen werden. Prüfe die Internetverbindung.	No se pudo cargar el diario. Comprueba la conexión a internet.	Nem sikerült betölteni a naplót. Ellenőrizd az internetkapcsolatot.
+Spróbuj ponownie	Try again	Zkusit znovu	Skúsiť znova	Erneut versuchen	Reintentar	Próbáld újra
+DZIENNIK	DIARY	DENÍK	DENNÍK	TAGEBUCH	DIARIO	NAPLÓ
+HISTORIA	HISTORY	HISTORIE	HISTÓRIA	VERLAUF	HISTORIAL	ELŐZMÉNYEK
+Trener już sprawdził ten wpis — edycja zablokowana	The trainer has already reviewed this entry — editing locked	Trenér už tento záznam zkontroloval — úpravy zablokovány	Tréner už tento záznam skontroloval — úpravy zablokované	Der Trainer hat diesen Eintrag bereits geprüft — Bearbeitung gesperrt	El entrenador ya revisó esta entrada — edición bloqueada	Az edző már ellenőrizte ezt a bejegyzést — szerkesztés zárolva
+Dzisiejszy wpis już istnieje — możesz go poprawić i zapisać ponownie.	Today's entry already exists — you can edit it and save again.	Dnešní záznam už existuje — můžete ho upravit a znovu uložit.	Dnešný záznam už existuje — môžete ho upraviť a znova uložiť.	Der heutige Eintrag existiert bereits — du kannst ihn bearbeiten und erneut speichern.	La entrada de hoy ya existe — puedes corregirla y guardarla de nuevo.	A mai bejegyzés már létezik — javíthatod és újra mentheted.
+ĆWICZENIA RELAKSACYJNE DZISIAJ	RELAXATION EXERCISES TODAY	RELAXAČNÍ CVIČENÍ DNES	RELAXAČNÉ CVIČENIA DNES	ENTSPANNUNGSÜBUNGEN HEUTE	EJERCICIOS DE RELAJACIÓN HOY	MAI RELAXÁCIÓS GYAKORLATOK
+Trening Jacobsona	Jacobson training	Jacobsonův trénink	Jacobsonov tréning	Jacobson-Training	Entrenamiento de Jacobson	Jacobson-tréning
+Skanowanie ciała	Body scan	Skenování těla	Skenovanie tela	Body-Scan	Escaneo corporal	Testpásztázás
+SUKCESY DZISIAJ	SUCCESSES TODAY	ÚSPĚCHY DNES	ÚSPECHY DNES	ERFOLGE HEUTE	ÉXITOS HOY	MAI SIKEREK
+Każde "tak" się liczy	Every "yes" counts	Každé "ano" se počítá	Každé "áno" sa počíta	Jedes "Ja" zählt	Cada "sí" cuenta	Minden "igen" számít
+CO BYŁO INNE DZIŚ NIŻ WCZORAJ? (opcjonalnie)	WHAT WAS DIFFERENT TODAY THAN YESTERDAY? (optional)	CO BYLO DNES JINAK NEŽ VČERA? (volitelné)	ČO BOLO DNES INAK AKO VČERA? (voliteľné)	WAS WAR HEUTE ANDERS ALS GESTERN? (optional)	¿QUÉ FUE DIFERENTE HOY QUE AYER? (opcional)	MI VOLT MÁS MA, MINT TEGNAP? (opcionális)
+COŚ JESZCZE CHCESZ DOPISAĆ? (opcjonalnie)	ANYTHING ELSE TO ADD? (optional)	CHCETE JEŠTĚ NĚCO DOPSAT? (volitelné)	CHCETE EŠTE NIEČO DOPÍSAŤ? (voliteľné)	MÖCHTEST DU NOCH ETWAS ERGÄNZEN? (optional)	¿ALGO MÁS QUE AÑADIR? (opcional)	SZERETNÉL MÉG VALAMIT HOZZÁÍRNI? (opcionális)
+DODATKOWE INFORMACJE	ADDITIONAL INFORMATION	DOPLŇUJÍCÍ INFORMACE	DOPLŇUJÚCE INFORMÁCIE	ZUSÄTZLICHE INFORMATIONEN	INFORMACIÓN ADICIONAL	TOVÁBBI INFORMÁCIÓK
+MIEJSCOWOŚĆ	TOWN	OBEC	OBEC	ORT	LOCALIDAD	TELEPÜLÉS
+SYTUACJE DLA MNIE TRUDNE (można kilka)	SITUATIONS DIFFICULT FOR ME (multiple allowed)	SITUACE PRO MĚ TĚŽKÉ (lze více)	SITUÁCIE PRE MŇA ŤAŽKÉ (možno viac)	FÜR MICH SCHWIERIGE SITUATIONEN (mehrere möglich)	SITUACIONES DIFÍCILES PARA MÍ (varias)	SZÁMOMRA NEHÉZ HELYZETEK (több is lehet)
+SYTUACJE DLA MNIE ŁATWE (można kilka)	SITUATIONS EASY FOR ME (multiple allowed)	SITUACE PRO MĚ SNADNÉ (lze více)	SITUÁCIE PRE MŇA ĽAHKÉ (možno viac)	FÜR MICH LEICHTE SITUATIONEN (mehrere möglich)	SITUACIONES FÁCILES PARA MÍ (varias)	SZÁMOMRA KÖNNYŰ HELYZETEK (több is lehet)
+Poziom zmęczenia (0-10)	Tiredness level (0-10)	Úroveň únavy (0-10)	Úroveň únavy (0-10)	Müdigkeit (0-10)	Nivel de cansancio (0-10)	Fáradtság szintje (0-10)
+Ilość snu (godz.)	Sleep (hours)	Spánek (hod.)	Spánok (hod.)	Schlaf (Std.)	Sueño (horas)	Alvás (óra)
+Ilość wypitych kaw	Cups of coffee	Počet vypitých káv	Počet vypitých káv	Anzahl Kaffees	Cafés tomados	Megivott kávék száma
+CZY BYŁ SPOŻYWANY ALKOHOL? (można kilka)	ANY ALCOHOL? (multiple allowed)	BYL KONZUMOVÁN ALKOHOL? (lze více)	BOL KONZUMOVANÝ ALKOHOL? (možno viac)	WURDE ALKOHOL GETRUNKEN? (mehrere möglich)	¿SE CONSUMIÓ ALCOHOL? (varias)	FOGYASZTOTTÁL ALKOHOLT? (több is lehet)
+Nie	No	Ne	Nie	Nein	No	Nem
+Tak	Yes	Ano	Áno	Ja	Sí	Igen
+Czy była aktywność fizyczna?	Any physical activity?	Byla fyzická aktivita?	Bola fyzická aktivita?	Gab es körperliche Aktivität?	¿Hubo actividad física?	Volt testmozgás?
+Poziom motywacji do ćwiczeń (0-10)	Motivation to practise (0-10)	Motivace ke cvičení (0-10)	Motivácia k cvičeniu (0-10)	Übungsmotivation (0-10)	Motivación para practicar (0-10)	Gyakorlási motiváció (0-10)
+Z KIM DZIŚ SUKCESY	WHO WERE TODAY'S SUCCESSES WITH	S KÝM DNES ÚSPĚCHY	S KÝM DNES ÚSPECHY	MIT WEM HEUTE ERFOLGE	CON QUIÉN TUVISTE ÉXITOS HOY	KIVEL VOLTAK MA SIKEREK
+ROZMOWY BEZ NAGRANIA	CONVERSATIONS WITHOUT RECORDING	ROZHOVORY BEZ NAHRÁVKY	ROZHOVORY BEZ NAHRÁVKY	GESPRÄCHE OHNE AUFNAHME	CONVERSACIONES SIN GRABACIÓN	BESZÉLGETÉSEK FELVÉTEL NÉLKÜL
+TELEFONY BEZ NAGRANIA	PHONE CALLS WITHOUT RECORDING	TELEFONÁTY BEZ NAHRÁVKY	TELEFONÁTY BEZ NAHRÁVKY	TELEFONATE OHNE AUFNAHME	LLAMADAS SIN GRABACIÓN	TELEFONHÍVÁSOK FELVÉTEL NÉLKÜL
+CZY DZIŚ STRACIŁEŚ KONTROLĘ NAD NOWĄ MOWĄ?	DID YOU LOSE CONTROL OF THE NEW SPEECH TODAY?	ZTRATIL JSI DNES KONTROLU NAD NOVOU ŘEČÍ?	STRATIL SI DNES KONTROLU NAD NOVOU REČOU?	HAST DU HEUTE DIE KONTROLLE ÜBER DIE NEUE SPRACHE VERLOREN?	¿PERDISTE HOY EL CONTROL DEL NUEVO HABLA?	ELVESZTETTED MA AZ ÚJ BESZÉD FELETTI KONTROLLT?
+SAMOPOCZUCIE DZISIAJ	HOW YOU FEEL TODAY	DNEŠNÍ NÁLADA	DNEŠNÁ NÁLADA	BEFINDEN HEUTE	CÓMO TE SIENTES HOY	MAI KÖZÉRZET
+ZAPISZ ZMIANY W DZIENNIKU	SAVE DIARY CHANGES	ULOŽIT ZMĚNY V DENÍKU	ULOŽIŤ ZMENY V DENNÍKU	ÄNDERUNGEN IM TAGEBUCH SPEICHERN	GUARDAR CAMBIOS DEL DIARIO	NAPLÓ VÁLTOZÁSAINAK MENTÉSE
+ZAPISZ WPIS DZIENNIKA	SAVE DIARY ENTRY	ULOŽIT ZÁZNAM DENÍKU	ULOŽIŤ ZÁZNAM DENNÍKA	TAGEBUCHEINTRAG SPEICHERN	GUARDAR ENTRADA DEL DIARIO	NAPLÓBEJEGYZÉS MENTÉSE
+CO WPŁYNĘŁO NA SAMOPOCZUCIE?	WHAT AFFECTED HOW YOU FEEL?	CO OVLIVNILO NÁLADU?	ČO OVPLYVNILO NÁLADU?	WAS HAT DEIN BEFINDEN BEEINFLUSST?	¿QUÉ INFLUYÓ EN CÓMO TE SIENTES?	MI BEFOLYÁSOLTA A KÖZÉRZETED?
+Nie możesz edytować tego wpisu, trener już go sprawdził.	You can't edit this entry, the trainer has already reviewed it.	Tento záznam nemůžete upravit, trenér ho už zkontroloval.	Tento záznam nemôžete upraviť, tréner ho už skontroloval.	Du kannst diesen Eintrag nicht bearbeiten, der Trainer hat ihn bereits geprüft.	No puedes editar esta entrada, el entrenador ya la revisó.	Ezt a bejegyzést nem szerkesztheted, az edző már ellenőrizte.
+Z kim dziś sukcesy	Who were today's successes with	S kým dnes úspěchy	S kým dnes úspechy	Mit wem heute Erfolge	Con quién tuviste éxitos hoy	Kivel voltak ma sikerek
+Rozmowy bez nagrania	Conversations without recording	Rozhovory bez nahrávky	Rozhovory bez nahrávky	Gespräche ohne Aufnahme	Conversaciones sin grabación	Beszélgetések felvétel nélkül
+Telefony bez nagrania	Phone calls without recording	Telefonáty bez nahrávky	Telefonáty bez nahrávky	Telefonate ohne Aufnahme	Llamadas sin grabación	Telefonhívások felvétel nélkül
+Czy straciłeś kontrolę nad nową mową	Did you lose control of the new speech	Ztratil jsi kontrolu nad novou řečí	Stratil si kontrolu nad novou rečou	Hast du die Kontrolle über die neue Sprache verloren	¿Perdiste el control del nuevo habla?	Elvesztetted-e a kontrollt az új beszéd felett
+Samopoczucie dzisiaj	How you feel today	Dnešní nálada	Dnešná nálada	Befinden heute	Cómo te sientes hoy	Mai közérzet
+Uzupełnij brakujące pola:	Fill in the missing fields:	Doplňte chybějící pole:	Doplňte chýbajúce polia:	Fülle die fehlenden Felder aus:	Completa los campos que faltan:	Töltsd ki a hiányzó mezőket:
+Zapisywanie…	Saving…	Ukládám…	Ukladám…	Speichern…	Guardando…	Mentés…
+Wpis dziennika zaktualizowany!	Diary entry updated!	Záznam deníku aktualizován!	Záznam denníka aktualizovaný!	Tagebucheintrag aktualisiert!	¡Entrada del diario actualizada!	Naplóbejegyzés frissítve!
+Zapisano ✓	Saved ✓	Uloženo ✓	Uložené ✓	Gespeichert ✓	Guardado ✓	Mentve ✓
+Dziękujemy — wpis z dnia	Thank you — the entry from	Děkujeme — záznam ze dne	Ďakujeme — záznam zo dňa	Danke — der Eintrag vom	Gracias — la entrada del	Köszönjük — a bejegyzés dátuma:
+jest zapisany w NewSpeech.	is saved in NewSpeech.	je uložen v NewSpeech.	je uložený v NewSpeech.	ist in NewSpeech gespeichert.	está guardada en NewSpeech.	el van mentve a NewSpeech-ben.
+Błąd zapisu dziennika	Diary save error	Chyba uložení deníku	Chyba uloženia denníka	Fehler beim Speichern des Tagebuchs	Error al guardar el diario	Napló mentési hiba
+Nie udało się wczytać historii.	Could not load history.	Historii se nepodařilo načíst.	Históriu sa nepodarilo načítať.	Verlauf konnte nicht geladen werden.	No se pudo cargar el historial.	Nem sikerült betölteni az előzményeket.
+Brak wcześniejszych wpisów dziennika.	No earlier diary entries.	Žádné starší záznamy deníku.	Žiadne staršie záznamy denníka.	Keine früheren Tagebucheinträge.	No hay entradas anteriores del diario.	Nincsenek korábbi naplóbejegyzések.
+sprawdzone	reviewed	zkontrolováno	skontrolované	geprüft	revisado	ellenőrizve
+czeka na ocenę	awaiting review	čeká na hodnocení	čaká na hodnotenie	wartet auf Bewertung	pendiente de evaluación	értékelésre vár
+HISTORIA DZIENNIKA	DIARY HISTORY	HISTORIE DENÍKU	HISTÓRIA DENNÍKA	TAGEBUCHVERLAUF	HISTORIAL DEL DIARIO	NAPLÓ ELŐZMÉNYEI
+Zamknij	Close	Zavřít	Zavrieť	Schließen	Cerrar	Bezárás
+Zapisz	Save	Uložit	Uložiť	Speichern	Guardar	Mentés
+Anulować poprawkę?	Cancel the correction?	Zrušit opravu?	Zrušiť opravu?	Korrektur abbrechen?	¿Cancelar la corrección?	Megszakítod a javítást?
+Kolejne nagranie będzie zwykłym nagraniem, nie poprawką dla:	The next recording will be a normal recording, not a correction for:	Další nahrávka bude běžná, ne oprava pro:	Ďalšia nahrávka bude bežná, nie oprava pre:	Die nächste Aufnahme ist eine normale Aufnahme, keine Korrektur für:	La próxima grabación será normal, no una corrección para:	A következő felvétel sima felvétel lesz, nem javítás ehhez:
+Anuluj poprawkę	Cancel correction	Zrušit opravu	Zrušiť opravu	Korrektur abbrechen	Cancelar corrección	Javítás megszakítása
+Zostaw	Keep	Ponechat	Ponechať	Behalten	Mantener	Maradjon
+Nagrywasz poprawkę dla:	Recording a correction for:	Nahráváte opravu pro:	Nahrávate opravu pre:	Du nimmst eine Korrektur auf für:	Grabando una corrección para:	Javítást veszel fel ehhez:
+dotknij, aby anulować)	tap to cancel)	klepněte pro zrušení)	ťuknite pre zrušenie)	tippen zum Abbrechen)	toca para cancelar)	koppints a megszakításhoz)
+Zatrzymaj nagrywanie, żeby zmienić format	Stop recording to change the format	Pro změnu formátu zastavte nahrávání	Pre zmenu formátu zastavte nahrávanie	Aufnahme stoppen, um das Format zu ändern	Detén la grabación para cambiar el formato	Állítsd le a felvételt a formátum módosításához
+KOREKTA	CORRECTIONS	KOREKCE	KOREKCIA	KORREKTUR	CORRECCIONES	JAVÍTÁS
+STATYSTYKI	STATISTICS	STATISTIKY	ŠTATISTIKY	STATISTIK	ESTADÍSTICAS	STATISZTIKA
+Aby otworzyć sekcję	To open the section	Pro otevření sekce	Na otvorenie sekcie	Um den Bereich	Para abrir la sección	A szakasz megnyitásához:
+zaloguj się do NewSpeech.	log in to NewSpeech.	se přihlaste do NewSpeech.	sa prihláste do NewSpeech.	zu öffnen, melde dich bei NewSpeech an.	inicia sesión en NewSpeech.	jelentkezz be a NewSpeech-be.
+Sprawdzam logowanie…	Checking login…	Ověřuji přihlášení…	Overujem prihlásenie…	Anmeldung wird geprüft…	Comprobando sesión…	Bejelentkezés ellenőrzése…
+Jesteś zalogowany ✓\n\nSekcja	You are logged in ✓\n\nThe section	Jste přihlášeni ✓\n\nSekce	Ste prihlásený ✓\n\nSekcia	Du bist angemeldet ✓\n\nDer Bereich	Has iniciado sesión ✓\n\nLa sección	Be vagy jelentkezve ✓\n\nA szakasz
+jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji.	is being prepared and will appear in the next app version.	se připravuje a objeví se v další verzi aplikace.	sa pripravuje a objaví sa v ďalšej verzii aplikácie.	ist in Vorbereitung und kommt in der nächsten App-Version.	está en preparación y aparecerá en la próxima versión.	előkészítés alatt van, és a következő verzióban jelenik meg.
+Twoja sesja NewSpeech wygasła. Zaloguj się ponownie.	Your NewSpeech session has expired. Please log in again.	Vaše relace NewSpeech vypršela. Přihlaste se znovu.	Vaša relácia NewSpeech vypršala. Prihláste sa znova.	Deine NewSpeech-Sitzung ist abgelaufen. Bitte erneut anmelden.	Tu sesión de NewSpeech ha caducado. Inicia sesión de nuevo.	A NewSpeech munkamenet lejárt. Jelentkezz be újra.
+Brak połączenia z NewSpeech.\nSprawdź internet i spróbuj ponownie.	No connection to NewSpeech.\nCheck your internet and try again.	Žádné spojení s NewSpeech.\nZkontrolujte internet a zkuste to znovu.	Žiadne spojenie s NewSpeech.\nSkontrolujte internet a skúste znova.	Keine Verbindung zu NewSpeech.\nPrüfe das Internet und versuche es erneut.	Sin conexión con NewSpeech.\nComprueba internet e inténtalo de nuevo.	Nincs kapcsolat a NewSpeech-csel.\nEllenőrizd az internetet, és próbáld újra.
+Wymagane logowanie	Login required	Vyžadováno přihlášení	Vyžaduje sa prihlásenie	Anmeldung erforderlich	Inicio de sesión necesario	Bejelentkezés szükséges
+Przejdź do logowania	Go to login	Přejít k přihlášení	Prejsť na prihlásenie	Zur Anmeldung	Ir a iniciar sesión	Ugrás a bejelentkezéshez
+Sesja NewSpeech wygasła — zaloguj się ponownie w Ustawieniach	NewSpeech session expired — log in again in Settings	Relace NewSpeech vypršela — přihlaste se znovu v Nastavení	Relácia NewSpeech vypršala — prihláste sa znova v Nastaveniach	NewSpeech-Sitzung abgelaufen — in den Einstellungen erneut anmelden	Sesión de NewSpeech caducada — inicia sesión de nuevo en Ajustes	A NewSpeech munkamenet lejárt — jelentkezz be újra a Beállításokban
+Wpisz email i hasło	Enter email and password	Zadejte e-mail a heslo	Zadajte e-mail a heslo	E-Mail und Passwort eingeben	Introduce correo y contraseña	Add meg az e-mailt és a jelszót
+Łączenie…	Connecting…	Připojuji…	Pripájam…	Verbinde…	Conectando…	Kapcsolódás…
+Zalogowano do NewSpeech	Logged in to NewSpeech	Přihlášeno do NewSpeech	Prihlásené do NewSpeech	Bei NewSpeech angemeldet	Sesión iniciada en NewSpeech	Bejelentkezve a NewSpeech-be
+KONTO NEWSPEECH	NEWSPEECH ACCOUNT	ÚČET NEWSPEECH	ÚČET NEWSPEECH	NEWSPEECH-KONTO	CUENTA NEWSPEECH	NEWSPEECH FIÓK
+Zalogowano:	Logged in:	Přihlášeno:	Prihlásené:	Angemeldet:	Sesión iniciada:	Bejelentkezve:
+Brak połączenia z NS — logowanie niepotwierdzone (	No connection to NS — login not confirmed (	Žádné spojení s NS — přihlášení nepotvrzeno (	Žiadne spojenie s NS — prihlásenie nepotvrdené (	Keine Verbindung zu NS — Anmeldung nicht bestätigt (	Sin conexión con NS — sesión no confirmada (	Nincs kapcsolat az NS-sel — a bejelentkezés nincs megerősítve (
+Sprawdzam logowanie… (	Checking login… (	Ověřuji přihlášení… (	Overujem prihlásenie… (	Anmeldung wird geprüft… (	Comprobando sesión… (	Bejelentkezés ellenőrzése… (
+Wyloguj	Log out	Odhlásit	Odhlásiť	Abmelden	Cerrar sesión	Kijelentkezés
+Sesja wygasła — zaloguj się ponownie	Session expired — log in again	Relace vypršela — přihlaste se znovu	Relácia vypršala — prihláste sa znova	Sitzung abgelaufen — erneut anmelden	Sesión caducada — inicia sesión de nuevo	A munkamenet lejárt — jelentkezz be újra
+Nie jesteś zalogowany	You are not logged in	Nejste přihlášeni	Nie ste prihlásený	Du bist nicht angemeldet	No has iniciado sesión	Nem vagy bejelentkezve
+Hasło	Password	Heslo	Heslo	Passwort	Contraseña	Jelszó
+Zaloguj	Log in	Přihlásit	Prihlásiť	Anmelden	Iniciar sesión	Bejelentkezés
+Po zalogowaniu pojawią się Korekta, Dziennik i Statystyki, a w Nagraniach zadziała „Wyślij NS”.	After logging in, Corrections, Diary and Statistics appear, and "Send NS" works in Recordings.	Po přihlášení se objeví Korekce, Deník a Statistiky a v Nahrávkách bude fungovat „Odeslat NS”.	Po prihlásení sa objavia Korekcia, Denník a Štatistiky a v Nahrávkach bude fungovať „Odoslať NS”.	Nach der Anmeldung erscheinen Korrektur, Tagebuch und Statistik, und in Aufnahmen funktioniert „An NS senden“.	Tras iniciar sesión aparecerán Correcciones, Diario y Estadísticas, y en Grabaciones funcionará «Enviar NS».	Bejelentkezés után megjelenik a Javítás, a Napló és a Statisztika, a Felvételeknél pedig működik a „Küldés NS-be”.
+Kategoria nagrania	Recording category	Kategorie nahrávky	Kategória nahrávky	Aufnahmekategorie	Categoría de la grabación	Felvétel kategóriája
+Aby wysłać nagranie do NewSpeech, zaloguj się.	Log in to send the recording to NewSpeech.	Pro odeslání nahrávky do NewSpeech se přihlaste.	Na odoslanie nahrávky do NewSpeech sa prihláste.	Melde dich an, um die Aufnahme an NewSpeech zu senden.	Inicia sesión para enviar la grabación a NewSpeech.	A felvétel NewSpeech-be küldéséhez jelentkezz be.
+Nieznana kategoria:	Unknown category:	Neznámá kategorie:	Neznáma kategória:	Unbekannte Kategorie:	Categoría desconocida:	Ismeretlen kategória:
+Wysyłanie poprawki…	Sending correction…	Odesílám opravu…	Odosielam opravu…	Korrektur wird gesendet…	Enviando corrección…	Javítás küldése…
+Wysyłanie do NS…	Sending to NS…	Odesílám do NS…	Odosielam do NS…	Wird an NS gesendet…	Enviando a NS…	Küldés az NS-be…
+Poprawka wysłana! Czeka na ocenę trenera.	Correction sent! Waiting for the trainer's review.	Oprava odeslána! Čeká na hodnocení trenéra.	Oprava odoslaná! Čaká na hodnotenie trénera.	Korrektur gesendet! Wartet auf die Bewertung des Trainers.	¡Corrección enviada! Pendiente de evaluación del entrenador.	Javítás elküldve! Az edző értékelésére vár.
+NS: wysłano (	NS: sent (	NS: odesláno (	NS: odoslané (	NS: gesendet (	NS: enviado (	NS: elküldve (
+Poprawka wysłana	Correction sent	Oprava odeslána	Oprava odoslaná	Korrektur gesendet	Corrección enviada	Javítás elküldve
+Wysłano do NS	Sent to NS	Odesláno do NS	Odoslané do NS	An NS gesendet	Enviado a NS	Elküldve az NS-be
+Poprawka odrzucona z powodu limitu	Correction rejected due to limit	Oprava odmítnuta kvůli limitu	Oprava odmietnutá kvôli limitu	Korrektur wegen Limit abgelehnt	Corrección rechazada por el límite	A javítást a korlát miatt elutasították
+Limit nagrań	Recording limit	Limit nahrávek	Limit nahrávok	Aufnahmelimit	Límite de grabaciones	Felvételi korlát
+Wysłanie poprawki nie powiodło się z powodu limitu nagrań (	Sending the correction failed due to the recording limit (	Odeslání opravy selhalo kvůli limitu nahrávek (	Odoslanie opravy zlyhalo kvôli limitu nahrávok (	Senden der Korrektur wegen Aufnahmelimit fehlgeschlagen (	El envío de la corrección falló por el límite de grabaciones (	A javítás küldése a felvételi korlát miatt nem sikerült (
+Poprawki powinny być możliwe bez limitu — jeśli to się powtarza, zgłoś to trenerowi.	Corrections should have no limit — if this repeats, tell your trainer.	Opravy by měly být bez limitu — pokud se to opakuje, řekněte to trenérovi.	Opravy by mali byť bez limitu — ak sa to opakuje, povedzte to trénerovi.	Korrekturen sollten ohne Limit möglich sein — wenn das wieder passiert, melde es dem Trainer.	Las correcciones no deberían tener límite — si se repite, avisa a tu entrenador.	A javításoknak nincs korlátja — ha ez ismétlődik, szólj az edzőnek.
+Dzienny limit NOWYCH nagrań wyczerpany	Daily limit of NEW recordings reached	Denní limit NOVÝCH nahrávek vyčerpán	Denný limit NOVÝCH nahrávok vyčerpaný	Tageslimit für NEUE Aufnahmen erreicht	Límite diario de grabaciones NUEVAS alcanzado	Elfogyott az ÚJ felvételek napi kerete
+Serwer NS:	NS server:	Server NS:	Server NS:	NS-Server:	Servidor NS:	NS szerver:
+Dzienny limit dotyczy tylko nowych nagrań. Poprawki odrzuconych nagrań nie mają limitu (sekcja Korekta).	The daily limit applies only to new recordings. Corrections of rejected recordings have no limit (Corrections section).	Denní limit platí jen pro nové nahrávky. Opravy zamítnutých nahrávek limit nemají (sekce Korekce).	Denný limit platí len pre nové nahrávky. Opravy zamietnutých nahrávok nemajú limit (sekcia Korekcia).	Das Tageslimit gilt nur für neue Aufnahmen. Korrekturen abgelehnter Aufnahmen haben kein Limit (Bereich Korrektur).	El límite diario solo se aplica a grabaciones nuevas. Las correcciones no tienen límite (sección Correcciones).	A napi keret csak az új felvételekre vonatkozik. Az elutasított felvételek javításának nincs korlátja (Javítás szakasz).
+NS:	NS:	NS:	NS:	NS:	NS:	NS:
+Błąd wysyłki:	Send error:	Chyba odeslání:	Chyba odoslania:	Sendefehler:	Error de envío:	Küldési hiba:
+Aby wysłać nagrania do NewSpeech, zaloguj się.	Log in to send recordings to NewSpeech.	Pro odeslání nahrávek do NewSpeech se přihlaste.	Na odoslanie nahrávok do NewSpeech sa prihláste.	Melde dich an, um Aufnahmen an NewSpeech zu senden.	Inicia sesión para enviar grabaciones a NewSpeech.	A felvételek NewSpeech-be küldéséhez jelentkezz be.
+Najpierw opisz nagrania (📝 Opisz)	Describe the recordings first (📝 Describe)	Nejdřív nahrávky popište (📝 Popsat)	Najprv nahrávky popíšte (📝 Popísať)	Beschreibe zuerst die Aufnahmen (📝 Beschreiben)	Primero describe las grabaciones (📝 Describir)	Először írd le a felvételeket (📝 Leírás)
+Wszystkie nagrania są już wysłane	All recordings have already been sent	Všechny nahrávky už jsou odeslané	Všetky nahrávky sú už odoslané	Alle Aufnahmen wurden bereits gesendet	Todas las grabaciones ya se enviaron	Minden felvétel el van küldve
+nagrań bez opisu zostanie pominiętych.	recordings without a description will be skipped.	nahrávek bez popisu bude přeskočeno.	nahrávok bez popisu bude preskočených.	Aufnahmen ohne Beschreibung werden übersprungen.	grabaciones sin descripción se omitirán.	leírás nélküli felvétel kimarad.
+Wysłać	Send	Odeslat	Odoslať	Senden:	¿Enviar	Elküldöd:
+nagrań do NS?	recordings to NS?	nahrávek do NS?	nahrávok do NS?	Aufnahmen an NS?	grabaciones a NS?	felvételt az NS-be?
+Każde nagranie trafi do NS w kategorii ze swojego opisu.	Each recording goes to NS in the category from its description.	Každá nahrávka půjde do NS v kategorii ze svého popisu.	Každá nahrávka pôjde do NS v kategórii zo svojho popisu.	Jede Aufnahme geht in der Kategorie aus ihrer Beschreibung an NS.	Cada grabación irá a NS en la categoría de su descripción.	Minden felvétel a leírásában megadott kategóriában kerül az NS-be.
+Wyślij	Send	Odeslat	Odoslať	Senden	Enviar	Küldés
+Wysłano	Sent	Odesláno	Odoslané	Gesendet:	Enviadas	Elküldve:
+nagrań do NS	recordings to NS	nahrávek do NS	nahrávok do NS	Aufnahmen an NS	grabaciones a NS	felvétel az NS-be
+Wysyłanie	Sending	Odesílám	Odosielam	Sende	Enviando	Küldés:
+zatrzymano:	stopped:	zastaveno:	zastavené:	gestoppt:	detenido:	leállítva:
+Zatrzymano wysyłkę:	Sending stopped:	Odesílání zastaveno:	Odosielanie zastavené:	Senden gestoppt:	Envío detenido:	Küldés leállítva:
+ZAPISZ POPRAWKĘ	SAVE CORRECTION	ULOŽIT OPRAVU	ULOŽIŤ OPRAVU	KORREKTUR SPEICHERN	GUARDAR CORRECCIÓN	JAVÍTÁS MENTÉSE
+ZAPISZ NAGRANIE	SAVE RECORDING	ULOŽIT NAHRÁVKU	ULOŽIŤ NAHRÁVKU	AUFNAHME SPEICHERN	GUARDAR GRABACIÓN	FELVÉTEL MENTÉSE
+Poprawka zapisana (	Correction saved (	Oprava uložena (	Oprava uložená (	Korrektur gespeichert (	Corrección guardada (	Javítás mentve (
+Zapisano (	Saved (	Uloženo (	Uložené (	Gespeichert (	Guardado (	Mentve (
+Zapisano bez opisu — opisz i wyślij w NAGRANIACH	Saved without description — describe and send in RECORDINGS	Uloženo bez popisu — popište a odešlete v NAHRÁVKÁCH	Uložené bez popisu — popíšte a odošlite v NAHRÁVKACH	Ohne Beschreibung gespeichert — in AUFNAHMEN beschreiben und senden	Guardado sin descripción — descríbelo y envíalo en GRABACIONES	Mentve leírás nélkül — írd le és küldd el a FELVÉTELEKNÉL
+OPISZ NAGRANIE	DESCRIBE RECORDING	POPSAT NAHRÁVKU	POPÍSAŤ NAHRÁVKU	AUFNAHME BESCHREIBEN	DESCRIBIR GRABACIÓN	FELVÉTEL LEÍRÁSA
+Nie udało się zmienić dostępności:	Could not change availability:	Dostupnost se nepodařilo změnit:	Dostupnosť sa nepodarilo zmeniť:	Verfügbarkeit konnte nicht geändert werden:	No se pudo cambiar la disponibilidad:	Nem sikerült módosítani az elérhetőséget:
+Mapa nagrań jest dostępna po zalogowaniu do NewSpeech.	The recordings map is available after logging in to NewSpeech.	Mapa nahrávek je dostupná po přihlášení do NewSpeech.	Mapa nahrávok je dostupná po prihlásení do NewSpeech.	Die Aufnahmekarte ist nach der Anmeldung bei NewSpeech verfügbar.	El mapa de grabaciones está disponible tras iniciar sesión en NewSpeech.	A felvételek térképe a NewSpeech-be való bejelentkezés után érhető el.
+Wysłać do NewSpeech?	Send to NewSpeech?	Odeslat do NewSpeech?	Odoslať do NewSpeech?	An NewSpeech senden?	¿Enviar a NewSpeech?	Elküldöd a NewSpeech-be?
+Nagranie zostało zapisane. Wysłać je teraz do NS?	The recording was saved. Send it to NS now?	Nahrávka byla uložena. Odeslat ji teď do NS?	Nahrávka bola uložená. Odoslať ju teraz do NS?	Die Aufnahme wurde gespeichert. Jetzt an NS senden?	La grabación se guardó. ¿Enviarla ahora a NS?	A felvétel mentve. Elküldöd most az NS-be?
+Później	Later	Později	Neskôr	Später	Más tarde	Később
+USTAWIENIA	SETTINGS	NASTAVENÍ	NASTAVENIA	EINSTELLUNGEN	AJUSTES	BEÁLLÍTÁSOK
+MAPA NAGRAŃ	RECORDINGS MAP	MAPA NAHRÁVEK	MAPA NAHRÁVOK	AUFNAHMEKARTE	MAPA DE GRABACIONES	FELVÉTELEK TÉRKÉPE
+NORMY	NORMS	NORMY	NORMY	NORMEN	NORMAS	NORMÁK
+Normy	Norms	Normy	Normy	Normen	Normas	Normák
+NAGRYWANIE	RECORDING	NAHRÁVÁNÍ	NAHRÁVANIE	AUFNAHME	GRABACIÓN	FELVÉTEL
+Format nagrania	Recording format	Formát nahrávky	Formát nahrávky	Aufnahmeformat	Formato de grabación	Felvétel formátuma
+MP3 — mniejsze pliki, szybsza wysyłka	MP3 — smaller files, faster upload	MP3 — menší soubory, rychlejší odeslání	MP3 — menšie súbory, rýchlejšie odoslanie	MP3 — kleinere Dateien, schnelleres Senden	MP3 — archivos más pequeños, envío más rápido	MP3 — kisebb fájlok, gyorsabb küldés
+WAV — pełna jakość, duże pliki	WAV — full quality, large files	WAV — plná kvalita, velké soubory	WAV — plná kvalita, veľké súbory	WAV — volle Qualität, große Dateien	WAV — calidad completa, archivos grandes	WAV — teljes minőség, nagy fájlok
+Automatyczna głośność (0 dB)	Automatic volume (0 dB)	Automatická hlasitost (0 dB)	Automatická hlasitosť (0 dB)	Automatische Lautstärke (0 dB)	Volumen automático (0 dB)	Automatikus hangerő (0 dB)
+Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)	Quiet recordings are boosted to 0 dB after saving (no distortion)	Tiché nahrávky se po uložení zesílí na 0 dB (bez zkreslení)	Tiché nahrávky sa po uložení zosilnia na 0 dB (bez skreslenia)	Leise Aufnahmen werden nach dem Speichern auf 0 dB angehoben (ohne Verzerrung)	Las grabaciones bajas se suben a 0 dB al guardar (sin distorsión)	A halk felvételek mentés után 0 dB-re erősödnek (torzítás nélkül)
+Wyłączone — nagranie zostaje bez zmian	Off — the recording stays unchanged	Vypnuto — nahrávka zůstane beze změny	Vypnuté — nahrávka zostane bez zmeny	Aus — die Aufnahme bleibt unverändert	Desactivado — la grabación no cambia	Kikapcsolva — a felvétel változatlan marad
+Ekran nie gaśnie (wyłączony wygaszacz)	Keep screen on (screen saver off)	Obrazovka nezhasne (spořič vypnut)	Obrazovka nezhasne (šetrič vypnutý)	Bildschirm bleibt an (Bildschirmschoner aus)	Pantalla siempre encendida	A képernyő nem kapcsol ki
+Bramka szumów (tłumi cichy szum tła)	Noise gate (reduces quiet background noise)	Šumová brána (tlumí tichý šum pozadí)	Šumová brána (tlmí tichý šum pozadia)	Noise Gate (dämpft leises Hintergrundrauschen)	Puerta de ruido (reduce el ruido de fondo)	Zajkapu (elnyomja a halk háttérzajt)
+Lokalizacja GPS	GPS location	Poloha GPS	Poloha GPS	GPS-Standort	Ubicación GPS	GPS helyzet
+zezwolono ✓	allowed ✓	povoleno ✓	povolené ✓	erlaubt ✓	permitido ✓	engedélyezve ✓
+brak zgody — dotknij, aby zezwolić	not allowed — tap to allow	nepovoleno — klepněte pro povolení	nepovolené — ťuknite pre povolenie	nicht erlaubt — tippen zum Erlauben	sin permiso — toca para permitir	nincs engedély — koppints az engedélyezéshez
+PAUZY — ZAKRES PRAWIDŁOWY	PAUSES — CORRECT RANGE	PAUZY — SPRÁVNÝ ROZSAH	PAUZY — SPRÁVNY ROZSAH	PAUSEN — KORREKTER BEREICH	PAUSAS — RANGO CORRECTO	SZÜNETEK — HELYES TARTOMÁNY
+Pauza między porcjami mowy %.1f–%.1f s liczy się jako prawidłowa (regulacja 1–4 s)	A pause between speech portions of %.1f–%.1f s counts as correct (adjustable 1–4 s)	Pauza mezi úseky řeči %.1f–%.1f s se počítá jako správná (nastavení 1–4 s)	Pauza medzi úsekmi reči %.1f–%.1f s sa počíta ako správna (nastavenie 1–4 s)	Eine Pause zwischen Sprechabschnitten von %.1f–%.1f s gilt als korrekt (einstellbar 1–4 s)	Una pausa entre partes del habla de %.1f–%.1f s cuenta como correcta (ajustable 1–4 s)	A beszédszakaszok közötti %.1f–%.1f s-os szünet helyesnek számít (állítható 1–4 s)
+WYGLĄD DAW	DAW APPEARANCE	VZHLED DAW	VZHĽAD DAW	DAW-DARSTELLUNG	APARIENCIA DAW	DAW MEGJELENÉS
+Grubość linii pitch: %.0f	Pitch line width: %.0f	Tloušťka čáry pitch: %.0f	Hrúbka čiary pitch: %.0f	Pitch-Linienstärke: %.0f	Grosor de la línea de tono: %.0f	Hangmagasság-vonal vastagsága: %.0f
+Kolor linii pitch	Pitch line color	Barva čáry pitch	Farba čiary pitch	Pitch-Linienfarbe	Color de la línea de tono	Hangmagasság-vonal színe
+Grubość siatki (poziome i pionowe): ×%.1f	Grid width (horizontal and vertical): ×%.1f	Tloušťka mřížky (vodorovná i svislá): ×%.1f	Hrúbka mriežky (vodorovná aj zvislá): ×%.1f	Rasterstärke (horizontal und vertikal): ×%.1f	Grosor de la cuadrícula (horizontal y vertical): ×%.1f	Rács vastagsága (vízszintes és függőleges): ×%.1f
+Kolor siatki	Grid color	Barva mřížky	Farba mriežky	Rasterfarbe	Color de la cuadrícula	Rács színe
+Kolor tła DAW	DAW background color	Barva pozadí DAW	Farba pozadia DAW	DAW-Hintergrundfarbe	Color de fondo DAW	DAW háttérszín
+Kolor fali	Waveform color	Barva vlny	Farba vlny	Wellenfarbe	Color de la onda	Hullám színe
+MAPA I DOSTĘPNOŚĆ	MAP AND AVAILABILITY	MAPA A DOSTUPNOST	MAPA A DOSTUPNOSŤ	KARTE UND VERFÜGBARKEIT	MAPA Y DISPONIBILIDAD	TÉRKÉP ÉS ELÉRHETŐSÉG
+Pokazuj mnie na mapie na żywo (Sklepy, Przechodzień)	Show me live on the map (Shops, Passerby)	Zobrazovat mě živě na mapě (Obchody, Kolemjdoucí)	Zobrazovať ma naživo na mape (Obchody, Okoloidúci)	Mich live auf der Karte zeigen (Geschäfte, Passant)	Mostrarme en directo en el mapa (Tiendas, Transeúnte)	Mutass élőben a térképen (Üzletek, Járókelő)
+Na mapie jako:	On the map as:	Na mapě jako:	Na mape ako:	Auf der Karte als:	En el mapa como:	A térképen így:
+Telefon (opcjonalnie, widoczny dla kursantów)	Phone (optional, visible to students)	Telefon (volitelné, viditelný pro kurzisty)	Telefón (voliteľné, viditeľný pre kurzistov)	Telefon (optional, für Teilnehmer sichtbar)	Teléfono (opcional, visible para alumnos)	Telefon (opcionális, a tanulók látják)
+Chętnie porozmawiam	Happy to talk	Rád si popovídám	Rád sa porozprávam	Gerne zum Gespräch bereit	Disponible para hablar	Szívesen beszélgetek
+WŁ	ON	ZAP	ZAP	AN	SÍ	BE
+WYŁ	OFF	VYP	VYP	AUS	NO	KI
+Dostępność do rozmowy wymaga zalogowania do NewSpeech.	Availability to talk requires logging in to NewSpeech.	Dostupnost k rozhovoru vyžaduje přihlášení do NewSpeech.	Dostupnosť na rozhovor vyžaduje prihlásenie do NewSpeech.	Gesprächsbereitschaft erfordert die Anmeldung bei NewSpeech.	La disponibilidad para hablar requiere iniciar sesión en NewSpeech.	A beszélgetési elérhetőséghez NewSpeech-bejelentkezés kell.
+Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach.	Visible on the map as available to talk — turns off by itself after 2 hours.	Viditelný na mapě jako dostupný k rozhovoru — vypne se sám po 2 hodinách.	Viditeľný na mape ako dostupný na rozhovor — vypne sa sám po 2 hodinách.	Auf der Karte als gesprächsbereit sichtbar — schaltet sich nach 2 Stunden ab.	Visible en el mapa como disponible — se desactiva solo tras 2 horas.	A térképen beszélgetésre elérhetőként látszol — 2 óra múlva magától kikapcsol.
+Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).	Turn on when you can talk on the phone with another student (turns off after 2 h).	Zapněte, když můžete telefonovat s jiným kurzistou (vypne se po 2 h).	Zapnite, keď môžete telefonovať s iným kurzistom (vypne sa po 2 h).	Einschalten, wenn du mit einem anderen Teilnehmer telefonieren kannst (aus nach 2 Std.).	Actívalo cuando puedas hablar por teléfono con otro alumno (se apaga tras 2 h).	Kapcsold be, ha tudsz telefonon beszélni egy másik tanulóval (2 óra után kikapcsol).
+JĘZYK	LANGUAGE	JAZYK	JAZYK	SPRACHE	IDIOMA	NYELV
+Odświeżanie…	Refreshing…	Obnovuji…	Obnovujem…	Aktualisiere…	Actualizando…	Frissítés…
+Wczytywanie…	Loading…	Načítám…	Načítavam…	Wird geladen…	Cargando…	Betöltés…
+sprawdź internet (↻ odśwież)	check internet (↻ refresh)	zkontrolujte internet (↻ obnovit)	skontrolujte internet (↻ obnoviť)	Internet prüfen (↻ aktualisieren)	comprueba internet (↻ actualizar)	ellenőrizd az internetet (↻ frissítés)
+Zaktualizowano	Updated	Aktualizováno	Aktualizované	Aktualisiert	Actualizado	Frissítve
+odświeża się co minutę	refreshes every minute	obnovuje se každou minutu	obnovuje sa každú minútu	aktualisiert sich jede Minute	se actualiza cada minuto	percenként frissül
+Brak nagrań do poprawy. Wszystko zaliczone albo czeka na pierwszą ocenę.	No recordings to correct. Everything passed or is waiting for the first review.	Žádné nahrávky k opravě. Vše splněno nebo čeká na první hodnocení.	Žiadne nahrávky na opravu. Všetko splnené alebo čaká na prvé hodnotenie.	Keine Aufnahmen zu korrigieren. Alles bestanden oder wartet auf die erste Bewertung.	No hay grabaciones que corregir. Todo aprobado o pendiente de la primera evaluación.	Nincs javítandó felvétel. Minden elfogadva, vagy első értékelésre vár.
+Pokazuję	Showing	Zobrazuji	Zobrazujem	Angezeigt:	Mostrando	Megjelenítve:
+od najstarszych	oldest first	od nejstarších	od najstarších	älteste zuerst	de la más antigua	a legrégebbitől
+nie zaliczone	not passed	nesplněno	nesplnené	nicht bestanden	no aprobada	nem elfogadott
+Wszystkie elementy techniki ocenione dobrze, ale całość nie została zaliczona. Częsty powód: nagranie było słabej jakości (zbyt cicho, szum, przerwa) i trener nie mógł go w pełni ocenić. Spróbuj nagrać jeszcze raz w spokojniejszym miejscu.	All technique elements were rated well, but the recording was not passed. A common reason: poor recording quality (too quiet, noise, gap) so the trainer could not fully assess it. Try recording again in a quieter place.	Všechny prvky techniky byly hodnoceny dobře, ale celek nebyl splněn. Častý důvod: nahrávka byla nekvalitní (příliš tichá, šum, výpadek) a trenér ji nemohl plně ohodnotit. Zkuste nahrát znovu na klidnějším místě.	Všetky prvky techniky boli hodnotené dobre, ale celok nebol splnený. Častý dôvod: nahrávka bola nekvalitná (príliš tichá, šum, výpadok) a tréner ju nemohol plne ohodnotiť. Skúste nahrať znova na pokojnejšom mieste.	Alle Technikelemente wurden gut bewertet, aber die Aufnahme wurde nicht bestanden. Häufiger Grund: schlechte Aufnahmequalität (zu leise, Rauschen, Lücke), sodass der Trainer sie nicht voll bewerten konnte. Nimm an einem ruhigeren Ort erneut auf.	Todos los elementos de la técnica se evaluaron bien, pero la grabación no se aprobó. Motivo frecuente: mala calidad (muy baja, ruido, corte) y el entrenador no pudo evaluarla por completo. Intenta grabar de nuevo en un lugar más tranquilo.	A technika minden eleme jó értékelést kapott, de a felvétel egésze nem lett elfogadva. Gyakori ok: gyenge minőség (túl halk, zaj, kihagyás), így az edző nem tudta teljesen értékelni. Próbáld újra felvenni egy csendesebb helyen.
+Słabe elementy:	Weak elements:	Slabé prvky:	Slabé prvky:	Schwache Elemente:	Elementos débiles:	Gyenge elemek:
+Nagraj poprawkę	Record correction	Nahrát opravu	Nahrať opravu	Korrektur aufnehmen	Grabar corrección	Javítás felvétele
+Pokaż kolejne	Show next	Zobrazit další	Zobraziť ďalšie	Weitere anzeigen	Mostrar siguientes	Továbbiak
+Nagraj poprawkę — REC	Record correction — REC	Nahrát opravu — REC	Nahrať opravu — REC	Korrektur aufnehmen — REC	Grabar corrección — REC	Javítás felvétele — REC
+w przygotowaniu, pojawi się w kolejnej wersji aplikacji.	in preparation, coming in the next app version.	připravuje se, objeví se v další verzi aplikace.	pripravuje sa, objaví sa v ďalšej verzii aplikácie.	in Vorbereitung, kommt in der nächsten App-Version.	en preparación, llegará en la próxima versión.	előkészítés alatt, a következő verzióban érkezik.
+NAGRYWA	RECORDING	NAHRÁVÁ	NAHRÁVA	AUFNAHME	GRABANDO	FELVÉTEL
+ZAPIS…	SAVING…	UKLÁDÁM…	UKLADÁM…	SPEICHERN…	GUARDANDO…	MENTÉS…
+PAUZA	PAUSED	PAUZA	PAUZA	PAUSE	PAUSA	SZÜNET
+Brak zgody na mikrofon	No microphone permission	Chybí povolení mikrofonu	Chýba povolenie mikrofónu	Keine Mikrofonberechtigung	Sin permiso de micrófono	Nincs mikrofonengedély
+Nagrano	Recorded	Nahráno	Nahrané	Aufgenommen:	Grabado	Felvéve:
+s — zapisano	s — saved	s — uloženo	s — uložené	s — gespeichert	s — guardado	s — mentve
+GOTOWY	READY	PŘIPRAVEN	PRIPRAVENÝ	BEREIT	LISTO	KÉSZ
+Błąd:	Error:	Chyba:	Chyba:	Fehler:	Error:	Hiba:
+Błąd zapisu:	Save error:	Chyba uložení:	Chyba uloženia:	Speicherfehler:	Error al guardar:	Mentési hiba:
+Podgląd MP3 podczas pauzy nie jest wspierany — zatrzymaj nagranie	MP3 preview during pause is not supported — stop the recording	Náhled MP3 během pauzy není podporován — zastavte nahrávání	Náhľad MP3 počas pauzy nie je podporovaný — zastavte nahrávanie	MP3-Vorschau während der Pause wird nicht unterstützt — Aufnahme stoppen	La vista previa MP3 en pausa no es compatible — detén la grabación	MP3 előnézet szünet közben nem támogatott — állítsd le a felvételt
+Błąd podglądu:	Preview error:	Chyba náhledu:	Chyba náhľadu:	Vorschaufehler:	Error de vista previa:	Előnézeti hiba:
+Wczytano nagranie	Recording loaded	Nahrávka načtena	Nahrávka načítaná	Aufnahme geladen	Grabación cargada	Felvétel betöltve
+Błąd wczytywania:	Loading error:	Chyba načítání:	Chyba načítania:	Ladefehler:	Error al cargar:	Betöltési hiba:
+Błąd odtwarzania:	Playback error:	Chyba přehrávání:	Chyba prehrávania:	Wiedergabefehler:	Error de reproducción:	Lejátszási hiba:
+NAGRANIA	RECORDINGS	NAHRÁVKY	NAHRÁVKY	AUFNAHMEN	GRABACIONES	FELVÉTELEK
+Wyślij wszystkie	Send all	Odeslat vše	Odoslať všetko	Alle senden	Enviar todas	Összes küldése
+Pobierz wszystkie	Download all	Stáhnout vše	Stiahnuť všetko	Alle herunterladen	Descargar todas	Összes letöltése
+Wgraj plik	Upload file	Nahrát soubor	Nahrať súbor	Datei hochladen	Subir archivo	Fájl feltöltése
+poprawka ·	correction ·	oprava ·	oprava ·	Korrektur ·	corrección ·	javítás ·
+bez opisu	no description	bez popisu	bez popisu	ohne Beschreibung	sin descripción	leírás nélkül
+Opisz i wyślij	Describe and send	Popsat a odeslat	Popísať a odoslať	Beschreiben und senden	Describir y enviar	Leírás és küldés
+Opisz	Describe	Popsat	Popísať	Beschreiben	Describir	Leírás
+Wyślij ponownie	Send again	Odeslat znovu	Odoslať znova	Erneut senden	Reenviar	Újraküldés
+Wyślij NS	Send NS	Odeslat NS	Odoslať NS	An NS senden	Enviar NS	Küldés NS-be
+Usuń	Delete	Smazat	Zmazať	Löschen	Eliminar	Törlés
+Brak nagrań	No recordings	Žádné nahrávky	Žiadne nahrávky	Keine Aufnahmen	No hay grabaciones	Nincsenek felvételek
+Udostępnij wszystkie nagrania	Share all recordings	Sdílet všechny nahrávky	Zdieľať všetky nahrávky	Alle Aufnahmen teilen	Compartir todas las grabaciones	Összes felvétel megosztása
+Udostępnij nagranie	Share recording	Sdílet nahrávku	Zdieľať nahrávku	Aufnahme teilen	Compartir grabación	Felvétel megosztása
+Błąd udostępniania:	Sharing error:	Chyba sdílení:	Chyba zdieľania:	Fehler beim Teilen:	Error al compartir:	Megosztási hiba:
+Brak połączenia z serwerem NewSpeech	No connection to the NewSpeech server	Žádné spojení se serverem NewSpeech	Žiadne spojenie so serverom NewSpeech	Keine Verbindung zum NewSpeech-Server	Sin conexión con el servidor de NewSpeech	Nincs kapcsolat a NewSpeech szerverrel
+Błąd	Error	Chyba	Chyba	Fehler	Error	Hiba
+Serwer nie zwrócił tokenu logowania	The server did not return a login token	Server nevrátil přihlašovací token	Server nevrátil prihlasovací token	Der Server hat kein Anmeldetoken zurückgegeben	El servidor no devolvió el token de sesión	A szerver nem adott vissza bejelentkezési tokent
+Nieprawidłowy email lub hasło	Incorrect email or password	Nesprávný e-mail nebo heslo	Nesprávny e-mail alebo heslo	Falsche E-Mail oder falsches Passwort	Correo o contraseña incorrectos	Hibás e-mail vagy jelszó
+Błąd serwera	Server error	Chyba serveru	Chyba servera	Serverfehler	Error del servidor	Szerverhiba
+Brak połączenia z serwerem	No connection to the server	Žádné spojení se serverem	Žiadne spojenie so serverom	Keine Verbindung zum Server	Sin conexión con el servidor	Nincs kapcsolat a szerverrel
+z nagrań na tym telefonie	from recordings on this phone	z nahrávek v tomto telefonu	z nahrávok v tomto telefóne	aus Aufnahmen auf diesem Telefon	de las grabaciones de este teléfono	a telefonon lévő felvételekből
+pełna historia z NewSpeech	full history from NewSpeech	celá historie z NewSpeech	celá história z NewSpeech	vollständiger Verlauf aus NewSpeech	historial completo de NewSpeech	teljes előzmény a NewSpeech-ből
+HARMONOGRAM	SCHEDULE	HARMONOGRAM	HARMONOGRAM	ZEITPLAN	CALENDARIO	ÜTEMTERV
+Wczytywanie harmonogramu…	Loading schedule…	Načítám harmonogram…	Načítavam harmonogram…	Zeitplan wird geladen…	Cargando calendario…	Ütemterv betöltése…
+Brak harmonogramu — trener nie ustalił jeszcze wymagań.	No schedule — the trainer hasn't set requirements yet.	Žádný harmonogram — trenér zatím nestanovil požadavky.	Žiadny harmonogram — tréner zatiaľ nestanovil požiadavky.	Kein Zeitplan — der Trainer hat noch keine Anforderungen festgelegt.	Sin calendario — el entrenador aún no fijó requisitos.	Nincs ütemterv — az edző még nem adott meg követelményeket.
+Nie udało się wczytać harmonogramu.	Could not load the schedule.	Harmonogram se nepodařilo načíst.	Harmonogram sa nepodarilo načítať.	Zeitplan konnte nicht geladen werden.	No se pudo cargar el calendario.	Nem sikerült betölteni az ütemtervet.
+Harmonogram wykonany!	Schedule completed!	Harmonogram splněn!	Harmonogram splnený!	Zeitplan erfüllt!	¡Calendario completado!	Ütemterv teljesítve!
+Brakuje {0} zaliczonych nagrań	{0} passed recordings missing	Chybí {0} splněných nahrávek	Chýba {0} splnených nahrávok	Es fehlen {0} bestandene Aufnahmen	Faltan {0} grabaciones aprobadas	Még {0} elfogadott felvétel hiányzik
+zaliczone {0} z {1} · wysłane {2}	passed {0} of {1} · sent {2}	splněno {0} z {1} · odesláno {2}	splnené {0} z {1} · odoslané {2}	bestanden {0} von {1} · gesendet {2}	aprobadas {0} de {1} · enviadas {2}	elfogadva {0} / {1} · elküldve {2}
+Świetnie! W tym tempie zdążysz przed terminem ({0} dni zostało).	Great! At this pace you'll make it before the deadline ({0} days left).	Skvělé! Tímto tempem to stihnete před termínem (zbývá {0} dní).	Skvelé! Týmto tempom to stihnete pred termínom (zostáva {0} dní).	Super! In diesem Tempo schaffst du es vor dem Termin (noch {0} Tage).	¡Genial! A este ritmo llegarás antes de la fecha ({0} días restantes).	Remek! Ebben a tempóban határidő előtt végzel ({0} nap van hátra).
+Aby zdążyć, potrzebujesz ok. {0} nagrań dziennie.	To make it, you need about {0} recordings a day.	Abyste to stihli, potřebujete asi {0} nahrávek denně.	Aby ste to stihli, potrebujete asi {0} nahrávok denne.	Um es zu schaffen, brauchst du etwa {0} Aufnahmen pro Tag.	Para llegar necesitas unas {0} grabaciones al día.	Hogy időben végezz, naponta kb. {0} felvétel kell.
+CO JESZCZE TRZEBA NAGRAĆ	WHAT STILL NEEDS RECORDING	CO JE JEŠTĚ TŘEBA NAHRÁT	ČO EŠTE TREBA NAHRAŤ	WAS NOCH AUFGENOMMEN WERDEN MUSS	QUÉ FALTA GRABAR	MIT KELL MÉG FELVENNI
+zaliczone	passed	splněno	splnené	bestanden	aprobada	elfogadva
+brakuje {0}	{0} missing	chybí {0}	chýba {0}	fehlen {0}	faltan {0}	hiányzik {0}
+z {1}	of {1}	z {1}	z {1}	von {1}	de {1}	/ {1}
+czeka na ocenę / do poprawy	awaiting review / to correct	čeká na hodnocení / k opravě	čaká na hodnotenie / na opravu	wartet auf Bewertung / zu korrigieren	pendiente de evaluación / por corregir	értékelésre vár / javítandó
+CO POPRAWIĆ W NASTĘPNYM NAGRANIU	WHAT TO IMPROVE IN THE NEXT RECORDING	CO ZLEPŠIT V PŘÍŠTÍ NAHRÁVCE	ČO ZLEPŠIŤ V ĎALŠEJ NAHRÁVKE	WAS DU IN DER NÄCHSTEN AUFNAHME VERBESSERN KANNST	QUÉ MEJORAR EN LA PRÓXIMA GRABACIÓN	MIN JAVÍTS A KÖVETKEZŐ FELVÉTELBEN
+Z ostatniej oceny trenera:	From the trainer's last review:	Z posledního hodnocení trenéra:	Z posledného hodnotenia trénera:	Aus der letzten Bewertung des Trainers:	De la última evaluación del entrenador:	Az edző legutóbbi értékeléséből:
+INSPIRACJE NA DZIŚ	IDEAS FOR TODAY	INSPIRACE NA DNES	INŠPIRÁCIE NA DNES	IDEEN FÜR HEUTE	IDEAS PARA HOY	MAI ÖTLETEK
+Miejsca w pobliżu i pomysły, co nagrać.	Nearby places and ideas for what to record.	Místa v okolí a nápady, co nahrát.	Miesta v okolí a nápady, čo nahrať.	Orte in der Nähe und Ideen, was du aufnehmen kannst.	Lugares cercanos e ideas de qué grabar.	Közeli helyek és ötletek, mit vegyél fel.
+Pokaż miejsca w pobliżu	Show nearby places	Zobrazit místa v okolí	Zobraziť miesta v okolí	Orte in der Nähe zeigen	Mostrar lugares cercanos	Közeli helyek megjelenítése
+Włącz lokalizację i spróbuj ponownie.	Turn on location and try again.	Zapněte polohu a zkuste to znovu.	Zapnite polohu a skúste znova.	Standort einschalten und erneut versuchen.	Activa la ubicación e inténtalo de nuevo.	Kapcsold be a helymeghatározást, és próbáld újra.
+GPS niedostępny. Włącz lokalizację i spróbuj ponownie.	GPS unavailable. Turn on location and try again.	GPS nedostupné. Zapněte polohu a zkuste to znovu.	GPS nedostupné. Zapnite polohu a skúste znova.	GPS nicht verfügbar. Standort einschalten und erneut versuchen.	GPS no disponible. Activa la ubicación e inténtalo de nuevo.	GPS nem elérhető. Kapcsold be a helymeghatározást, és próbáld újra.
+Szukam miejsc w pobliżu…	Searching nearby places…	Hledám místa v okolí…	Hľadám miesta v okolí…	Suche Orte in der Nähe…	Buscando lugares cercanos…	Közeli helyek keresése…
+Nie znaleziono miejsc w pobliżu.	No places found nearby.	V okolí nebyla nalezena žádná místa.	V okolí sa nenašli žiadne miesta.	Keine Orte in der Nähe gefunden.	No se encontraron lugares cercanos.	Nem található közeli hely.
+Nie udało się pobrać miejsc — sprawdź internet.	Could not load places — check your internet.	Místa se nepodařilo načíst — zkontrolujte internet.	Miesta sa nepodarilo načítať — skontrolujte internet.	Orte konnten nicht geladen werden — Internet prüfen.	No se pudieron cargar lugares — comprueba internet.	Nem sikerült lekérni a helyeket — ellenőrizd az internetet.
+MIEJSCA W POBLIŻU ({0})	NEARBY PLACES ({0})	MÍSTA V OKOLÍ ({0})	MIESTA V OKOLÍ ({0})	ORTE IN DER NÄHE ({0})	LUGARES CERCANOS ({0})	KÖZELI HELYEK ({0})
+Pokaż kolejne {0} (zostało {1})	Show next {0} ({1} left)	Zobrazit dalších {0} (zbývá {1})	Zobraziť ďalších {0} (zostáva {1})	Nächste {0} anzeigen (noch {1})	Mostrar {0} más (quedan {1})	Következő {0} ({1} maradt)
+w tym tygodniu	this week	tento týden	tento týždeň	diese Woche	esta semana	ezen a héten
+dni z rzędu	days in a row	dní v řadě	dní za sebou	Tage in Folge	días seguidos	nap egymás után
+łącznie w NS	total in NS	celkem v NS	celkom v NS	gesamt in NS	total en NS	összesen az NS-ben
+łącznie	total	celkem	celkom	gesamt	total	összesen
+Najczęściej w tym tygodniu: {0} ({1}x)	Most often this week: {0} ({1}x)	Nejčastěji tento týden: {0} ({1}x)	Najčastejšie tento týždeň: {0} ({1}x)	Am häufigsten diese Woche: {0} ({1}x)	Lo más frecuente esta semana: {0} ({1}x)	A héten leggyakrabban: {0} ({1}x)
+AKTYWNOŚĆ — OSTATNIE 5 TYGODNI	ACTIVITY — LAST 5 WEEKS	AKTIVITA — POSLEDNÍCH 5 TÝDNŮ	AKTIVITA — POSLEDNÝCH 5 TÝŽDŇOV	AKTIVITÄT — LETZTE 5 WOCHEN	ACTIVIDAD — ÚLTIMAS 5 SEMANAS	AKTIVITÁS — AZ UTOLSÓ 5 HÉT
+dni z rzędu — tak trzymaj!	days in a row — keep it up!	dní v řadě — jen tak dál!	dní za sebou — len tak ďalej!	Tage in Folge — weiter so!	días seguidos — ¡sigue así!	nap egymás után — csak így tovább!
+Rośniesz! Ten tydzień: {0}, poprzedni: {1}	You're growing! This week: {0}, last: {1}	Rostete! Tento týden: {0}, minulý: {1}	Rastiete! Tento týždeň: {0}, minulý: {1}	Du wächst! Diese Woche: {0}, letzte: {1}	¡Estás creciendo! Esta semana: {0}, la anterior: {1}	Fejlődsz! Ez a hét: {0}, az előző: {1}
+Wróć do treningu — jedno nagranie dziś to już sukces!	Get back to training — one recording today is already a success!	Vraťte se k tréninku — jedna nahrávka dnes je už úspěch!	Vráťte sa k tréningu — jedna nahrávka dnes je už úspech!	Zurück zum Training — eine Aufnahme heute ist schon ein Erfolg!	Vuelve al entrenamiento — ¡una grabación hoy ya es un éxito!	Térj vissza az edzéshez — már egy mai felvétel is siker!
+Utrzymaj tempo — w tym tygodniu: {0}	Keep the pace — this week: {0}	Udržte tempo — tento týden: {0}	Udržte tempo — tento týždeň: {0}	Halte das Tempo — diese Woche: {0}	Mantén el ritmo — esta semana: {0}	Tartsd a tempót — ezen a héten: {0}
+tyg.	wk	týd.	týž.	Wo.	sem.	hét
+tydz.	wk	týd.	týž.	Wo.	sem.	hét
+ten tydz.	this wk	tento týd.	tento týž.	diese Wo.	esta sem.	e hét
+OCENA TRENERA	TRAINER'S REVIEW	HODNOCENÍ TRENÉRA	HODNOTENIE TRÉNERA	BEWERTUNG DES TRAINERS	EVALUACIÓN DEL ENTRENADOR	EDZŐI ÉRTÉKELÉS
+ocenionych	reviewed	hodnoceno	hodnotené	bewertet	evaluadas	értékelt
+zaliczonych	passed	splněno	splnené	bestanden	aprobadas	elfogadott
+skuteczność	success rate	úspěšnost	úspešnosť	Erfolgsquote	efectividad	eredményesség
+NAGRANIA WG KATEGORII	RECORDINGS BY CATEGORY	NAHRÁVKY PODLE KATEGORIE	NAHRÁVKY PODĽA KATEGÓRIE	AUFNAHMEN NACH KATEGORIE	GRABACIONES POR CATEGORÍA	FELVÉTELEK KATEGÓRIÁNKÉNT
+Brak nagrań z kategorią.	No recordings with a category.	Žádné nahrávky s kategorií.	Žiadne nahrávky s kategóriou.	Keine Aufnahmen mit Kategorie.	No hay grabaciones con categoría.	Nincs kategóriás felvétel.
+Źródło:	Source:	Zdroj:	Zdroj:	Quelle:	Fuente:	Forrás:
+OSIĄGNIĘCIA	ACHIEVEMENTS	ÚSPĚCHY	ÚSPECHY	ERFOLGE	LOGROS	EREDMÉNYEK
+Nagraj w kategorii {0} — brakuje jeszcze {1} zaliczonych.	Record in {0} — {1} passed still missing.	Nahrajte v kategorii {0} — chybí ještě {1} splněných.	Nahrajte v kategórii {0} — chýba ešte {1} splnených.	Nimm in {0} auf — es fehlen noch {1} bestandene.	Graba en {0} — faltan aún {1} aprobadas.	Vegyél fel a(z) {0} kategóriában — még {1} elfogadott hiányzik.
+Kategoria {0} czeka — jeszcze {1} nagrań i będzie zaliczona!	{0} is waiting — {1} more recordings and it's done!	Kategorie {0} čeká — ještě {1} nahrávek a bude splněna!	Kategória {0} čaká — ešte {1} nahrávok a bude splnená!	{0} wartet — noch {1} Aufnahmen und sie ist geschafft!	{0} te espera — ¡{1} grabaciones más y estará completa!	A(z) {0} kategória vár — még {1} felvétel és kész!
+Mała sesja w kategorii {0}? Potrzebujesz {1} zaliczonych.	A short session in {0}? You need {1} passed.	Krátká session v kategorii {0}? Potřebujete {1} splněných.	Krátka session v kategórii {0}? Potrebujete {1} splnených.	Eine kurze Session in {0}? Du brauchst {1} bestandene.	¿Una sesión corta en {0}? Necesitas {1} aprobadas.	Egy rövid kör a(z) {0} kategóriában? {1} elfogadott kell.
+Dobry początek dnia! Już {0} nagrań za Tobą 💪	Great start to the day! {0} recordings done already 💪	Dobrý začátek dne! Už {0} nahrávek za vámi 💪	Dobrý začiatok dňa! Už {0} nahrávok za vami 💪	Guter Start in den Tag! Schon {0} Aufnahmen geschafft 💪	¡Buen comienzo del día! Ya llevas {0} grabaciones 💪	Jó kezdés! Már {0} felvétel megvan 💪
+Świetnie, że zaczynasz dzień od nagrań!	Great that you start the day with recordings!	Skvělé, že den začínáte nahrávkami!	Skvelé, že deň začínate nahrávkami!	Toll, dass du den Tag mit Aufnahmen beginnst!	¡Genial que empieces el día grabando!	Nagyszerű, hogy felvételekkel kezded a napot!
+Dzień dobry! Dobry moment na pierwsze nagranie dnia.	Good morning! A good moment for the first recording of the day.	Dobré ráno! Dobrá chvíle na první nahrávku dne.	Dobré ráno! Dobrá chvíľa na prvú nahrávku dňa.	Guten Morgen! Ein guter Moment für die erste Aufnahme des Tages.	¡Buenos días! Buen momento para la primera grabación del día.	Jó reggelt! Jó pillanat a nap első felvételére.
+Rano głos jest najczystszy — to dobry czas na nagrania.	Your voice is clearest in the morning — a good time to record.	Ráno je hlas nejčistší — dobrý čas na nahrávky.	Ráno je hlas najčistejší — dobrý čas na nahrávky.	Morgens ist die Stimme am klarsten — gute Zeit für Aufnahmen.	Por la mañana la voz está más clara — buen momento para grabar.	Reggel a legtisztább a hang — jó idő a felvételekre.
+Już {0} nagrań dzisiaj — tak dalej!	{0} recordings today already — keep going!	Už {0} nahrávek dnes — jen tak dál!	Už {0} nahrávok dnes — len tak ďalej!	Schon {0} Aufnahmen heute — weiter so!	Ya {0} grabaciones hoy — ¡sigue así!	Ma már {0} felvétel — így tovább!
+Dobre tempo jak na środek dnia 👍	Good pace for midday 👍	Dobré tempo na poledne 👍	Dobré tempo na obed 👍	Gutes Tempo für die Tagesmitte 👍	Buen ritmo para mediodía 👍	Jó tempó a nap közepére 👍
+Połowa dnia — może czas na chwilę nagrań?	Midday — maybe time for a few recordings?	Polovina dne — možná čas na pár nahrávek?	Polovica dňa — možno čas na pár nahrávok?	Tagesmitte — vielleicht Zeit für ein paar Aufnahmen?	Mediodía — ¿quizá tiempo para unas grabaciones?	Nap közepe — talán ideje pár felvételnek?
+Krótka przerwa na nagranie dobrze zrobi.	A short break for a recording will do you good.	Krátká pauza na nahrávku vám prospěje.	Krátka prestávka na nahrávku vám prospeje.	Eine kurze Aufnahmepause tut gut.	Una pausa corta para grabar te hará bien.	Egy rövid felvételi szünet jót tesz.
+Popołudniowy postęp: {0} nagrań 🎯	Afternoon progress: {0} recordings 🎯	Odpolední pokrok: {0} nahrávek 🎯	Popoludňajší pokrok: {0} nahrávok 🎯	Fortschritt am Nachmittag: {0} Aufnahmen 🎯	Progreso de la tarde: {0} grabaciones 🎯	Délutáni haladás: {0} felvétel 🎯
+Niezły wynik na dziś, jeszcze chwila i będzie więcej.	Nice result today, a bit more and there'll be more.	Pěkný výsledek na dnešek, ještě chvilku a bude víc.	Pekný výsledok na dnes, ešte chvíľku a bude viac.	Gutes Ergebnis heute, noch ein bisschen und es wird mehr.	Buen resultado hoy, un poco más y habrá más.	Szép mai eredmény, még egy kicsi és több lesz.
+Popołudnie to dobry czas na nagranie przed wieczorem.	Afternoon is a good time to record before the evening.	Odpoledne je dobrý čas na nahrávku před večerem.	Popoludnie je dobrý čas na nahrávku pred večerom.	Der Nachmittag ist gut für eine Aufnahme vor dem Abend.	La tarde es buen momento para grabar antes de la noche.	A délután jó idő egy felvételre este előtt.
+Jeszcze nic dzisiaj? Mała sesja teraz się przyda.	Nothing yet today? A short session now will help.	Dnes ještě nic? Krátká session teď se hodí.	Dnes ešte nič? Krátka session teraz sa hodí.	Heute noch nichts? Eine kurze Session jetzt hilft.	¿Nada hoy todavía? Una sesión corta ahora vendrá bien.	Ma még semmi? Egy rövid kör most jól jön.
+Dzisiaj zrobione: {0} nagrań — gratulacje!	Done today: {0} recordings — congratulations!	Dnes hotovo: {0} nahrávek — gratulujeme!	Dnes hotovo: {0} nahrávok — gratulujeme!	Heute geschafft: {0} Aufnahmen — Glückwunsch!	Hecho hoy: {0} grabaciones — ¡enhorabuena!	Ma kész: {0} felvétel — gratulálunk!
+Dobry dzień za Tobą, {0} nagrań w skrzynce.	A good day behind you, {0} recordings in the box.	Dobrý den za vámi, {0} nahrávek hotovo.	Dobrý deň za vami, {0} nahrávok hotových.	Ein guter Tag, {0} Aufnahmen im Kasten.	Un buen día, {0} grabaciones hechas.	Jó nap van mögötted, {0} felvétel megvan.
+Wieczór to ostatnia szansa na dzisiejsze nagranie.	Evening is the last chance for today's recording.	Večer je poslední šance na dnešní nahrávku.	Večer je posledná šanca na dnešnú nahrávku.	Der Abend ist die letzte Chance für die heutige Aufnahme.	La noche es la última oportunidad para grabar hoy.	Az este az utolsó esély a mai felvételre.
+Jeszcze jedno nagranie przed snem?	One more recording before bed?	Ještě jedna nahrávka před spaním?	Ešte jedna nahrávka pred spaním?	Noch eine Aufnahme vor dem Schlafen?	¿Una grabación más antes de dormir?	Még egy felvétel lefekvés előtt?
+Powiedziałeś coś na głos poza domem?	Did you say something out loud outside home?	Řekl jsi něco nahlas mimo domov?	Povedal si niečo nahlas mimo domu?	Hast du außer Haus etwas laut gesagt?	¿Dijiste algo en voz alta fuera de casa?	Mondtál valamit hangosan otthonon kívül?
+Zacząłeś rozmowę jako pierwszy?	Did you start a conversation first?	Začal jsi rozhovor jako první?	Začal si rozhovor ako prvý?	Hast du ein Gespräch als Erster begonnen?	¿Iniciaste una conversación primero?	Te kezdeményeztél beszélgetést?
+Zamówiłeś coś / zapytałeś w sklepie?	Did you order / ask something in a shop?	Objednal jsi něco / zeptal ses v obchodě?	Objednal si niečo / spýtal si sa v obchode?	Hast du etwas bestellt / im Geschäft gefragt?	¿Pediste algo / preguntaste en una tienda?	Rendeltél valamit / kérdeztél a boltban?
+Odebrałeś / wykonałeś telefon?	Did you answer / make a phone call?	Přijal jsi / uskutečnil telefonát?	Prijal si / uskutočnil telefonát?	Hast du einen Anruf angenommen / getätigt?	¿Contestaste / hiciste una llamada?	Fogadtál / kezdeményeztél hívást?
+Mowa spontaniczna, brak ESBS	Spontaneous speech, no ESBS	Spontánní řeč, bez ESBS	Spontánna reč, bez ESBS	Spontane Sprache, kein ESBS	Habla espontánea, sin ESBS	Spontán beszéd, ESBS nélkül
+Jąkanie	Stuttering	Koktání	Zajakávanie	Stottern	Tartamudeo	Dadogás
+Blok	Block	Blok	Blok	Block	Bloqueo	Blokk
+Kamuflaż	Camouflage	Kamufláž	Kamufláž	Tarnung	Camuflaje	Álcázás
+Zdrowie / fizyczne	Health / physical	Zdraví / fyzické	Zdravie / fyzické	Gesundheit / körperlich	Salud / físico	Egészség / fizikai
+Sprawy niezw. z mową	Non-speech matters	Věci nesouvisející s řečí	Veci nesúvisiace s rečou	Nicht sprachbezogene Dinge	Asuntos no relacionados con el habla	Beszédtől független ügyek
+Trudność w mowie	Speech difficulty	Obtíž v řeči	Ťažkosť v reči	Sprechschwierigkeit	Dificultad en el habla	Beszédnehézség
+Sukces związany z mową	Speech-related success	Úspěch spojený s řečí	Úspech spojený s rečou	Sprachbezogener Erfolg	Éxito relacionado con el habla	Beszéddel kapcsolatos siker
+Emocje nie związane z mową	Emotions not related to speech	Emoce nesouvisející s řečí	Emócie nesúvisiace s rečou	Gefühle ohne Sprachbezug	Emociones no relacionadas con el habla	Beszédtől független érzelmek
+Sklepy	Shops	Obchody	Obchody	Geschäfte	Tiendas	Üzletek
+Przechodzień	Passerby	Kolemjdoucí	Okoloidúci	Passant	Transeúnte	Járókelő
+Telefon do miasta	Phone call to a business	Telefon do města	Telefonát do mesta	Anruf bei Firmen	Llamada a comercios	Hívás cégekhez
+Telefon rodzina/znajomi	Phone family/friends	Telefon rodina/známí	Telefón rodina/známi	Telefon Familie/Freunde	Llamada familia/amigos	Hívás család/barátok
+Restauracja Kelner	Restaurant waiter	Restaurace číšník	Reštaurácia čašník	Restaurant Kellner	Restaurante camarero	Étterem pincér
+Wystąpienie	Public speaking	Vystoupení	Vystúpenie	Auftritt	Discurso público	Nyilvános beszéd
+Praca / Szkoła	Work / School	Práce / Škola	Práca / Škola	Arbeit / Schule	Trabajo / Escuela	Munka / Iskola
+Rodzina	Family	Rodina	Rodina	Familie	Familia	Család
+Przyjaciele	Friends	Přátelé	Priatelia	Freunde	Amigos	Barátok
+W grupie	In a group	Ve skupině	V skupine	In der Gruppe	En grupo	Csoportban
+Piwo	Beer	Pivo	Pivo	Bier	Cerveza	Sör
+Wino	Wine	Víno	Víno	Wein	Vino	Bor
+Wódka	Vodka	Vodka	Vodka	Wodka	Vodka	Vodka
+Koniak	Cognac	Koňak	Koňak	Cognac	Coñac	Konyak
+Inne	Other	Jiné	Iné	Andere	Otro	Egyéb
+Monolog / Czytanie	Monologue / Reading	Monolog / Čtení	Monológ / Čítanie	Monolog / Lesen	Monólogo / Lectura	Monológ / Olvasás
+Miasto - inne	City - other	Město - jiné	Mesto - iné	Stadt - andere	Ciudad - otros	Város - egyéb
+Zerówka	Level zero	Nultý stupeň	Nultý stupeň	Stufe Null	Nivel cero	Nulladik szint
+Phone do Kursanta/Trenera	Phone to Student/Trainer	Telefon kurzistovi/trenérovi	Telefón kurzistovi/trénerovi	Anruf an Teilnehmer/Trainer	Llamada a alumno/entrenador	Hívás tanulónak/edzőnek
+wyśmienite	excellent	výborná	výborná	ausgezeichnet	excelente	kiváló
+bardzo dobre	very good	velmi dobrá	veľmi dobrá	sehr gut	muy bien	nagyon jó
+dobre	good	dobrá	dobrá	gut	bien	jó
+słabe	poor	slabá	slabá	schwach	mal	gyenge
+smutek	sadness	smutek	smútok	Traurigkeit	tristeza	szomorúság
+STATS	STATS	STATS	ŠTATS	STATS	ESTAD.	STAT
+Formularz Google: wysłano ✓	Google Form: sent ✓	Formulář Google: odesláno ✓	Formulár Google: odoslané ✓	Google-Formular: gesendet ✓	Formulario de Google: enviado ✓	Google űrlap: elküldve ✓
+Formularz Google nie wysłany	Google Form not sent	Formulář Google neodeslán	Formulár Google neodoslaný	Google-Formular nicht gesendet	Formulario de Google no enviado	A Google űrlap nincs elküldve
+ponowię automatycznie	will retry automatically	zkusím znovu automaticky	skúsim znova automaticky	wird automatisch wiederholt	se reintentará automáticamente	automatikusan újrapróbálom
+PODPOWIEDZI	HINTS	NÁPOVĚDY	NÁPOVEDY	HINWEISE	AYUDAS	TIPPEK
+Pauzy na wykresie	Pauses on the chart	Pauzy v grafu	Pauzy v grafe	Pausen im Diagramm	Pausas en el gráfico	Szünetek a grafikonon
+Ocena emisji wg norm	Emission rating by norms	Hodnocení emise podle norem	Hodnotenie emisie podľa noriem	Stimmbewertung nach Normen	Evaluación de la emisión según normas	Hangképzés értékelése normák szerint
+Strzałki intonacji	Intonation arrows	Šipky intonace	Šípky intonácie	Intonationspfeile	Flechas de entonación	Intonációs nyilak
+Inspiracje na dziś (Statystyki)	Ideas for today (Statistics)	Inspirace na dnes (Statistiky)	Inšpirácie na dnes (Štatistiky)	Ideen für heute (Statistik)	Ideas para hoy (Estadísticas)	Mai ötletek (Statisztika)
+Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.	Hints appear on the chart while recording and during playback.	Nápovědy se zobrazují v grafu během nahrávání i přehrávání.	Nápovedy sa zobrazujú v grafe počas nahrávania aj prehrávania.	Hinweise erscheinen im Diagramm während der Aufnahme und beim Abspielen.	Las ayudas aparecen en el gráfico al grabar y al reproducir.	A tippek felvétel és visszajátszás közben jelennek meg a grafikonon.
+kolory i linie	colors and lines	barvy a čáry	farby a čiary	Farben und Linien	colores y líneas	színek és vonalak
+Każda porcja mowy jest oceniana w 4 fazach: 1) łagodne wejście, 2) narastanie, 3) plateau — utrzymanie, 4) opadanie — wyciszenie. Wynik pojawia się na wykresie nad porcją mowy i na żywo w czasie nagrywania.	Each speech portion is rated in 4 phases: 1) gentle onset, 2) rise, 3) plateau — hold, 4) fall — fade out. The result appears on the chart above the speech portion and live while recording.	Každý úsek řeči se hodnotí ve 4 fázích: 1) jemný nástup, 2) nárůst, 3) plató — udržení, 4) pokles — ztišení. Výsledek se zobrazí v grafu nad úsekem řeči a živě při nahrávání.	Každý úsek reči sa hodnotí v 4 fázach: 1) jemný nástup, 2) nárast, 3) plató — udržanie, 4) pokles — stíšenie. Výsledok sa zobrazí v grafe nad úsekom reči a naživo pri nahrávaní.	Jeder Sprechabschnitt wird in 4 Phasen bewertet: 1) sanfter Einsatz, 2) Anstieg, 3) Plateau — Halten, 4) Abfall — Ausklingen. Das Ergebnis erscheint im Diagramm über dem Abschnitt und live während der Aufnahme.	Cada parte del habla se evalúa en 4 fases: 1) inicio suave, 2) subida, 3) meseta — mantener, 4) bajada — atenuar. El resultado aparece en el gráfico sobre la parte y en directo al grabar.	Minden beszédszakaszt 4 fázisban értékelünk: 1) lágy indítás, 2) emelkedés, 3) plató — kitartás, 4) lecsengés — elhalkulás. Az eredmény a grafikonon a szakasz fölött és felvétel közben élőben jelenik meg.
+CZASY FAZ	PHASE TIMES	ČASY FÁZÍ	ČASY FÁZ	PHASENZEITEN	TIEMPOS DE FASES	FÁZISIDŐK
+Faza leniwa (cichy start)	Lazy phase (quiet start)	Líná fáze (tichý start)	Lenivá fáza (tichý štart)	Ruhephase (leiser Start)	Fase lenta (inicio suave)	Lusta fázis (halk indulás)
+Narastanie	Rise	Nárůst	Nárast	Anstieg	Subida	Emelkedés
+Plateau	Plateau	Plató	Plató	Plateau	Meseta	Plató
+Opadanie	Fall	Pokles	Pokles	Abfall	Bajada	Lecsengés
+CZUŁOŚĆ OCENY	RATING SENSITIVITY	CITLIVOST HODNOCENÍ	CITLIVOSŤ HODNOTENIA	BEWERTUNGSEMPFINDLICHKEIT	SENSIBILIDAD DE LA EVALUACIÓN	ÉRTÉKELÉS ÉRZÉKENYSÉGE
+Próg ciszy na starcie	Quiet threshold at start	Práh ticha na startu	Prah ticha na štarte	Ruheschwelle am Start	Umbral de silencio al inicio	Csendküszöb az elején
+Tolerancja	Tolerance	Tolerance	Tolerancia	Toleranz	Tolerancia	Tűrés
+Szczyt / cisza (wzorzec)	Peak / quiet (model)	Vrchol / ticho (vzor)	Vrchol / ticho (vzor)	Spitze / Ruhe (Muster)	Pico / silencio (modelo)	Csúcs / csend (minta)
+Zapisany kształt wzorca — porównanie podobieństwa jest włączone.	Model shape saved — similarity comparison is on.	Tvar vzoru uložen — porovnání podobnosti je zapnuté.	Tvar vzoru uložený — porovnanie podobnosti je zapnuté.	Musterform gespeichert — Ähnlichkeitsvergleich ist aktiv.	Forma del modelo guardada — la comparación de similitud está activa.	Minta alakja mentve — a hasonlóság-összehasonlítás be van kapcsolva.
+Brak wzorca kształtu — nagraj wzorzec, aby porównywać podobieństwo.	No model shape — record a model to compare similarity.	Chybí vzor tvaru — nahrajte vzor pro porovnání podobnosti.	Chýba vzor tvaru — nahrajte vzor na porovnanie podobnosti.	Keine Musterform — nimm ein Muster auf, um die Ähnlichkeit zu vergleichen.	Sin forma de modelo — graba un modelo para comparar la similitud.	Nincs mintaalak — vegyél fel mintát a hasonlóság összevetéséhez.
+KALIBRACJA Z NAGRANIA	CALIBRATION FROM A RECORDING	KALIBRACE Z NAHRÁVKY	KALIBRÁCIA Z NAHRÁVKY	KALIBRIERUNG AUS EINER AUFNAHME	CALIBRACIÓN DESDE UNA GRABACIÓN	KALIBRÁLÁS FELVÉTELBŐL
+Trener nagrywa jedną wzorcową porcję mowy (z ciszą na początku), a potem wybiera ją tutaj — czasy faz i kształt zostaną wyliczone automatycznie.	The trainer records one model speech portion (with silence at the start), then picks it here — phase times and shape are calculated automatically.	Trenér nahraje jeden vzorový úsek řeči (s tichem na začátku) a pak ho zde vybere — časy fází a tvar se vypočítají automaticky.	Tréner nahrá jeden vzorový úsek reči (s tichom na začiatku) a potom ho tu vyberie — časy fáz a tvar sa vypočítajú automaticky.	Der Trainer nimmt einen Muster-Sprechabschnitt auf (mit Stille am Anfang) und wählt ihn hier — Phasenzeiten und Form werden automatisch berechnet.	El entrenador graba una parte modelo (con silencio al inicio) y la elige aquí — los tiempos de fases y la forma se calculan automáticamente.	Az edző felvesz egy minta beszédszakaszt (az elején csenddel), majd itt kiválasztja — a fázisidők és az alak automatikusan kiszámolódnak.
+Kalibruj z nagrania	Calibrate from recording	Kalibrovat z nahrávky	Kalibrovať z nahrávky	Aus Aufnahme kalibrieren	Calibrar desde grabación	Kalibrálás felvételből
+Przywróć domyślne	Restore defaults	Obnovit výchozí	Obnoviť predvolené	Standard wiederherstellen	Restaurar valores predeterminados	Alapértelmezés visszaállítása
+Wybierz nagranie wzorcowe	Choose the model recording	Vyberte vzorovou nahrávku	Vyberte vzorovú nahrávku	Musteraufnahme wählen	Elige la grabación modelo	Válaszd ki a mintafelvételt
+Analizuję nagranie…	Analysing recording…	Analyzuji nahrávku…	Analyzujem nahrávku…	Aufnahme wird analysiert…	Analizando grabación…	Felvétel elemzése…
+Nagranie zbyt ciche albo za krótkie — nagraj wzorzec bliżej mikrofonu.	Recording too quiet or too short — record the model closer to the microphone.	Nahrávka je příliš tichá nebo krátká — nahrajte vzor blíž k mikrofonu.	Nahrávka je príliš tichá alebo krátka — nahrajte vzor bližšie k mikrofónu.	Aufnahme zu leise oder zu kurz — nimm das Muster näher am Mikrofon auf.	Grabación demasiado baja o corta — graba el modelo más cerca del micrófono.	A felvétel túl halk vagy túl rövid — vedd fel a mintát közelebb a mikrofonhoz.
+Wynik kalibracji	Calibration result	Výsledek kalibrace	Výsledok kalibrácie	Kalibrierungsergebnis	Resultado de la calibración	Kalibrálás eredménye
+Zastosuj	Apply	Použít	Použiť	Übernehmen	Aplicar	Alkalmaz
+Zastosowano	Applied	Použito	Použité	Übernommen	Aplicado	Alkalmazva
+EMISJA	EMISSION	EMISE	EMISIA	STIMME	EMISIÓN	HANGKÉPZÉS
+WEJŚCIE	ONSET	NÁSTUP	NÁSTUP	EINSATZ	INICIO	INDÍTÁS
+łagodne ✓	gentle ✓	jemný ✓	jemný ✓	sanft ✓	suave ✓	lágy ✓
+za głośno ✗	too loud ✗	příliš hlasitě ✗	príliš nahlas ✗	zu laut ✗	demasiado alto ✗	túl hangos ✗
+KSZTAŁT	SHAPE	TVAR	TVAR	FORM	FORMA	ALAK
+za krótka	too short	příliš krátká	príliš krátka	zu kurz	demasiado corta	túl rövid
+za długa	too long	příliš dlouhá	príliš dlhá	zu lang	demasiado larga	túl hosszú
+nagrane / wysłane	recorded / sent	nahráno / odesláno	nahrané / odoslané	aufgenommen / gesendet	grabadas / enviadas	felvéve / elküldve
+zaliczone ✓	passed ✓	splněno ✓	splnené ✓	bestanden ✓	aprobadas ✓	elfogadva ✓
+do korekty	to correct	k opravě	na opravu	zu korrigieren	por corregir	javítandó
+Nagrania do korekty znajdziesz w zakładce KOREKTA — poprawki nie mają limitu.	Recordings to correct are in the CORRECTIONS tab — corrections have no limit.	Nahrávky k opravě najdete v záložce KOREKCE — opravy nemají limit.	Nahrávky na opravu nájdete v záložke KOREKCIA — opravy nemajú limit.	Aufnahmen zum Korrigieren findest du im Tab KORREKTUR — Korrekturen haben kein Limit.	Las grabaciones por corregir están en la pestaña CORRECCIONES — sin límite.	A javítandó felvételek a JAVÍTÁS fülön vannak — a javításoknak nincs korlátja.
+LENIWA: czekam…	LAZY: waiting…	LÍNÁ: čekám…	LENIVÁ: čakám…	RUHE: warte…	LENTA: esperando…	LUSTA: várakozás…
+NARASTANIE: ×{0} (cel ×{1})	RISE: ×{0} (target ×{1})	NÁRŮST: ×{0} (cíl ×{1})	NÁRAST: ×{0} (cieľ ×{1})	ANSTIEG: ×{0} (Ziel ×{1})	SUBIDA: ×{0} (objetivo ×{1})	EMELKEDÉS: ×{0} (cél ×{1})
+NARASTANIE ✓ ×{0} — trzymaj szczyt	RISE ✓ ×{0} — hold the peak	NÁRŮST ✓ ×{0} — držte vrchol	NÁRAST ✓ ×{0} — držte vrchol	ANSTIEG ✓ ×{0} — Spitze halten	SUBIDA ✓ ×{0} — mantén el pico	EMELKEDÉS ✓ ×{0} — tartsd a csúcsot
+PLATEAU: zbyt krótki	PLATEAU: too short	PLATÓ: příliš krátké	PLATÓ: príliš krátke	PLATEAU: zu kurz	MESETA: demasiado corta	PLATÓ: túl rövid
+PLATEAU ✓ — zacznij wyciszać	PLATEAU ✓ — start fading out	PLATÓ ✓ — začněte ztišovat	PLATÓ ✓ — začnite stišovať	PLATEAU ✓ — beginne auszuklingen	MESETA ✓ — empieza a atenuar	PLATÓ ✓ — kezdj elhalkulni
+KSZTAŁT ✓ — za cicho! (×{0} / wzorzec ×{1})	SHAPE ✓ — too quiet! (×{0} / model ×{1})	TVAR ✓ — příliš tiše! (×{0} / vzor ×{1})	TVAR ✓ — príliš potichu! (×{0} / vzor ×{1})	FORM ✓ — zu leise! (×{0} / Muster ×{1})	FORMA ✓ — ¡demasiado bajo! (×{0} / modelo ×{1})	ALAK ✓ — túl halk! (×{0} / minta ×{1})
+EMISJA ✓ — na starcie trochę za głośno	EMISSION ✓ — a bit too loud at the start	EMISE ✓ — na začátku trochu hlasitě	EMISIA ✓ — na začiatku trochu nahlas	STIMME ✓ — am Anfang etwas zu laut	EMISIÓN ✓ — un poco alta al inicio	HANGKÉPZÉS ✓ — az elején kicsit hangos
+DOBRA EMISJA ✓	GOOD EMISSION ✓	DOBRÁ EMISE ✓	DOBRÁ EMISIA ✓	GUTE STIMMGEBUNG ✓	BUENA EMISIÓN ✓	JÓ HANGKÉPZÉS ✓
+Harmonogram do {0} — zostało {1} dni	Schedule until {0} — {1} days left	Harmonogram do {0} — zbývá {1} dní	Harmonogram do {0} — zostáva {1} dní	Zeitplan bis {0} — noch {1} Tage	Calendario hasta el {0} — quedan {1} días	Ütemterv {0}-ig — {1} nap van hátra
+Harmonogram zakończył się {0}	The schedule ended on {0}	Harmonogram skončil {0}	Harmonogram skončil {0}	Der Zeitplan endete am {0}	El calendario terminó el {0}	Az ütemterv lejárt: {0}
+Po {0} tylko 3 nowe nagrania dziennie	After {0} only 3 new recordings per day	Po {0} jen 3 nové nahrávky denně	Po {0} len 3 nové nahrávky denne	Nach dem {0} nur 3 neue Aufnahmen pro Tag	Después del {0} solo 3 grabaciones nuevas al día	{0} után naponta csak 3 új felvétel
+Teraz tylko 3 nowe nagrania dziennie	Now only 3 new recordings per day	Nyní jen 3 nové nahrávky denně	Teraz len 3 nové nahrávky denne	Jetzt nur 3 neue Aufnahmen pro Tag	Ahora solo 3 grabaciones nuevas al día	Most naponta csak 3 új felvétel
+Wymagane w harmonogramie: {0} zaliczonych	Required in the schedule: {0} passed	Požadováno v harmonogramu: {0} splněných	Požadované v harmonograme: {0} splnených	Im Zeitplan erforderlich: {0} bestandene	Necesarias en el calendario: {0} aprobadas	Az ütemtervben szükséges: {0} elfogadott
+Poprawkę nagraj w TYM SAMYM systemie mowy, co nagranie z błędem — wybierz go poniżej.	Record the correction in the SAME speech system as the recording with the error — choose it below.	Opravu nahrajte ve STEJNÉM systému řeči jako nahrávku s chybou — vyberte ho níže.	Opravu nahrajte v ROVNAKOM systéme reči ako nahrávku s chybou — vyberte ho nižšie.	Nimm die Korrektur im GLEICHEN Sprechsystem auf wie die fehlerhafte Aufnahme — wähle es unten.	Graba la corrección en el MISMO sistema de habla que la grabación con error — elígelo abajo.	A javítást UGYANABBAN a beszédrendszerben vedd fel, mint a hibás felvételt — válaszd ki lent.
+Poprawka musi być w tym samym systemie mowy co nagranie z błędem: {0}	The correction must use the same speech system as the recording with the error: {0}	Oprava musí být ve stejném systému řeči jako nahrávka s chybou: {0}	Oprava musí byť v rovnakom systéme reči ako nahrávka s chybou: {0}	Die Korrektur muss im gleichen Sprechsystem sein wie die fehlerhafte Aufnahme: {0}	La corrección debe ser en el mismo sistema de habla que la grabación con error: {0}	A javításnak ugyanabban a beszédrendszerben kell lennie, mint a hibás felvétel: {0}
+System nowej mowy (taki sam jak w nagraniu z błędem)	New speech system (same as in the recording with the error)	Systém nové řeči (stejný jako v nahrávce s chybou)	Systém novej reči (rovnaký ako v nahrávke s chybou)	Neue-Sprache-System (wie in der fehlerhaften Aufnahme)	Sistema nueva habla (el mismo que en la grabación con error)	Új beszéd rendszer (ugyanaz, mint a hibás felvételben)
+System mowy	Speech system	Systém řeči	Systém reči	Sprechsystem	Sistema de habla	Beszédrendszer
+nagraj w tym samym systemie co oryginał	record in the same system as the original	nahrajte ve stejném systému jako originál	nahrajte v rovnakom systéme ako originál	im gleichen System wie das Original aufnehmen	graba en el mismo sistema que el original	ugyanabban a rendszerben vedd fel, mint az eredetit
+poprawka musi być w tym samym systemie	the correction must use the same system	oprava musí být ve stejném systému	oprava musí byť v rovnakom systéme	die Korrektur muss im gleichen System sein	la corrección debe ser en el mismo sistema	a javításnak ugyanabban a rendszerben kell lennie
+Nagraj poprawkę w TYM SAMYM systemie mowy, co nagranie z błędem.	Record the correction in the SAME speech system as the recording with the error.	Nahrajte opravu ve STEJNÉM systému řeči jako nahrávku s chybou.	Nahrajte opravu v ROVNAKOM systéme reči ako nahrávku s chybou.	Nimm die Korrektur im GLEICHEN Sprechsystem auf wie die fehlerhafte Aufnahme.	Graba la corrección en el MISMO sistema de habla que la grabación con error.	A javítást UGYANABBAN a beszédrendszerben vedd fel, mint a hibás felvételt.
+Poprawkę nagraj w systemie {0} — takim samym jak w nagraniu z błędem. Inny system nie będzie dostępny.	Record the correction in the {0} system — the same as in the recording with the error. Other systems will be unavailable.	Opravu nahrajte v systému {0} — stejném jako v nahrávce s chybou. Jiný systém nebude dostupný.	Opravu nahrajte v systéme {0} — rovnakom ako v nahrávke s chybou. Iný systém nebude dostupný.	Nimm die Korrektur im System {0} auf — wie in der fehlerhaften Aufnahme. Andere Systeme sind nicht verfügbar.	Graba la corrección en el sistema {0} — el mismo que en la grabación con error. Otros sistemas no estarán disponibles.	A javítást a(z) {0} rendszerben vedd fel — ugyanabban, mint a hibás felvételt. Más rendszer nem lesz elérhető.
+system	system	systém	systém	System	sistema	rendszer

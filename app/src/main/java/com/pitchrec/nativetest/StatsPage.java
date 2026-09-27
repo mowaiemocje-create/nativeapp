@@ -70,9 +70,11 @@ public class StatsPage {
         improve.setVisibility(View.GONE);
         root.addView(improve);
         loadImprove(improve);
-        LinearLayout insp = Ui.card(a);
-        root.addView(insp);
-        buildInspirations(insp);
+        if (a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getBoolean("show_insp", true)) {
+            LinearLayout insp = Ui.card(a);
+            root.addView(insp);
+            buildInspirations(insp);
+        }
         LinearLayout summary = Ui.card(a);
         root.addView(summary);
         LinearLayout activity = Ui.card(a);
@@ -214,13 +216,13 @@ public class StatsPage {
             String cid = cat != null ? cat.optString("id", "") : "";
             String cname = cat != null ? (cat.optString("name_pl", "").isEmpty() ? cat.optString("name", "") : cat.optString("name_pl", "")) : "?";
             int need = rq.optInt("records_count", 0);
-            int sent = 0, correct = 0;
+            int sent = 0, correct = 0, reviewed = 0;
             if (by != null && by.optJSONObject(cid) != null) {
                 JSONObject b = by.optJSONObject(cid);
-                sent = b.optInt("sent", 0); correct = b.optInt("correct", 0);
+                sent = b.optInt("sent", 0); correct = b.optInt("correct", 0); reviewed = b.optInt("reviewed", correct);
             }
             totReq += need; totCorrect += Math.min(correct, need); totSent += sent;
-            rows.add(new Object[]{cname, need, sent, correct});
+            rows.add(new Object[]{cname, need, sent, correct, Math.max(correct, reviewed)});
         }
         int missing = Math.max(0, totReq - totCorrect);
         int pct = totReq > 0 ? Math.min(100, Math.round(totCorrect * 100f / totReq)) : 0;
@@ -236,7 +238,8 @@ public class StatsPage {
         TextView h1 = Ui.text(a, missing == 0 ? "🎉 " + L.t("Harmonogram wykonany!") : L.f("Brakuje {0} zaliczonych nagrań", missing), 15f, R.color.pr_text);
         h1.setTypeface(Typeface.DEFAULT_BOLD);
         heroTxt.addView(h1);
-        heroTxt.addView(Ui.text(a, active ? L.f("do wizyty {0} — zostało {1} dni", dl, daysLeft) : L.f("termin wizyty minął ({0})", dl), 12f, active && daysLeft <= 3 && missing > 0 ? R.color.pr_warn : R.color.pr_muted));
+        heroTxt.addView(Ui.text(a, active ? L.f("Harmonogram do {0} — zostało {1} dni", dl, daysLeft) : L.f("Harmonogram zakończył się {0}", dl), 12f, active && daysLeft <= 3 && missing > 0 ? R.color.pr_warn : R.color.pr_muted));
+        heroTxt.addView(Ui.text(a, active ? "⏳ " + L.f("Po {0} tylko 3 nowe nagrania dziennie", dl) : "⏳ " + L.t("Teraz tylko 3 nowe nagrania dziennie"), 11f, active ? R.color.pr_pause : R.color.pr_warn));
         heroTxt.addView(Ui.text(a, L.f("zaliczone {0} z {1} · wysłane {2}", totCorrect, totReq, totSent), 11f, R.color.pr_muted));
         hero.addView(heroTxt, Ui.weight(1f, 0));
         card.addView(hero);
@@ -275,7 +278,8 @@ public class StatsPage {
             row.setOrientation(LinearLayout.VERTICAL);
             row.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
             LinearLayout top = Ui.row(a);
-            TextView nm = Ui.text(a, (m == 0 ? "✅ " : "") + L.cat((String) rw[0]), 13f, R.color.pr_text);
+            int reviewedN = (Integer) rw[4];
+            TextView nm = Ui.text(a, (m == 0 ? "✅ " : "") + L.cat((String) rw[0]) + "  ▾", 13f, R.color.pr_text);
             nm.setTypeface(Typeface.DEFAULT_BOLD);
             top.addView(nm, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             top.addView(Ui.text(a, m == 0 ? L.t("zaliczone") : L.f("brakuje {0}", m), 12f, m == 0 ? R.color.pr_accent : R.color.pr_warn));
@@ -283,6 +287,36 @@ public class StatsPage {
             row.addView(bar(need > 0 ? Math.min(1f, correct / (float) need) : 0f, m == 0 ? 0xFF00C853 : 0xFFE8820C, 7));
             String detail = L.f("✓ {0} z {1}", Math.min(correct, need), need) + (sent > correct ? " · " + L.f("{0} czeka na ocenę / do poprawy", sent - correct) : "");
             row.addView(Ui.text(a, detail, 10f, R.color.pr_muted));
+            // Po kliknieciu: rozwiniecie — ile nagral, ile OK, ile do korekty, ile czeka
+            LinearLayout more = new LinearLayout(a);
+            more.setOrientation(LinearLayout.VERTICAL);
+            more.setVisibility(View.GONE);
+            more.setPadding((int) (10 * d), (int) (8 * d), (int) (10 * d), (int) (8 * d));
+            more.setBackground(Ui.rounded(Ui.col(a, R.color.pr_bg), Ui.col(a, R.color.pr_border), d, 10 * d));
+            LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            mlp.topMargin = (int) (6 * d);
+            int toFix = Math.max(0, reviewedN - correct), waiting = Math.max(0, sent - reviewedN);
+            LinearLayout grid = Ui.row(a);
+            grid.addView(bigStat(String.valueOf(sent), L.t("nagrane / wysłane"), R.color.pr_purple), Ui.weight(1f, 0));
+            grid.addView(bigStat(String.valueOf(correct), L.t("zaliczone ✓"), R.color.pr_accent), Ui.weight(1f, 0));
+            grid.addView(bigStat(String.valueOf(toFix), L.t("do korekty"), R.color.pr_warn), Ui.weight(1f, 0));
+            grid.addView(bigStat(String.valueOf(waiting), L.t("czeka na ocenę"), R.color.pr_pause), Ui.weight(1f, 0));
+            more.addView(grid);
+            TextView req = Ui.text(a, L.f("Wymagane w harmonogramie: {0} zaliczonych", need) + (m > 0 ? " · " + L.f("brakuje {0}", m) : " · ✓"), 11f, R.color.pr_muted);
+            req.setGravity(Gravity.CENTER);
+            req.setPadding(0, (int) (6 * d), 0, 0);
+            more.addView(req);
+            if (toFix > 0) {
+                TextView tip = Ui.text(a, "🔄 " + L.t("Nagrania do korekty znajdziesz w zakładce KOREKTA — poprawki nie mają limitu."), 11f, R.color.pr_warn);
+                tip.setPadding(0, (int) (4 * d), 0, 0);
+                more.addView(tip);
+            }
+            row.addView(more, mlp);
+            row.setOnClickListener(v -> {
+                boolean open = more.getVisibility() != View.VISIBLE;
+                more.setVisibility(open ? View.VISIBLE : View.GONE);
+                nm.setText((m == 0 ? "✅ " : "") + L.cat((String) rw[0]) + (open ? "  ▴" : "  ▾"));
+            });
             card.addView(row);
         }
     }
@@ -392,41 +426,125 @@ public class StatsPage {
         });
     }
 
+    // Miejsca w poblizu — jak fetchNearbyPlaces w PWA: Overpass + Nominatim (przez proxy)
+    // ROWNOLEGLE, promien 5 km, wyniki scalone; wystarczy, ze jedno zrodlo odpowie.
+    // Pamiec podreczna 30 min, zeby nie meczyc serwera przy kazdym wejsciu.
+    private static List<Object[]> placesCache;
+    private static String placesCacheKey;
+    private static long placesCacheAt;
+
     private void fetchPlaces(LinearLayout card, TextView info, double lat, double lon) {
-        String q = "[out:json][timeout:20];(node[\"amenity\"](around:3000," + lat + "," + lon + ");node[\"shop\"](around:3000," + lat + "," + lon + ");"
-                + "node[\"leisure\"~\"park|garden|sports_centre\"][\"name\"](around:3000," + lat + "," + lon + ");"
-                + "node[\"tourism\"~\"museum|attraction\"][\"name\"](around:3000," + lat + "," + lon + "););out center tags;";
-        byte[] body = ("data=" + NsClient.enc(q)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        NsClient.request("POST", "/overpass", null, null, "application/x-www-form-urlencoded", body, r -> {
-            if (!host.isCurrent()) return;
-            List<Object[]> places = new ArrayList<>(); // nazwa, odleglosc [m], typ
+        String key = Math.round(lat * 100) + "," + Math.round(lon * 100);
+        if (placesCache != null && key.equals(placesCacheKey) && System.currentTimeMillis() - placesCacheAt < 30 * 60 * 1000L) {
+            info.setText("📍 " + L.f("MIEJSCA W POBLIŻU ({0})", placesCache.size()));
+            showPlaces(card, placesCache, 0);
+            return;
+        }
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        new Thread(() -> {
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(5);
+            List<java.util.concurrent.Future<List<Object[]>>> jobs = new ArrayList<>();
+            final String[] err = {null};
+            jobs.add(pool.submit(() -> overpass(lat, lon, err)));
+            String[] types = {"amenity=restaurant", "amenity=cafe", "amenity=pharmacy", "amenity=school", "amenity=bank", "amenity=post_office",
+                    "amenity=fuel", "amenity=library", "shop=supermarket", "shop=bakery", "shop=convenience", "leisure=park"};
+            for (String t : types) jobs.add(pool.submit(() -> nominatim(t, lat, lon, err)));
+            List<Object[]> all = new ArrayList<>();
             Set<String> seen = new HashSet<>();
             String[] skip = {"parking", "toilets", "bench", "waste_basket", "bicycle_parking", "atm", "charging_station", "vending_machine", "recycling"};
-            try {
-                JSONArray els = new JSONObject(r.body).optJSONArray("elements");
-                for (int i = 0; els != null && i < els.length(); i++) {
-                    JSONObject el = els.optJSONObject(i);
-                    JSONObject tags = el == null ? null : el.optJSONObject("tags");
-                    if (tags == null) continue;
-                    String name = tags.optString("name", "");
-                    if (name.isEmpty() || !seen.add(name.toLowerCase(Locale.ROOT))) continue;
-                    JSONObject center = el.optJSONObject("center");
-                    double la = el.optDouble("lat", center != null ? center.optDouble("lat", 0) : 0);
-                    double lo = el.optDouble("lon", center != null ? center.optDouble("lon", 0) : 0);
-                    if (la == 0) continue;
-                    String type = tags.optString("amenity", tags.optString("shop", tags.optString("leisure", tags.optString("tourism", "_shop"))));
-                    boolean sk = false;
-                    for (String s : skip) if (s.equals(type)) sk = true;
-                    if (sk) continue;
-                    double dLat = (la - lat) * 111000, dLon = (lo - lon) * 111000 * Math.cos(Math.toRadians(lat));
-                    places.add(new Object[]{name, (int) Math.round(Math.sqrt(dLat * dLat + dLon * dLon)), type});
+            for (java.util.concurrent.Future<List<Object[]>> j : jobs) {
+                try {
+                    for (Object[] p : j.get(40, java.util.concurrent.TimeUnit.SECONDS)) {
+                        String nm = ((String) p[0]).trim();
+                        if (nm.isEmpty() || !seen.add(nm.toLowerCase(Locale.ROOT))) continue;
+                        boolean sk = false;
+                        for (String s : skip) if (s.equals(p[2])) sk = true;
+                        if (sk || (Integer) p[1] > 5000) continue;
+                        all.add(p);
+                    }
+                } catch (Exception e) { if (err[0] == null) err[0] = e.getClass().getSimpleName(); }
+            }
+            pool.shutdownNow();
+            java.util.Collections.sort(all, (x, y) -> (Integer) x[1] - (Integer) y[1]);
+            main.post(() -> {
+                if (!host.isCurrent()) return;
+                if (all.isEmpty()) {
+                    info.setText(err[0] == null ? L.t("Nie znaleziono miejsc w pobliżu.") : L.t("Nie udało się pobrać miejsc — sprawdź internet.") + " (" + err[0] + ")");
+                    return;
                 }
-            } catch (Exception e) { }
-            java.util.Collections.sort(places, (x, y) -> (Integer) x[1] - (Integer) y[1]);
-            if (places.isEmpty()) { info.setText(r.ok ? L.t("Nie znaleziono miejsc w pobliżu.") : L.t("Nie udało się pobrać miejsc — sprawdź internet.")); return; }
-            info.setText("📍 " + L.f("MIEJSCA W POBLIŻU ({0})", places.size()));
-            showPlaces(card, places, 0);
-        });
+                placesCache = all; placesCacheKey = key; placesCacheAt = System.currentTimeMillis();
+                info.setText("📍 " + L.f("MIEJSCA W POBLIŻU ({0})", all.size()));
+                showPlaces(card, all, 0);
+            });
+        }).start();
+    }
+
+    private static int dist(double lat, double lon, double la, double lo) {
+        double dLat = (la - lat) * 111000, dLon = (lo - lon) * 111000 * Math.cos(Math.toRadians(lat));
+        return (int) Math.round(Math.sqrt(dLat * dLat + dLon * dLon));
+    }
+
+    private static String http(String method, String url, String form) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setRequestMethod(method);
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(35000);
+        c.setRequestProperty("Accept", "application/json");
+        if (form != null) {
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            try (java.io.OutputStream os = c.getOutputStream()) { os.write(form.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+        }
+        int st = c.getResponseCode();
+        java.io.InputStream in = st >= 400 ? c.getErrorStream() : c.getInputStream();
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+        if (in != null) { byte[] b = new byte[8192]; int n; while ((n = in.read(b)) > 0) bo.write(b, 0, n); in.close(); }
+        c.disconnect();
+        if (st < 200 || st >= 300) throw new java.io.IOException("HTTP " + st);
+        return new String(bo.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static List<Object[]> overpass(double lat, double lon, String[] err) {
+        List<Object[]> out = new ArrayList<>();
+        String a = "(around:5000," + lat + "," + lon + ")", b = "(around:3000," + lat + "," + lon + ")";
+        String q = "[out:json][timeout:20];(node[\"amenity\"]" + a + ";node[\"shop\"]" + a + ";node[\"leisure\"~\"park|garden|sports_centre\"][\"name\"]" + a
+                + ";node[\"tourism\"~\"museum|attraction\"][\"name\"]" + b + ";way[\"shop\"][\"name\"]" + b + ";way[\"amenity\"][\"name\"]" + b + ";);out center tags;";
+        try {
+            JSONArray els = new JSONObject(http("POST", NsClient.NS_BASE + "/overpass", "data=" + NsClient.enc(q))).optJSONArray("elements");
+            for (int i = 0; els != null && i < els.length(); i++) {
+                JSONObject el = els.optJSONObject(i);
+                JSONObject tags = el == null ? null : el.optJSONObject("tags");
+                if (tags == null) continue;
+                String name = tags.optString("name", tags.optString("name:pl", ""));
+                if (name.isEmpty()) continue;
+                JSONObject center = el.optJSONObject("center");
+                double la = el.has("lat") ? el.optDouble("lat", 0) : center != null ? center.optDouble("lat", 0) : 0;
+                double lo = el.has("lon") ? el.optDouble("lon", 0) : center != null ? center.optDouble("lon", 0) : 0;
+                if (la == 0) continue;
+                String type = tags.optString("amenity", tags.optString("shop", tags.optString("leisure", tags.optString("tourism", "_shop"))));
+                out.add(new Object[]{name, dist(lat, lon, la, lo), type});
+            }
+        } catch (Exception e) { err[0] = "Overpass: " + e.getMessage(); }
+        return out;
+    }
+
+    private static List<Object[]> nominatim(String t, double lat, double lon, String[] err) {
+        List<Object[]> out = new ArrayList<>();
+        try {
+            String url = NsClient.NS_BASE + "/nominatim?" + t + "&lat=" + lat + "&lon=" + lon + "&format=json&limit=3&radius=5000&bounded=0&accept-language=pl&addressdetails=0";
+            JSONArray arr = new JSONArray(http("GET", url, null));
+            String type = t.substring(t.indexOf('=') + 1);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject el = arr.optJSONObject(i);
+                if (el == null) continue;
+                String name = el.optString("name", "");
+                if (name.isEmpty()) name = el.optString("display_name", "").split(",")[0];
+                double la = Double.parseDouble(el.optString("lat", "0")), lo = Double.parseDouble(el.optString("lon", "0"));
+                if (la == 0) continue;
+                out.add(new Object[]{name, dist(lat, lon, la, lo), type});
+            }
+        } catch (Exception e) { if (err[0] == null) err[0] = "Nominatim: " + e.getMessage(); }
+        return out;
     }
 
     private void showPlaces(LinearLayout card, List<Object[]> places, int from) {

@@ -59,12 +59,10 @@ public class MapActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 // Krok 1: strona z tej samej domeny -> wpisujemy logowanie do localStorage
                 // (map.html czyta token NS z localStorage, tak jak w przegladarce)
-                if (url != null && url.contains("map.html")) {
-                    // Mapa gotowa: czyscimy historie (przycisk Wstecz nie cofnie do strony
-                    // pomocniczej z kodem) i pokazujemy
-                    view.clearHistory();
-                    view.setVisibility(android.view.View.VISIBLE);
-                    loading.setVisibility(android.view.View.GONE);
+                // Krok 2: KAZDA strona inna niz pomocnicza (manifest.json) to juz mapa — serwer
+                // przekierowuje "map.html" na "/map" (bez .html), dlatego nie sprawdzamy nazwy.
+                if (injected && url != null && !url.contains("manifest.json")) {
+                    showMap(view, loading);
                     return;
                 }
                 if (!injected) {
@@ -75,10 +73,22 @@ public class MapActivity extends Activity {
                             + "localStorage.setItem('pitchrec_map_name'," + q(name) + ");"
                             + "localStorage.setItem('pitchrec_ns_server','test');}catch(e){}";
                     view.evaluateJavascript(js, v -> view.loadUrl(PWA_BASE + "/map.html"));
+                    // Zabezpieczenie: gdyby strona nie zglosila konca ladowania, pokaz po 8 s
+                    view.postDelayed(() -> { if (!mapShown && !isFinishing()) showMap(view, loading); }, 8000);
                 }
             }
         });
         web.loadUrl(PWA_BASE + "/manifest.json");
+    }
+
+    private boolean mapShown = false;
+
+    // Mapa gotowa: czyscimy historie (Wstecz nie cofnie do strony pomocniczej) i pokazujemy
+    private void showMap(WebView view, android.widget.TextView loading) {
+        mapShown = true;
+        view.clearHistory();
+        view.setVisibility(android.view.View.VISIBLE);
+        loading.setVisibility(android.view.View.GONE);
     }
 
     private static String q(String s) {

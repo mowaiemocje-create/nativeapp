@@ -112,11 +112,31 @@ public class DescribeSheet {
 
         // SYSTEM NOWEJ MOWY (ostatni wybor zapamietany)
         body.addView(Ui.label(a, L.t("SYSTEM NOWEJ MOWY")));
-        final String[] selSys = {m.sys != null && !m.sys.isEmpty() ? m.sys : prefs.getString("last_sys", "")};
+        final String lockedSys = m.fixSys != null ? m.fixSys : "";
+        final String[] selSys = {!lockedSys.isEmpty() ? lockedSys : m.sys != null && !m.sys.isEmpty() ? m.sys : prefs.getString("last_sys", "")};
+        if (!m.fixRecordId.isEmpty()) {
+            // POPRAWKA: system mowy musi byc taki sam jak w nagraniu, w ktorym byl blad
+            TextView lockInfo = Ui.text(a, lockedSys.isEmpty()
+                    ? "⚠ " + L.t("Poprawkę nagraj w TYM SAMYM systemie mowy, co nagranie z błędem — wybierz go poniżej.")
+                    : "🔒 " + L.f("Poprawka musi być w tym samym systemie mowy co nagranie z błędem: {0}", lockedSys), 12f, R.color.pr_text);
+            int wc = Ui.col(a, R.color.pr_warn);
+            lockInfo.setPadding((int) Ui.dp(a, 10), (int) Ui.dp(a, 8), (int) Ui.dp(a, 10), (int) Ui.dp(a, 8));
+            lockInfo.setBackground(Ui.rounded((wc & 0x00FFFFFF) | 0x22000000, wc, Ui.dp(a, 1), Ui.dp(a, 8)));
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            llp.bottomMargin = (int) Ui.dp(a, 8);
+            body.addView(lockInfo, llp);
+        }
         LinearLayout sysGrid = new LinearLayout(a);
         sysGrid.setOrientation(LinearLayout.VERTICAL);
         List<Button> sysBtns = new ArrayList<>();
         buildGrid(a, sysGrid, RecMeta.SYS_LEVELS, sysBtns, selSys);
+        if (!lockedSys.isEmpty()) {
+            for (Button sb : sysBtns) {
+                boolean same = lockedSys.equals(String.valueOf(sb.getTag()));
+                sb.setEnabled(same);
+                sb.setAlpha(same ? 1f : 0.3f);
+            }
+        }
         body.addView(sysGrid);
         body.addView(Ui.spacer(a, 12));
 
@@ -202,6 +222,7 @@ public class DescribeSheet {
             String name = nameInput.getText().toString().trim();
             List<String> missing = new ArrayList<>();
             if (selCat[0].isEmpty()) missing.add(L.t("• Kategoria"));
+            if (!m.fixRecordId.isEmpty() && lockedSys.isEmpty() && selSys[0].isEmpty()) missing.add(L.t("• System nowej mowy (taki sam jak w nagraniu z błędem)"));
             if (newRecording) {
                 if (name.isEmpty()) missing.add(L.t("• Imię kursanta"));
                 if (emo[0] == 0) missing.add(L.t("• Emocje (gwiazdki 1-5)"));
@@ -216,7 +237,7 @@ public class DescribeSheet {
             }
             m.name = name;
             m.cat = selCat[0];
-            m.sys = selSys[0];
+            m.sys = !lockedSys.isEmpty() ? lockedSys : selSys[0];
             m.emotion = emo[0];
             m.note = noteInput.getText().toString().trim();
             if (gps[0] != null) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); }

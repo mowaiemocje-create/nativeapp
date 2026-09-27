@@ -67,8 +67,14 @@ public class NeonButton extends View {
         return v * getResources().getDisplayMetrics().density;
     }
 
+    // Kolor bazowy (PLAY zielony, REC czerwony, STOP bialy). Gdy przycisk pokazuje PAUZE (⏸),
+    // caly przycisk — ramka, symbol i poswiata — jest POMARANCZOWY, jak w PitchRec.
+    private int baseColor = Color.WHITE;
+    public static final int PAUSE_COLOR = 0xFFFF9500;
+
     public void setNeonColor(int color) {
-        neonColor = color;
+        baseColor = color;
+        neonColor = symbol.contains("⏸") ? PAUSE_COLOR : color;
         invalidate();
     }
 
@@ -76,6 +82,7 @@ public class NeonButton extends View {
         // Tylko symbol — pierwszy niealfanumeryczny znak (▶ ● ■ itp.), bez podpisu tekstowego.
         symbol = t.replaceAll("[A-Za-zĄĘŁŃÓŚŹŻąęłńóśźż ]", "").trim();
         if (symbol.isEmpty()) symbol = t;
+        neonColor = symbol.contains("⏸") ? PAUSE_COLOR : baseColor;
         invalidate();
     }
 
@@ -138,6 +145,10 @@ public class NeonButton extends View {
         if (pressed && enabled) {
             topShade = darken(neonColor, 0.55f);
             bottomShade = lighten(neonColor, 0.15f);
+        } else if (enabled && neonColor == PAUSE_COLOR) {
+            // Pauza: caly przycisk podswietlony na pomaranczowo (nie tylko ikonka)
+            topShade = darken(PAUSE_COLOR, 0.45f);
+            bottomShade = darken(PAUSE_COLOR, 0.22f);
         } else {
             topShade = Color.parseColor("#2E2E36");
             bottomShade = Color.parseColor("#18181C");
@@ -148,7 +159,7 @@ public class NeonButton extends View {
         borderPaint.setColor(activeColor);
         canvas.drawRoundRect(left, top, right, bottom, radius, radius, borderPaint);
 
-        symbolPaint.setColor(pressed && enabled ? Color.WHITE : activeColor);
+        symbolPaint.setColor(pressed && enabled ? Color.WHITE : (enabled && neonColor == PAUSE_COLOR ? 0xFFFFE0B0 : activeColor));
         float textY = (top + bottom) / 2f - (symbolPaint.descent() + symbolPaint.ascent()) / 2f;
         canvas.drawText(symbol, (left + right) / 2f, textY, symbolPaint);
     }

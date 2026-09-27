@@ -219,9 +219,33 @@ public class DiaryPage {
 
     private LinearLayout section(String label) {
         LinearLayout c = Ui.card(a);
-        c.addView(Ui.label(a, label));
+        c.addView(sectionHead(label));
         root.addView(c);
         return c;
+    }
+
+    // Wyrazny naglowek sekcji: pomaranczowy pasek z lewej + pogrubiony, wiekszy tekst
+    private View sectionHead(String label) {
+        LinearLayout r = Ui.row(a);
+        r.setPadding(0, 0, 0, (int) (10 * d));
+        View bar = new View(a);
+        bar.setBackground(Ui.rounded(Ui.col(a, R.color.pr_accent), 0, 0, 2 * d));
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams((int) (4 * d), (int) (20 * d));
+        bl.rightMargin = (int) (8 * d);
+        r.addView(bar, bl);
+        TextView t = Ui.text(a, label, 15f, R.color.pr_text);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setLetterSpacing(0.04f);
+        r.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        return r;
+    }
+
+    // Pytanie wewnatrz sekcji — pogrubione, w kolorze akcentu, z odstepem nad
+    private TextView question(String label) {
+        TextView t = Ui.text(a, label, 13f, R.color.pr_accent);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(0, (int) (12 * d), 0, (int) (6 * d));
+        return t;
     }
 
     private void buildForm() {
@@ -247,27 +271,27 @@ public class DiaryPage {
         LinearLayout succ = section(L.t("✨ SUKCESY DZISIAJ"));
         succ.addView(Ui.text(a, L.t("Każde \"tak\" się liczy"), 11f, R.color.pr_muted));
         for (String[] q : SUCCESS_Q) succ.addView(yesNoRow(q[1], () -> draft.success.get(q[0]), v -> draft.success.put(q[0], v)));
-        succ.addView(Ui.label(a, L.t("CO BYŁO INNE DZIŚ NIŻ WCZORAJ? (opcjonalnie)")));
+        succ.addView(question(L.t("CO BYŁO INNE DZIŚ NIŻ WCZORAJ? (opcjonalnie)")));
         succ.addView(textInput(draft.diffNote, s -> draft.diffNote = s));
         succ.addView(Ui.spacer(a, 8));
-        succ.addView(Ui.label(a, L.t("COŚ JESZCZE CHCESZ DOPISAĆ? (opcjonalnie)")));
+        succ.addView(question(L.t("COŚ JESZCZE CHCESZ DOPISAĆ? (opcjonalnie)")));
         succ.addView(textInput(draft.extraNote, s -> draft.extraNote = s));
 
         // Dodatkowe informacje (pola badawcze)
         LinearLayout extra = section(L.t("📊 DODATKOWE INFORMACJE"));
-        extra.addView(Ui.label(a, L.t("MIEJSCOWOŚĆ")));
+        extra.addView(question(L.t("MIEJSCOWOŚĆ")));
         extra.addView(textInput(draft.city, s -> draft.city = s));
         extra.addView(Ui.spacer(a, 8));
-        extra.addView(Ui.label(a, L.t("SYTUACJE DLA MNIE TRUDNE (można kilka)")));
+        extra.addView(question(L.t("SYTUACJE DLA MNIE TRUDNE (można kilka)")));
         extra.addView(simpleChips(SITUATIONS, draft.hard, null));
         extra.addView(Ui.spacer(a, 8));
-        extra.addView(Ui.label(a, L.t("SYTUACJE DLA MNIE ŁATWE (można kilka)")));
+        extra.addView(question(L.t("SYTUACJE DLA MNIE ŁATWE (można kilka)")));
         extra.addView(simpleChips(SITUATIONS, draft.easy, null));
         extra.addView(Ui.spacer(a, 8));
         extra.addView(counter(L.t("Poziom zmęczenia (0-10)"), () -> draft.tiredness, v -> draft.tiredness = v, 0, 10, 1));
         extra.addView(decimalCounter(L.t("Ilość snu (godz.)")));
         extra.addView(counter(L.t("Ilość wypitych kaw"), () -> draft.coffee, v -> draft.coffee = v, 0, 15, 1));
-        extra.addView(Ui.label(a, L.t("CZY BYŁ SPOŻYWANY ALKOHOL? (można kilka)")));
+        extra.addView(question(L.t("CZY BYŁ SPOŻYWANY ALKOHOL? (można kilka)")));
         extra.addView(simpleChips(ALCOHOL, draft.alcohol, "Nie"));
         extra.addView(Ui.spacer(a, 8));
         extra.addView(yesNoRow(L.t("Czy była aktywność fizyczna?"), () -> draft.activity == null ? null : "tak".equals(draft.activity), v -> draft.activity = v ? "tak" : "nie"));
@@ -542,7 +566,7 @@ public class DiaryPage {
     private void renderFeelingContext(LinearLayout wrap) {
         wrap.removeAllViews();
         if (draft.feelingId == null) return;
-        wrap.addView(Ui.label(a, L.t("CO WPŁYNĘŁO NA SAMOPOCZUCIE?")));
+        wrap.addView(question(L.t("CO WPŁYNĘŁO NA SAMOPOCZUCIE?")));
         String[][] opts = feelingNegative() ? CTX_NEG : CTX_POS;
         FlowLayout fl = new FlowLayout(a);
         List<TextView> all = new ArrayList<>();
