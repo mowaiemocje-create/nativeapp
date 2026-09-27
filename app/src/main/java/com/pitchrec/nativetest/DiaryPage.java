@@ -93,14 +93,14 @@ public class DiaryPage {
         if (draft == null || !today().equals(draft.date)) { draft = new Draft(); draft.date = today(); }
         root.removeAllViews();
         root.addView(header());
-        TextView loading = Ui.text(a, "⏳ Wczytywanie dziennika…", 14f, R.color.pr_muted);
+        TextView loading = Ui.text(a, L.t("⏳ Wczytywanie dziennika…"), 14f, R.color.pr_muted);
         root.addView(loading);
         loadDicts(ok -> {
             if (!host.isCurrent()) return;
             if (!ok) {
-                loading.setText("Nie udało się wczytać dziennika. Sprawdź połączenie z internetem.");
+                loading.setText(L.t("Nie udało się wczytać dziennika. Sprawdź połączenie z internetem."));
                 loading.setTextColor(Ui.col(a, R.color.pr_warn));
-                Button retry = Ui.button(a, "Spróbuj ponownie", R.color.pr_accent, false);
+                Button retry = Ui.button(a, L.t("Spróbuj ponownie"), R.color.pr_accent, false);
                 retry.setOnClickListener(v -> render());
                 root.addView(retry);
                 return;
@@ -204,12 +204,12 @@ public class DiaryPage {
     // ── UI ──
     private View header() {
         LinearLayout h = Ui.row(a);
-        TextView t = Ui.text(a, "DZIENNIK", 18f, R.color.pr_muted);
+        TextView t = Ui.text(a, L.t("DZIENNIK"), 18f, R.color.pr_muted);
         t.setLetterSpacing(0.3f);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         h.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         h.addView(Ui.text(a, draft != null ? draft.date + "  " : "", 10f, R.color.pr_muted));
-        Button hist = Ui.button(a, "📅 HISTORIA", R.color.pr_accent, false);
+        Button hist = Ui.button(a, L.t("📅 HISTORIA"), R.color.pr_accent, false);
         hist.setTextSize(10f);
         hist.setOnClickListener(v -> showHistory());
         h.addView(hist);
@@ -226,64 +226,64 @@ public class DiaryPage {
 
     private void buildForm() {
         if (draft.locked) {
-            TextView lock = Ui.text(a, "🔒 Trener już sprawdził ten wpis — edycja zablokowana", 12f, R.color.pr_pause);
+            TextView lock = Ui.text(a, L.t("🔒 Trener już sprawdził ten wpis — edycja zablokowana"), 12f, R.color.pr_pause);
             lock.setTypeface(Typeface.DEFAULT_BOLD);
             lock.setPadding((int) (10 * d), (int) (10 * d), (int) (10 * d), (int) (10 * d));
             lock.setBackground(Ui.rounded((Ui.col(a, R.color.pr_pause) & 0x00FFFFFF) | 0x1A000000, Ui.col(a, R.color.pr_pause), d, 8 * d));
             root.addView(lock);
             root.addView(Ui.spacer(a, 8));
         } else if (draft.existingId != null && !draft.existingId.isEmpty()) {
-            TextView info = Ui.text(a, "Dzisiejszy wpis już istnieje — możesz go poprawić i zapisać ponownie.", 12f, R.color.pr_muted);
+            TextView info = Ui.text(a, L.t("Dzisiejszy wpis już istnieje — możesz go poprawić i zapisać ponownie."), 12f, R.color.pr_muted);
             info.setPadding(0, 0, 0, (int) (8 * d));
             root.addView(info);
         }
 
         // Cwiczenia relaksacyjne
-        LinearLayout relax = section("ĆWICZENIA RELAKSACYJNE DZISIAJ");
-        relax.addView(counter("Trening Jacobsona", () -> draft.jacobson, v -> draft.jacobson = v, 0, 20, 1));
-        relax.addView(counter("Skanowanie ciała", () -> draft.scan, v -> draft.scan = v, 0, 20, 1));
+        LinearLayout relax = section(L.t("ĆWICZENIA RELAKSACYJNE DZISIAJ"));
+        relax.addView(counter(L.t("Trening Jacobsona"), () -> draft.jacobson, v -> draft.jacobson = v, 0, 20, 1));
+        relax.addView(counter(L.t("Skanowanie ciała"), () -> draft.scan, v -> draft.scan = v, 0, 20, 1));
 
         // Sukcesy
-        LinearLayout succ = section("✨ SUKCESY DZISIAJ");
-        succ.addView(Ui.text(a, "Każde \"tak\" się liczy", 11f, R.color.pr_muted));
+        LinearLayout succ = section(L.t("✨ SUKCESY DZISIAJ"));
+        succ.addView(Ui.text(a, L.t("Każde \"tak\" się liczy"), 11f, R.color.pr_muted));
         for (String[] q : SUCCESS_Q) succ.addView(yesNoRow(q[1], () -> draft.success.get(q[0]), v -> draft.success.put(q[0], v)));
-        succ.addView(Ui.label(a, "CO BYŁO INNE DZIŚ NIŻ WCZORAJ? (opcjonalnie)"));
+        succ.addView(Ui.label(a, L.t("CO BYŁO INNE DZIŚ NIŻ WCZORAJ? (opcjonalnie)")));
         succ.addView(textInput(draft.diffNote, s -> draft.diffNote = s));
         succ.addView(Ui.spacer(a, 8));
-        succ.addView(Ui.label(a, "COŚ JESZCZE CHCESZ DOPISAĆ? (opcjonalnie)"));
+        succ.addView(Ui.label(a, L.t("COŚ JESZCZE CHCESZ DOPISAĆ? (opcjonalnie)")));
         succ.addView(textInput(draft.extraNote, s -> draft.extraNote = s));
 
         // Dodatkowe informacje (pola badawcze)
-        LinearLayout extra = section("📊 DODATKOWE INFORMACJE");
-        extra.addView(Ui.label(a, "MIEJSCOWOŚĆ"));
+        LinearLayout extra = section(L.t("📊 DODATKOWE INFORMACJE"));
+        extra.addView(Ui.label(a, L.t("MIEJSCOWOŚĆ")));
         extra.addView(textInput(draft.city, s -> draft.city = s));
         extra.addView(Ui.spacer(a, 8));
-        extra.addView(Ui.label(a, "SYTUACJE DLA MNIE TRUDNE (można kilka)"));
+        extra.addView(Ui.label(a, L.t("SYTUACJE DLA MNIE TRUDNE (można kilka)")));
         extra.addView(simpleChips(SITUATIONS, draft.hard, null));
         extra.addView(Ui.spacer(a, 8));
-        extra.addView(Ui.label(a, "SYTUACJE DLA MNIE ŁATWE (można kilka)"));
+        extra.addView(Ui.label(a, L.t("SYTUACJE DLA MNIE ŁATWE (można kilka)")));
         extra.addView(simpleChips(SITUATIONS, draft.easy, null));
         extra.addView(Ui.spacer(a, 8));
-        extra.addView(counter("Poziom zmęczenia (0-10)", () -> draft.tiredness, v -> draft.tiredness = v, 0, 10, 1));
-        extra.addView(decimalCounter("Ilość snu (godz.)"));
-        extra.addView(counter("Ilość wypitych kaw", () -> draft.coffee, v -> draft.coffee = v, 0, 15, 1));
-        extra.addView(Ui.label(a, "CZY BYŁ SPOŻYWANY ALKOHOL? (można kilka)"));
+        extra.addView(counter(L.t("Poziom zmęczenia (0-10)"), () -> draft.tiredness, v -> draft.tiredness = v, 0, 10, 1));
+        extra.addView(decimalCounter(L.t("Ilość snu (godz.)")));
+        extra.addView(counter(L.t("Ilość wypitych kaw"), () -> draft.coffee, v -> draft.coffee = v, 0, 15, 1));
+        extra.addView(Ui.label(a, L.t("CZY BYŁ SPOŻYWANY ALKOHOL? (można kilka)")));
         extra.addView(simpleChips(ALCOHOL, draft.alcohol, "Nie"));
         extra.addView(Ui.spacer(a, 8));
-        extra.addView(yesNoRow("Czy była aktywność fizyczna?", () -> draft.activity == null ? null : "tak".equals(draft.activity), v -> draft.activity = v ? "tak" : "nie"));
-        extra.addView(counter("Poziom motywacji do ćwiczeń (0-10)", () -> draft.motivation, v -> draft.motivation = v, 0, 10, 1));
+        extra.addView(yesNoRow(L.t("Czy była aktywność fizyczna?"), () -> draft.activity == null ? null : "tak".equals(draft.activity), v -> draft.activity = v ? "tak" : "nie"));
+        extra.addView(counter(L.t("Poziom motywacji do ćwiczeń (0-10)"), () -> draft.motivation, v -> draft.motivation = v, 0, 10, 1));
 
         // Z kim sukcesy / rozmowy / telefony
-        LinearLayout who = section("Z KIM DZIŚ SUKCESY");
+        LinearLayout who = section(L.t("Z KIM DZIŚ SUKCESY"));
         autoFillSuccessWho();
         who.addView(dictChips(successPeople, draft.successWho));
-        LinearLayout talk = section("ROZMOWY BEZ NAGRANIA");
+        LinearLayout talk = section(L.t("ROZMOWY BEZ NAGRANIA"));
         talk.addView(dictChips(talkPeople, draft.talkNoRec));
-        LinearLayout phone = section("TELEFONY BEZ NAGRANIA");
+        LinearLayout phone = section(L.t("TELEFONY BEZ NAGRANIA"));
         phone.addView(dictChips(talkPeople, draft.phoneNoRec));
 
         // Utrata kontroli
-        LinearLayout ctrl = section("CZY DZIŚ STRACIŁEŚ KONTROLĘ NAD NOWĄ MOWĄ?");
+        LinearLayout ctrl = section(L.t("CZY DZIŚ STRACIŁEŚ KONTROLĘ NAD NOWĄ MOWĄ?"));
         FlowLayout details = new FlowLayout(a);
         String[] ctrlLabels = new String[CONTROL_OPT.length];
         for (int i = 0; i < CONTROL_OPT.length; i++) ctrlLabels[i] = CONTROL_OPT[i][1];
@@ -303,7 +303,7 @@ public class DiaryPage {
         ctrl.addView(detailWrap);
 
         // Samopoczucie
-        LinearLayout feel = section("SAMOPOCZUCIE DZISIAJ");
+        LinearLayout feel = section(L.t("SAMOPOCZUCIE DZISIAJ"));
         LinearLayout ctxWrap = new LinearLayout(a);
         ctxWrap.setOrientation(LinearLayout.VERTICAL);
         feel.addView(feelingChips(ctxWrap));
@@ -312,7 +312,7 @@ public class DiaryPage {
         renderFeelingContext(ctxWrap);
 
         // Zapis
-        Button save = Ui.button(a, draft.existingId != null && !draft.existingId.isEmpty() ? "ZAPISZ ZMIANY W DZIENNIKU" : "ZAPISZ WPIS DZIENNIKA", R.color.pr_accent, true);
+        Button save = Ui.button(a, draft.existingId != null && !draft.existingId.isEmpty() ? L.t("ZAPISZ ZMIANY W DZIENNIKU") : L.t("ZAPISZ WPIS DZIENNIKA"), R.color.pr_accent, true);
         save.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
         save.setTextSize(14f);
         if (draft.locked) { save.setEnabled(false); save.setAlpha(0.5f); }
@@ -330,7 +330,7 @@ public class DiaryPage {
     private View counter(String label, IntGet g, IntSet st, int min, int max, int step) {
         LinearLayout r = Ui.row(a);
         r.setPadding(0, (int) (4 * d), 0, (int) (4 * d));
-        r.addView(Ui.text(a, label, 13f, R.color.pr_text), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.addView(Ui.text(a, L.t(label), 13f, R.color.pr_text), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button minus = Ui.button(a, "−", R.color.pr_muted, false);
         TextView val = Ui.text(a, String.valueOf(g.get()), 17f, R.color.pr_accent);
         val.setTypeface(Typeface.DEFAULT_BOLD);
@@ -354,7 +354,7 @@ public class DiaryPage {
     private View decimalCounter(String label) {
         LinearLayout r = Ui.row(a);
         r.setPadding(0, (int) (4 * d), 0, (int) (4 * d));
-        r.addView(Ui.text(a, label, 13f, R.color.pr_text), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        r.addView(Ui.text(a, L.t(label), 13f, R.color.pr_text), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Button minus = Ui.button(a, "−", R.color.pr_muted, false);
         TextView val = Ui.text(a, fmtSleep(draft.sleep), 17f, R.color.pr_accent);
         val.setTypeface(Typeface.DEFAULT_BOLD);
@@ -381,9 +381,9 @@ public class DiaryPage {
     private View yesNoRow(String label, BoolGet g, BoolSet st) {
         LinearLayout r = Ui.row(a);
         r.setPadding(0, (int) (4 * d), 0, (int) (4 * d));
-        if (!label.isEmpty()) r.addView(Ui.text(a, label, 13f, R.color.pr_text), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        Button no = Ui.button(a, "Nie", R.color.pr_muted, false);
-        Button yes = Ui.button(a, "Tak", R.color.pr_muted, false);
+        if (!label.isEmpty()) r.addView(Ui.text(a, L.t(label), 13f, R.color.pr_text), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button no = Ui.button(a, L.t("Nie"), R.color.pr_muted, false);
+        Button yes = Ui.button(a, L.t("Tak"), R.color.pr_muted, false);
         Runnable paint = () -> {
             Boolean v = g.get();
             styleToggle(no, Boolean.FALSE.equals(v));
@@ -424,7 +424,8 @@ public class DiaryPage {
     }
 
     private TextView chip(String text) {
-        TextView c = Ui.text(a, text, 12f, R.color.pr_text);
+        TextView c = Ui.text(a, L.t(text), 12f, R.color.pr_text);
+        c.setTag(text);
         c.setPadding((int) (12 * d), (int) (7 * d), (int) (12 * d), (int) (7 * d));
         return c;
     }
@@ -453,7 +454,7 @@ public class DiaryPage {
                     else if (exclusive != null) selected.remove(exclusive);
                     selected.add(it);
                 }
-                for (TextView x : all) styleChip(x, selected.contains(x.getText().toString()));
+                for (TextView x : all) styleChip(x, selected.contains(String.valueOf(x.getTag())));
                 if (onChange != null) onChange.run();
             });
             styleChip(c, selected.contains(it));
@@ -541,7 +542,7 @@ public class DiaryPage {
     private void renderFeelingContext(LinearLayout wrap) {
         wrap.removeAllViews();
         if (draft.feelingId == null) return;
-        wrap.addView(Ui.label(a, "CO WPŁYNĘŁO NA SAMOPOCZUCIE?"));
+        wrap.addView(Ui.label(a, L.t("CO WPŁYNĘŁO NA SAMOPOCZUCIE?")));
         String[][] opts = feelingNegative() ? CTX_NEG : CTX_POS;
         FlowLayout fl = new FlowLayout(a);
         List<TextView> all = new ArrayList<>();
@@ -609,17 +610,17 @@ public class DiaryPage {
 
     private void submit(Button btn) {
         if (draft.locked) {
-            new AlertDialog.Builder(a).setMessage("Nie możesz edytować tego wpisu, trener już go sprawdził.").setPositiveButton("OK", null).show();
+            new AlertDialog.Builder(a).setMessage(L.t("Nie możesz edytować tego wpisu, trener już go sprawdził.")).setPositiveButton("OK", null).show();
             return;
         }
         List<String> missing = new ArrayList<>();
-        if (draft.successWho.isEmpty()) missing.add("• Z kim dziś sukcesy");
-        if (draft.talkNoRec.isEmpty()) missing.add("• Rozmowy bez nagrania");
-        if (draft.phoneNoRec.isEmpty()) missing.add("• Telefony bez nagrania");
-        if (draft.controlLost == null) missing.add("• Czy straciłeś kontrolę nad nową mową");
-        if (draft.feelingId == null) missing.add("• Samopoczucie dzisiaj");
+        if (draft.successWho.isEmpty()) missing.add(L.t("• Z kim dziś sukcesy"));
+        if (draft.talkNoRec.isEmpty()) missing.add(L.t("• Rozmowy bez nagrania"));
+        if (draft.phoneNoRec.isEmpty()) missing.add(L.t("• Telefony bez nagrania"));
+        if (draft.controlLost == null) missing.add(L.t("• Czy straciłeś kontrolę nad nową mową"));
+        if (draft.feelingId == null) missing.add(L.t("• Samopoczucie dzisiaj"));
         if (!missing.isEmpty()) {
-            new AlertDialog.Builder(a).setTitle("Uzupełnij brakujące pola:")
+            new AlertDialog.Builder(a).setTitle(L.t("Uzupełnij brakujące pola:"))
                     .setMessage(android.text.TextUtils.join("\n", missing)).setPositiveButton("OK", null).show();
             return;
         }
@@ -629,26 +630,26 @@ public class DiaryPage {
         int meditation = draft.jacobson + draft.scan;
         boolean isUpdate = draft.existingId != null && !draft.existingId.isEmpty();
         btn.setEnabled(false);
-        btn.setText("Zapisywanie…");
+        btn.setText(L.t("Zapisywanie…"));
         NsClient.Callback cb = r -> {
             btn.setEnabled(true);
-            btn.setText(isUpdate || (draft.existingId != null && !draft.existingId.isEmpty()) ? "ZAPISZ ZMIANY W DZIENNIKU" : "ZAPISZ WPIS DZIENNIKA");
+            btn.setText(isUpdate || (draft.existingId != null && !draft.existingId.isEmpty()) ? L.t("ZAPISZ ZMIANY W DZIENNIKU") : L.t("ZAPISZ WPIS DZIENNIKA"));
             if (r.ok) {
                 if (!isUpdate) {
                     try { draft.existingId = new JSONObject(r.body).optString("id", ""); } catch (Exception e) { }
                 }
                 sendCopies(notes, comment, subst, meditation);
-                new AlertDialog.Builder(a).setTitle(isUpdate ? "Wpis dziennika zaktualizowany!" : "Zapisano ✓")
-                        .setMessage("Dziękujemy — wpis z dnia " + draft.date + " jest zapisany w NewSpeech.")
+                new AlertDialog.Builder(a).setTitle(isUpdate ? L.t("Wpis dziennika zaktualizowany!") : L.t("Zapisano ✓"))
+                        .setMessage(L.t("Dziękujemy — wpis z dnia ") + draft.date + L.t(" jest zapisany w NewSpeech."))
                         .setPositiveButton("OK", null).show();
             } else if (r.status == 403) {
                 draft.locked = true;
-                new AlertDialog.Builder(a).setMessage("Nie możesz edytować tego wpisu, trener już go sprawdził.").setPositiveButton("OK", null).show();
+                new AlertDialog.Builder(a).setMessage(L.t("Nie możesz edytować tego wpisu, trener już go sprawdził.")).setPositiveButton("OK", null).show();
                 render();
             } else if (r.isAuthError()) {
                 host.onAuthExpired();
             } else {
-                new AlertDialog.Builder(a).setTitle("Błąd zapisu dziennika").setMessage(r.err).setPositiveButton("OK", null).show();
+                new AlertDialog.Builder(a).setTitle(L.t("Błąd zapisu dziennika")).setMessage(r.err).setPositiveButton("OK", null).show();
             }
         };
         try {
@@ -782,7 +783,7 @@ public class DiaryPage {
             int p = (int) (16 * d);
             box.setPadding(p, p / 2, p, p);
             if (list == null || list.length() == 0) {
-                box.addView(Ui.text(a, list == null ? "Nie udało się wczytać historii." : "Brak wcześniejszych wpisów dziennika.", 13f, R.color.pr_muted));
+                box.addView(Ui.text(a, list == null ? L.t("Nie udało się wczytać historii.") : L.t("Brak wcześniejszych wpisów dziennika."), 13f, R.color.pr_muted));
             } else {
                 for (int i = 0; i < list.length(); i++) {
                     JSONObject e = list.optJSONObject(i);
@@ -792,7 +793,7 @@ public class DiaryPage {
                     JSONObject tf = e.optJSONObject("talk_feeling");
                     if (tf != null) feel = name(tf);
                     TextView t = Ui.text(a, e.optString("date", "") + (feel.isEmpty() ? "" : " · " + feel)
-                            + (reviewed ? "  ✓ sprawdzone" : "  ⏳ czeka na ocenę"), 13f, R.color.pr_text);
+                            + (reviewed ? L.t("  ✓ sprawdzone") : L.t("  ⏳ czeka na ocenę")), 13f, R.color.pr_text);
                     t.setTypeface(Typeface.DEFAULT_BOLD);
                     box.addView(t);
                     String n = e.isNull("notes") ? "" : e.optString("notes", "");
@@ -802,7 +803,7 @@ public class DiaryPage {
             }
             android.widget.ScrollView sv = new android.widget.ScrollView(a);
             sv.addView(box);
-            new AlertDialog.Builder(a).setTitle("HISTORIA DZIENNIKA").setView(sv).setPositiveButton("Zamknij", null).show();
+            new AlertDialog.Builder(a).setTitle(L.t("HISTORIA DZIENNIKA")).setView(sv).setPositiveButton(L.t("Zamknij"), null).show();
         });
     }
 }

@@ -28,6 +28,13 @@ public class MapActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         root.setFitsSystemWindows(true);
         web = new WebView(this);
+        // Strona pomocnicza (do wpisania logowania) nie moze byc widoczna — pokazujemy dopiero mape
+        web.setVisibility(android.view.View.INVISIBLE);
+        android.widget.TextView loading = new android.widget.TextView(this);
+        loading.setText("⏳");
+        loading.setTextSize(28f);
+        loading.setGravity(android.view.Gravity.CENTER);
+        root.addView(loading, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
@@ -52,6 +59,14 @@ public class MapActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 // Krok 1: strona z tej samej domeny -> wpisujemy logowanie do localStorage
                 // (map.html czyta token NS z localStorage, tak jak w przegladarce)
+                if (url != null && url.contains("map.html")) {
+                    // Mapa gotowa: czyscimy historie (przycisk Wstecz nie cofnie do strony
+                    // pomocniczej z kodem) i pokazujemy
+                    view.clearHistory();
+                    view.setVisibility(android.view.View.VISIBLE);
+                    loading.setVisibility(android.view.View.GONE);
+                    return;
+                }
                 if (!injected) {
                     injected = true;
                     String js = "try{localStorage.setItem('ns_jwt'," + q(token) + ");"
@@ -71,10 +86,10 @@ public class MapActivity extends Activity {
         return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'";
     }
 
+    // Wstecz = zawsze powrot do aplikacji (bez cofania sie po stronach w WebView)
     @Override
     public void onBackPressed() {
-        if (web != null && web.canGoBack() && web.getUrl() != null && !web.getUrl().endsWith("map.html")) web.goBack();
-        else finish();
+        finish();
     }
 
     @Override

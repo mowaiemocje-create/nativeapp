@@ -78,7 +78,7 @@ public class DescribeSheet {
 
         // ZAMKNIJ bez opisu — NA SAMEJ GORZE (od razu widoczny). Nagranie zostaje w NAGRANIACH
         // jako "bez opisu"; opisac i wyslac mozna je pozniej ("📝 Opisz i wyślij").
-        Button closeBtn = Ui.button(a, newRecording ? "✕ ZAMKNIJ — zapisz bez opisu" : "✕ ZAMKNIJ", R.color.pr_warn, false);
+        Button closeBtn = Ui.button(a, newRecording ? L.t("✕ ZAMKNIJ — zapisz bez opisu") : L.t("✕ ZAMKNIJ"), R.color.pr_warn, false);
         body.addView(closeBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         body.addView(Ui.spacer(a, 12));
 
@@ -93,15 +93,15 @@ public class DescribeSheet {
         }
 
         // IMIE KURSANTA (zapamietywane jak w PWA)
-        body.addView(Ui.label(a, "IMIĘ KURSANTA"));
-        EditText nameInput = input(a, "np. Anna K.");
+        body.addView(Ui.label(a, L.t("IMIĘ KURSANTA")));
+        EditText nameInput = input(a, L.t("np. Anna K."));
         String savedName = m.name != null && !m.name.isEmpty() ? m.name : prefs.getString("student_name", "");
         nameInput.setText(savedName);
         body.addView(nameInput);
         body.addView(Ui.spacer(a, 12));
 
         // KATEGORIA
-        body.addView(Ui.label(a, "KATEGORIA"));
+        body.addView(Ui.label(a, L.t("KATEGORIA")));
         final String[] selCat = {m.cat == null ? "" : m.cat};
         LinearLayout catGrid = new LinearLayout(a);
         catGrid.setOrientation(LinearLayout.VERTICAL);
@@ -111,7 +111,7 @@ public class DescribeSheet {
         body.addView(Ui.spacer(a, 12));
 
         // SYSTEM NOWEJ MOWY (ostatni wybor zapamietany)
-        body.addView(Ui.label(a, "SYSTEM NOWEJ MOWY"));
+        body.addView(Ui.label(a, L.t("SYSTEM NOWEJ MOWY")));
         final String[] selSys = {m.sys != null && !m.sys.isEmpty() ? m.sys : prefs.getString("last_sys", "")};
         LinearLayout sysGrid = new LinearLayout(a);
         sysGrid.setOrientation(LinearLayout.VERTICAL);
@@ -121,7 +121,7 @@ public class DescribeSheet {
         body.addView(Ui.spacer(a, 12));
 
         // LOKALIZACJA GPS
-        body.addView(Ui.label(a, "LOKALIZACJA GPS"));
+        body.addView(Ui.label(a, L.t("LOKALIZACJA GPS")));
         TextView gpsBox = Ui.text(a, "", 11f, R.color.pr_muted);
         gpsBox.setTypeface(Typeface.DEFAULT_BOLD);
         int gp = (int) Ui.dp(a, 10);
@@ -142,14 +142,14 @@ public class DescribeSheet {
         refreshGps.run();
         View.OnClickListener fetchGps = v -> {
             if (!GpsHelper.hasPermission(a)) {
-                showGps(a, gpsBox, null, "❌ Brak zgody na lokalizację — kliknij, aby zezwolić");
+                showGps(a, gpsBox, null, L.t("❌ Brak zgody na lokalizację — kliknij, aby zezwolić"));
                 MainActivity.requestLocationPermission(a);
                 return;
             }
-            showGps(a, gpsBox, null, "⏳ Pobieranie GPS…");
+            showGps(a, gpsBox, null, L.t("⏳ Pobieranie GPS…"));
             GpsHelper.requestFix(a, loc -> {
                 if (loc != null) gps[0] = loc;
-                showGps(a, gpsBox, gps[0], loc == null && gps[0] == null ? "❌ GPS niedostępny — kliknij, aby spróbować ponownie" : null);
+                showGps(a, gpsBox, gps[0], loc == null && gps[0] == null ? L.t("❌ GPS niedostępny — kliknij, aby spróbować ponownie") : null);
             });
         };
         gpsBox.setOnClickListener(fetchGps);
@@ -157,7 +157,7 @@ public class DescribeSheet {
         body.addView(Ui.spacer(a, 12));
 
         // EMOCJE W TEJ SYTUACJI
-        body.addView(Ui.label(a, "EMOCJE W TEJ SYTUACJI"));
+        body.addView(Ui.label(a, L.t("EMOCJE W TEJ SYTUACJI")));
         LinearLayout stars = Ui.row(a);
         final int[] emo = {m.emotion};
         TextView starLbl = Ui.text(a, "—", 11f, R.color.pr_muted);
@@ -177,12 +177,12 @@ public class DescribeSheet {
         body.addView(Ui.spacer(a, 12));
 
         // NOTATKA + ZAPISZ
-        body.addView(Ui.label(a, "NOTATKA"));
+        body.addView(Ui.label(a, L.t("NOTATKA")));
         LinearLayout noteRow = Ui.row(a);
-        EditText noteInput = input(a, "opcjonalnie…");
+        EditText noteInput = input(a, L.t("opcjonalnie…"));
         noteInput.setText(m.note);
         noteRow.addView(noteInput, Ui.weight(1f, Ui.dp(a, 8)));
-        Button save = Ui.button(a, "ZAPISZ ✓", R.color.pr_purple, true);
+        Button save = Ui.button(a, L.t("ZAPISZ ✓"), R.color.pr_purple, true);
         save.setTextColor(Ui.col(a, R.color.pr_bg));
         save.setLetterSpacing(0.1f);
         noteRow.addView(save);
@@ -201,15 +201,15 @@ public class DescribeSheet {
         save.setOnClickListener(v -> {
             String name = nameInput.getText().toString().trim();
             List<String> missing = new ArrayList<>();
-            if (selCat[0].isEmpty()) missing.add("• Kategoria");
+            if (selCat[0].isEmpty()) missing.add(L.t("• Kategoria"));
             if (newRecording) {
-                if (name.isEmpty()) missing.add("• Imię kursanta");
-                if (emo[0] == 0) missing.add("• Emocje (gwiazdki 1-5)");
+                if (name.isEmpty()) missing.add(L.t("• Imię kursanta"));
+                if (emo[0] == 0) missing.add(L.t("• Emocje (gwiazdki 1-5)"));
                 // GPS wymagany jak w PWA — chyba ze uzytkownik nie dal zgody na lokalizacje
-                if (gps[0] == null && GpsHelper.hasPermission(a)) missing.add("• GPS — poczekaj lub kliknij pole GPS");
+                if (gps[0] == null && GpsHelper.hasPermission(a)) missing.add(L.t("• GPS — poczekaj lub kliknij pole GPS"));
             }
             if (!missing.isEmpty()) {
-                new AlertDialog.Builder(a).setTitle("Wymagane")
+                new AlertDialog.Builder(a).setTitle(L.t("Wymagane"))
                         .setMessage(android.text.TextUtils.join("\n", missing))
                         .setPositiveButton("OK", null).show();
                 return;
@@ -254,7 +254,8 @@ public class DescribeSheet {
             }
             final String item = items[i];
             Button b = new Button(c);
-            b.setText(item);
+            b.setText(L.t(item));
+            b.setTag(item);
             b.setAllCaps(false);
             b.setTextSize(12f);
             b.setTypeface(Typeface.DEFAULT_BOLD);
@@ -266,7 +267,7 @@ public class DescribeSheet {
             btns.add(b);
             b.setOnClickListener(v -> {
                 selected[0] = item;
-                for (Button x : btns) styleCat(c, x, x.getText().toString().equals(selected[0]));
+                for (Button x : btns) styleCat(c, x, String.valueOf(x.getTag()).equals(selected[0]));
             });
             styleCat(c, b, item.equals(selected[0]));
             row.addView(b, Ui.weight(1f, (i % 2 == 0) ? Ui.dp(c, 6) : 0));
@@ -292,8 +293,8 @@ public class DescribeSheet {
     private static void showGps(Context c, TextView box, Location loc, String msg) {
         boolean ok = msg == null && loc != null;
         if (msg != null) box.setText(msg);
-        else if (loc != null) box.setText(String.format(Locale.US, "📍 %.5f, %.5f (±%dm)", loc.getLatitude(), loc.getLongitude(), Math.round(loc.getAccuracy())));
-        else box.setText("❌ Brak GPS z czasu nagrywania — kliknij, aby pobrać");
+        else if (loc != null) box.setText(String.format(Locale.US, L.t("📍 %.5f, %.5f (±%dm)"), loc.getLatitude(), loc.getLongitude(), Math.round(loc.getAccuracy())));
+        else box.setText(L.t("❌ Brak GPS z czasu nagrywania — kliknij, aby pobrać"));
         box.setTextColor(Ui.col(c, ok ? R.color.pr_text : (msg != null && msg.startsWith("⏳") ? R.color.pr_muted : R.color.pr_warn)));
         box.setBackground(Ui.rounded(Ui.col(c, R.color.pr_card), Ui.col(c, ok ? R.color.pr_border : R.color.pr_warn), Ui.dp(c, 1), Ui.dp(c, 8)));
     }

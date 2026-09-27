@@ -94,7 +94,7 @@ public class NsClient {
         NET.execute(() -> {
             Result r;
             try { r = job.call(); }
-            catch (Exception e) { r = new Result(); r.ok = false; r.status = 0; r.err = "Brak połączenia z serwerem NewSpeech"; }
+            catch (Exception e) { r = new Result(); r.ok = false; r.status = 0; r.err = L.t("Brak połączenia z serwerem NewSpeech"); }
             final Result fr = r;
             MAIN.post(() -> cb.done(fr));
         });
@@ -135,7 +135,7 @@ public class NsClient {
         if (!r.ok) {
             String msg = null;
             try { msg = new JSONObject(r.body).optString("message", null); } catch (Exception e) { }
-            r.err = (msg != null && !msg.isEmpty()) ? msg : ("Błąd " + r.status);
+            r.err = (msg != null && !msg.isEmpty()) ? msg : (L.t("Błąd ") + r.status);
         }
         return r;
     }
@@ -157,7 +157,7 @@ public class NsClient {
                 if (tok.isEmpty()) tok = d.optString("token", "");
                 if (tok.isEmpty()) tok = d.optString("jwt", "");
                 if (tok.isEmpty() && d.optJSONObject("data") != null) tok = d.optJSONObject("data").optString("auth_token", "");
-                if (tok.isEmpty()) { r.ok = false; r.err = "Serwer nie zwrócił tokenu logowania"; return r; }
+                if (tok.isEmpty()) { r.ok = false; r.err = L.t("Serwer nie zwrócił tokenu logowania"); return r; }
                 r.token = tok;
                 String em = d.optString("email", "");
                 if (em.isEmpty() && d.optJSONObject("user") != null) em = d.optJSONObject("user").optString("email", "");
@@ -166,7 +166,7 @@ public class NsClient {
                 if (id.isEmpty() && d.optJSONObject("user") != null) id = d.optJSONObject("user").optString("id", "");
                 r.userId = id;
             } else if (r.status == 401 || r.status == 422 || r.status == 400) {
-                r.err = "Nieprawidłowy email lub hasło";
+                r.err = L.t("Nieprawidłowy email lub hasło");
             }
             return r;
         }, cb);
@@ -240,10 +240,10 @@ public class NsClient {
                 int st = c.getResponseCode();
                 String body = readBody(c);
                 if (st == 401 || st == 403) err = "AUTH";
-                else if (st < 200 || st >= 300) err = "Błąd " + st;
+                else if (st < 200 || st >= 300) err = L.t("Błąd ") + st;
                 else {
                     JSONObject d = new JSONObject(body);
-                    if (!d.optBoolean("ok", false)) err = d.optString("error", "Błąd serwera");
+                    if (!d.optBoolean("ok", false)) err = d.optString("error", L.t("Błąd serwera"));
                     JSONArray arr = d.optJSONArray("entries");
                     if (arr != null) {
                         for (int i = 0; i < arr.length(); i++) {
@@ -272,7 +272,7 @@ public class NsClient {
                     }
                 }
             } catch (Exception e) {
-                err = "Brak połączenia z serwerem";
+                err = L.t("Brak połączenia z serwerem");
             }
             final String fErr = err;
             MAIN.post(() -> cb.done(list, fErr));
@@ -312,20 +312,95 @@ public class NsClient {
     }
 
     // Wyslanie formularza (np. Google Forms) — "wyslij i zapomnij", bledy ignorowane.
-    public static void postForm(String url, String body) {
-        NET.execute(() -> {
-            try {
-                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                c.setRequestMethod("POST");
-                c.setConnectTimeout(15000);
-                c.setReadTimeout(20000);
-                c.setDoOutput(true);
-                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-                try (OutputStream os = c.getOutputStream()) { os.write(body.getBytes(StandardCharsets.UTF_8)); }
-                c.getResponseCode();
-                c.disconnect();
-            } catch (Exception e) { /* ignorowane */ }
+    // ── GOOGLE FORMS (kwestionariusz nagrania + dziennik) ──
+    // Wlasny watek (nie czeka za dlugimi wysylkami nagran), naglowki jak przegladarka,
+    // sprawdzenie kodu odpowiedzi, a przy bledzie / braku internetu — kolejka zapisana w
+    // telefonie i ponowienie przy nastepnym uruchomieniu lub nastepnej wysylce (jak w PWA).
+    private static final ExecutorService GF_NET = Executors.newSingleThreadExecutor();
+    private static android.content.Context gfCtx;
+    public interface FormCallback { void done(boolean ok, String info); }
+
+    public static void initForms(android.content.Context c) {
+        gfCtx = c.getApplicationContext();
+        flushFormQueue();
+    }
+
+    public static void postForm(String url, String body) { postForm(url, body, null); }
+
+    public static void postForm(String url, String body, FormCallback cb) {
+        GF_NET.execute(() -> {
+            String info = sendFormNow(url, body);
+            boolean ok = info == null;
+            if (ok) flushQueueInline();
+            else enqueueForm(url, body);
+            if (cb != null) MAIN.post(() -> cb.done(ok, ok ? "" : info));
         });
+    }
+
+    // null = wyslano; inaczej opis bledu
+    private static String sendFormNow(String url, String body) {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setRequestMethod("POST");
+            c.setInstanceFollowRedirects(true);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(20000);
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8");
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36");
+            c.setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*");
+            c.setRequestProperty("Origin", "https://docs.google.com");
+            c.setRequestProperty("Referer", url.replace("/formResponse", "/viewform"));
+            byte[] data = body.getBytes(StandardCharsets.UTF_8);
+            c.setFixedLengthStreamingMode(data.length);
+            try (OutputStream os = c.getOutputStream()) { os.write(data); }
+            int st = c.getResponseCode();
+            try { readBody(c); } catch (Exception e) { }
+            if (st >= 200 && st < 400) return null;
+            return "HTTP " + st;
+        } catch (Exception e) {
+            return e.getClass().getSimpleName();
+        } finally {
+            if (c != null) try { c.disconnect(); } catch (Exception e) { }
+        }
+    }
+
+    private static synchronized void enqueueForm(String url, String body) {
+        if (gfCtx == null) return;
+        try {
+            android.content.SharedPreferences p = gfCtx.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+            JSONArray q = new JSONArray(p.getString("gf_queue", "[]"));
+            JSONObject o = new JSONObject();
+            o.put("u", url); o.put("b", body);
+            q.put(o);
+            while (q.length() > 200) q.remove(0);
+            p.edit().putString("gf_queue", q.toString()).apply();
+        } catch (Exception e) { }
+    }
+
+    public static void flushFormQueue() { GF_NET.execute(NsClient::flushQueueInline); }
+
+    private static synchronized void flushQueueInline() {
+        if (gfCtx == null) return;
+        try {
+            android.content.SharedPreferences p = gfCtx.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+            JSONArray q = new JSONArray(p.getString("gf_queue", "[]"));
+            if (q.length() == 0) return;
+            JSONArray left = new JSONArray();
+            for (int i = 0; i < q.length(); i++) {
+                JSONObject o = q.optJSONObject(i);
+                if (o == null) continue;
+                if (left.length() > 0 || sendFormNow(o.optString("u", ""), o.optString("b", "")) != null) left.put(o);
+            }
+            p.edit().putString("gf_queue", left.toString()).apply();
+        } catch (Exception e) { }
+    }
+
+    public static int formQueueSize() {
+        if (gfCtx == null) return 0;
+        try { return new JSONArray(gfCtx.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getString("gf_queue", "[]")).length(); }
+        catch (Exception e) { return 0; }
     }
 
     public static String enc(String s) {
