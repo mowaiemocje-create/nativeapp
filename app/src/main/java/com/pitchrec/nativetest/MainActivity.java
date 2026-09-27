@@ -1605,8 +1605,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // 1) nagranie z tego telefonu (zapamietane ID z NS), 2) nazwa pliku w NS — PitchRec
     // zapisuje system w nazwie (np. "Sklepy_3-maj-2026-(14h-5m-2s)-U1K-stres.mp3").
     private static final java.util.Map<String, String> FIX_SYS_CACHE = new java.util.HashMap<>();
+    // System mowy w nazwie pliku NS, po godzinie nagrania, np.:
+    //   "..._20h-15m-29s_-FIX-luz_GPS..."  albo  "...20h 15m 29s)-FIX..." (tez zakodowane w URL)
     private static final java.util.regex.Pattern SYS_IN_NAME = java.util.regex.Pattern.compile(
-            "s(?:\\)|%29|\\\\u0029)-(Basic|U1K|U1|FIX|K1|K2|Full)(?=[^A-Za-z0-9]|$)");
+            "\\d{1,2}s(?:\\)|%29|\\\\u0029|_|%5F|\\s|%20|\\+)*-(Basic|U1K|U1|FIX|K1|K2|Full)(?=[^A-Za-z0-9]|$)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final String[] SYS_CANON = {"Basic", "U1K", "U1", "FIX", "K1", "K2", "Full"};
+
+    static String sysFromName(String s) {
+        if (s == null) return "";
+        java.util.regex.Matcher m = SYS_IN_NAME.matcher(s);
+        if (!m.find()) return "";
+        for (String c : SYS_CANON) if (c.equalsIgnoreCase(m.group(1))) return c;
+        return "";
+    }
 
     public interface StrCb { void done(String s); }
 
@@ -1649,8 +1661,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             r.status = status; r.body = rbody; r.ok = status >= 200 && status < 300;
             String sys = "";
             if (r.ok && r.body != null) {
-                java.util.regex.Matcher mm = SYS_IN_NAME.matcher(r.body);
-                if (mm.find()) sys = mm.group(1);
+                sys = sysFromName(r.body);
             }
             if (!sys.isEmpty() || !r.ok) {
                 if (r.ok) FIX_SYS_CACHE.put(recordId, sys);
