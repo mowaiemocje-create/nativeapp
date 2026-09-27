@@ -1480,6 +1480,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         redrawHandler.postDelayed(fixAutoRefresh, 60000);
     }
 
+    private static String fixDayKey(NsClient.FixEntry fe) {
+        if (fe.recordDate != null && fe.recordDate.length() >= 10) return fe.recordDate.substring(0, 10);
+        long t = fe.recordedAt > 0 ? fe.recordedAt : fe.reviewedAt;
+        if (t <= 0) return "";
+        java.text.SimpleDateFormat k = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        k.setTimeZone(java.util.TimeZone.getTimeZone("Europe/Warsaw"));
+        return k.format(new java.util.Date(t * 1000L));
+    }
+
     private void fillFixList(android.widget.LinearLayout c, java.util.List<NsClient.FixEntry> list) {
         float d = getResources().getDisplayMetrics().density;
         if (list.isEmpty()) {
@@ -1488,6 +1497,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             c.addView(e);
             return;
         }
+        // sortowanie po record_date (dzien w NS), od najstarszych; ten sam dzien — po ocenie
+        list = new java.util.ArrayList<>(list);
+        java.util.Collections.sort(list, (x, y) -> {
+            int k = fixDayKey(x).compareTo(fixDayKey(y));
+            return k != 0 ? k : Long.compare(x.reviewedAt, y.reviewedAt);
+        });
         int shown = Math.min(fixShowCount, list.size());
         if (list.size() > 10) {
             TextView info = Ui.text(this, L.t("Pokazuję ") + shown + " z " + list.size() + L.t(" — od najstarszych"), 11f, R.color.pr_muted);
@@ -1509,22 +1524,24 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pill.setBackground(Ui.rounded((getResources().getColor(R.color.pr_warn) & 0x00FFFFFF) | 0x26000000, 0, 0, 6 * d));
             top.addView(pill);
             card.addView(top);
-            // Daty (backend: recorded_at = aktualna wersja nagrania, first_sent_at = pierwsze
-            // wyslanie, reviewed_at = ocena trenera). Czas polski.
+            // Daty: glowna = record_date (dzien, pod ktorym nagranie widac w NS), pod spodem ocena;
+            // gdy kursant podmienil nagranie innego dnia (recorded_at) — dopisek. Czas polski.
             java.util.TimeZone pl = java.util.TimeZone.getTimeZone("Europe/Warsaw");
             java.text.SimpleDateFormat dHm = new java.text.SimpleDateFormat("dd.MM, HH:mm", Locale.US);
             java.text.SimpleDateFormat dDm = new java.text.SimpleDateFormat("dd.MM", Locale.US);
-            dHm.setTimeZone(pl); dDm.setTimeZone(pl);
-            if (fe.recordedAt > 0) {
-                TextView rec1 = Ui.text(this, "🎙 " + L.t("Nagrane") + ": " + dHm.format(new java.util.Date(fe.recordedAt * 1000L)), 13f, R.color.pr_text);
+            java.text.SimpleDateFormat dKey = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            dHm.setTimeZone(pl); dDm.setTimeZone(pl); dKey.setTimeZone(pl);
+            String rd = fe.recordDate != null && fe.recordDate.length() >= 10 ? fe.recordDate.substring(0, 10) : "";
+            if (!rd.isEmpty()) {
+                TextView rec1 = Ui.text(this, "📅 " + rd.substring(8, 10) + "." + rd.substring(5, 7), 13f, R.color.pr_text);
                 rec1.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
                 rec1.setPadding(0, (int) (4 * d), 0, 0);
                 card.addView(rec1);
                 StringBuilder sub = new StringBuilder();
                 if (fe.reviewedAt > 0) sub.append(L.t("Oceniono")).append(": ").append(dDm.format(new java.util.Date(fe.reviewedAt * 1000L)));
-                if (fe.firstSentAt > 0 && Math.abs(fe.firstSentAt - fe.recordedAt) > 60) {
+                if (fe.recordedAt > 0 && !rd.equals(dKey.format(new java.util.Date(fe.recordedAt * 1000L)))) {
                     if (sub.length() > 0) sub.append("  ·  ");
-                    sub.append(L.t("pierwsza wersja")).append(": ").append(dDm.format(new java.util.Date(fe.firstSentAt * 1000L)));
+                    sub.append(L.t("podmienione przez kursanta")).append(" ").append(dHm.format(new java.util.Date(fe.recordedAt * 1000L)));
                 }
                 if (sub.length() > 0) {
                     TextView rec2 = Ui.text(this, sub.toString(), 10f, R.color.pr_muted);
