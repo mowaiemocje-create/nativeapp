@@ -47,6 +47,8 @@ public class LiveAudioData {
     public static volatile float gridLineWidthDp = 1f; // wspolna grubosc linii poziomych i pionowych (0.5-10)
     // AUTO 0 dB — po Stop nagranie jest podglasniane do 0 dB (szczyt -0,1 dBFS)
     public static volatile boolean autoNormalize = true;
+    // Dodatkowe wzmocnienie po zapisie (×1 = tylko 0 dB, ×2…×10 z miekkim limiterem)
+    public static volatile int outputBoost = 1;
     public static volatile int gridLineColor = 0x4DFFFFFF; // ARGB, domyslnie subtelny
     public static volatile int dawBackgroundColor = 0xFF050510; // ARGB, tlo wykresu DAW
     public static volatile int waveColor = 0xFFFFB23C; // ARGB, kolor fali (obwiedni amplitudy)

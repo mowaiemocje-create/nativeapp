@@ -341,6 +341,7 @@ public class BackgroundRecorderService extends Service {
                 // AUTO 0 dB: ciche nagranie podglasniamy tak, zeby najglosniejsza probka
                 // trafila w 0 dB (-0,1 dBFS). Czysto liniowo = bez znieksztalcen.
                 if (LiveAudioData.autoNormalize) normalizeWavInPlace(outputFile);
+                if (LiveAudioData.outputBoost > 1) boostWavInPlace(outputFile, LiveAudioData.outputBoost);
                 File finalFile = outputFile;
                 String mime = "audio/wav";
                 if ("mp3".equals(outputFormat)) {
@@ -441,6 +442,35 @@ public class BackgroundRecorderService extends Service {
                 raf.seek(pos);
             }
         } catch (Exception e) { /* zostaje oryginalne nagranie */ }
+    }
+
+    // Glosnosc wynikowa ×N: wzmocnienie liniowe, a powyzej 60% skali miekki limiter (tanh),
+    // wiec glosne miejsca sa lagodnie sciskane zamiast przesterowane "trzaski".
+    private void boostWavInPlace(File wavFile, int boost) {
+        final double T = 0.6, K = 1.0 - T, CEIL = 0.985;
+        try (RandomAccessFile raf = new RandomAccessFile(wavFile, "rw")) {
+            if (raf.length() <= 44) return;
+            byte[] buf = new byte[65536];
+            long pos = 44;
+            raf.seek(pos);
+            int read;
+            while ((read = raf.read(buf)) > 0) {
+                int even = read & ~1;
+                if (even == 0) break;
+                for (int i = 0; i < even; i += 2) {
+                    int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                    double x = v / 32768.0 * boost, ax = Math.abs(x);
+                    double y = ax <= T ? ax : T + K * Math.tanh((ax - T) / K);
+                    long nv = Math.round(Math.signum(x) * Math.min(y, 1.0) * CEIL * 32767);
+                    buf[i] = (byte) (nv & 0xff);
+                    buf[i + 1] = (byte) ((nv >> 8) & 0xff);
+                }
+                raf.seek(pos);
+                raf.write(buf, 0, even);
+                pos += even;
+                raf.seek(pos);
+            }
+        } catch (Exception e) { /* zostaje nagranie bez dodatkowego wzmocnienia */ }
     }
 
     private void cleanupAudioResources() {

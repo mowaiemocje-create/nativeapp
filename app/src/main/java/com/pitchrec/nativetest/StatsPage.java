@@ -82,6 +82,9 @@ public class StatsPage {
         root.addView(review);
         LinearLayout cats = Ui.card(a);
         root.addView(cats);
+        LinearLayout special = Ui.card(a);
+        root.addView(special);
+        fillSpecial(special);
         LinearLayout miles = Ui.card(a);
         root.addView(miles);
         root.addView(Ui.spacer(a, 20));
@@ -121,6 +124,68 @@ public class StatsPage {
                 if (ov != null) fillReview(review, ov.optInt("reviewed", 0), ov.optInt("correct", 0));
             } catch (Exception e) { /* zostaja dane lokalne */ }
         });
+    }
+
+    // ═════════════ ZADANIA SPECJALNE ═════════════
+    // Wykonane (nagranie Special z wybranym zadaniem) sa podswietlone; najpierw zadania dla
+    // systemu kursanta, reszta pod "pokaz wszystkie".
+    private boolean specialAll = false;
+
+    private void fillSpecial(LinearLayout card) {
+        card.removeAllViews();
+        Map<String, Long> done = SpecialTasks.done(a);
+        String mySys = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getString("last_sys", "");
+        LinearLayout head = Ui.row(a);
+        head.addView(Ui.label(a, "🎬 " + L.t("ZADANIA SPECJALNE")), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView cnt = Ui.text(a, L.t("wykonane") + " " + done.size() + "/" + SpecialTasks.ALL.length, 12f, R.color.pr_accent);
+        cnt.setTypeface(Typeface.DEFAULT_BOLD);
+        head.addView(cnt);
+        card.addView(head);
+        TextView info = Ui.text(a, L.t("Przy opisie nagrania „Special” wybierz zadanie — tu podświetli się jako wykonane."), 11f, R.color.pr_muted);
+        info.setPadding(0, (int) (2 * d), 0, (int) (8 * d));
+        card.addView(info);
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("dd.MM.yyyy", Locale.getDefault());
+        int hidden = 0;
+        List<SpecialTasks.Task> order = new ArrayList<>();
+        for (SpecialTasks.Task t : SpecialTasks.ALL) if (done.containsKey(t.name)) order.add(t);
+        for (SpecialTasks.Task t : SpecialTasks.ALL) if (!done.containsKey(t.name) && t.forSystem(mySys)) order.add(t);
+        for (SpecialTasks.Task t : SpecialTasks.ALL) if (!done.containsKey(t.name) && !t.forSystem(mySys)) order.add(t);
+        for (SpecialTasks.Task t : order) {
+            boolean isDone = done.containsKey(t.name);
+            if (!isDone && !t.forSystem(mySys) && !specialAll) { hidden++; continue; }
+            LinearLayout row = Ui.row(a);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            int pd = (int) (8 * d);
+            row.setPadding(pd, pd, pd, pd);
+            row.setBackground(Ui.rounded(isDone ? 0x2600E5A0 : 0x00000000, isDone ? 0xFF00E5A0 : 0x22FFFFFF, isDone ? 2 * d : d, 8 * d));
+            TextView ic = Ui.text(a, t.icon, 18f, R.color.pr_text);
+            ic.setGravity(Gravity.CENTER);
+            ic.setBackground(Ui.rounded(t.color, 0, 0, 8 * d));
+            ic.setAlpha(isDone ? 1f : 0.6f);
+            row.addView(ic, new LinearLayout.LayoutParams((int) (34 * d), (int) (34 * d)));
+            LinearLayout col = new LinearLayout(a);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding((int) (10 * d), 0, 0, 0);
+            TextView nm = Ui.text(a, t.shortName(), 13f, isDone ? R.color.pr_text : R.color.pr_muted);
+            if (isDone) nm.setTypeface(Typeface.DEFAULT_BOLD);
+            col.addView(nm);
+            String sub = isDone ? "✓ " + L.t("wykonane") + " " + df.format(new java.util.Date(done.get(t.name)))
+                    : (t.systems.length == 0 ? L.t("każdy system") : android.text.TextUtils.join(" · ", t.systems));
+            TextView sb = Ui.text(a, sub, 10f, isDone ? R.color.pr_accent : R.color.pr_muted);
+            col.addView(sb);
+            row.addView(col, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            final String full = t.name;
+            row.setOnClickListener(v -> new android.app.AlertDialog.Builder(a).setTitle(t.icon + " " + t.shortName()).setMessage(full).setPositiveButton("OK", null).show());
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = (int) (5 * d);
+            card.addView(row, lp);
+        }
+        if (hidden > 0 || specialAll) {
+            TextView more = Ui.text(a, specialAll ? "▲ " + L.t("pokaż tylko dla mojego systemu") : "▼ " + L.f("pokaż wszystkie (+{0} dla innych systemów)", hidden), 12f, R.color.pr_accent);
+            more.setPadding(0, (int) (6 * d), 0, (int) (2 * d));
+            more.setOnClickListener(v -> { specialAll = !specialAll; fillSpecial(card); });
+            card.addView(more);
+        }
     }
 
     // ═════════════ HARMONOGRAM ═════════════

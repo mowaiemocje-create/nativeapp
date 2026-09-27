@@ -106,8 +106,50 @@ public class DescribeSheet {
         LinearLayout catGrid = new LinearLayout(a);
         catGrid.setOrientation(LinearLayout.VERTICAL);
         List<Button> catBtns = new ArrayList<>();
-        buildGrid(a, catGrid, NsClient.CATEGORIES, catBtns, selCat);
         body.addView(catGrid);
+
+        // ZADANIE SPECJALNE — tylko dla kategorii Special: kursant wybiera, ktore zadanie wykonal
+        final String[] selSpecial = {m.special == null ? "" : m.special};
+        LinearLayout specialBox = new LinearLayout(a);
+        specialBox.setOrientation(LinearLayout.VERTICAL);
+        body.addView(specialBox);
+        final Runnable[] buildSpecial = new Runnable[1];
+        buildSpecial[0] = () -> {
+            specialBox.removeAllViews();
+            if (!"Special".equals(selCat[0])) return;
+            specialBox.addView(Ui.spacer(a, 8));
+            specialBox.addView(Ui.label(a, "🎬 " + L.t("ZADANIE SPECJALNE — które wykonujesz?")));
+            java.util.Map<String, Long> done = SpecialTasks.done(a);
+            String mySys = prefs.getString("last_sys", "");
+            List<SpecialTasks.Task> order = new ArrayList<>();
+            for (SpecialTasks.Task tk : SpecialTasks.ALL) if (tk.forSystem(mySys)) order.add(tk);
+            for (SpecialTasks.Task tk : SpecialTasks.ALL) if (!tk.forSystem(mySys)) order.add(tk);
+            for (SpecialTasks.Task tk : order) {
+                boolean on = tk.name.equals(selSpecial[0]);
+                LinearLayout row = Ui.row(a);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                int pd = (int) Ui.dp(a, 8);
+                row.setPadding(pd, pd, pd, pd);
+                row.setBackground(Ui.rounded(on ? 0x33E8820C : 0x00000000, on ? 0xFFE8820C : 0x33FFFFFF, Ui.dp(a, on ? 2 : 1), Ui.dp(a, 8)));
+                TextView ic = Ui.text(a, tk.icon, 18f, R.color.pr_text);
+                ic.setGravity(android.view.Gravity.CENTER);
+                ic.setBackground(Ui.rounded(tk.color, 0, 0, Ui.dp(a, 8)));
+                int icS = (int) Ui.dp(a, 36);
+                row.addView(ic, new LinearLayout.LayoutParams(icS, icS));
+                String sub = done.containsKey(tk.name) ? "  ✓ " + L.t("wykonane") : (tk.forSystem(mySys) ? "" : "  · " + android.text.TextUtils.join("/", tk.systems));
+                TextView tx = Ui.text(a, tk.shortName() + sub, 12f, R.color.pr_text);
+                if (on) tx.setTypeface(Typeface.DEFAULT_BOLD);
+                tx.setAlpha(tk.forSystem(mySys) || on ? 1f : 0.55f);
+                tx.setPadding((int) Ui.dp(a, 10), 0, 0, 0);
+                row.addView(tx, Ui.weight(1f, 0));
+                row.setOnClickListener(v -> { selSpecial[0] = tk.name.equals(selSpecial[0]) ? "" : tk.name; buildSpecial[0].run(); });
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                rlp.bottomMargin = (int) Ui.dp(a, 5);
+                specialBox.addView(row, rlp);
+            }
+        };
+        buildGrid(a, catGrid, NsClient.CATEGORIES, catBtns, selCat, () -> buildSpecial[0].run());
+        buildSpecial[0].run();
         body.addView(Ui.spacer(a, 12));
 
         // SYSTEM NOWEJ MOWY (ostatni wybor zapamietany)
@@ -240,6 +282,9 @@ public class DescribeSheet {
             m.sys = !lockedSys.isEmpty() ? lockedSys : selSys[0];
             m.emotion = emo[0];
             m.note = noteInput.getText().toString().trim();
+            m.special = "Special".equals(selCat[0]) ? selSpecial[0] : "";
+            SpecialTasks.Task st = SpecialTasks.find(m.special);
+            if (st != null && !m.note.contains(st.shortName())) m.note = "🎬 " + st.shortName() + (m.note.isEmpty() ? "" : " — " + m.note);
             if (gps[0] != null) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); }
             prefs.edit().putString("student_name", name).putString("last_sys", selSys[0]).apply();
             dismiss.run();
@@ -265,6 +310,10 @@ public class DescribeSheet {
 
     // Siatka 2 kolumny jak .cat-grid — pomaranczowe przyciski, wybrany = bialy z pomaranczowym napisem
     private static void buildGrid(Context c, LinearLayout grid, String[] items, List<Button> btns, String[] selected) {
+        buildGrid(c, grid, items, btns, selected, null);
+    }
+
+    private static void buildGrid(Context c, LinearLayout grid, String[] items, List<Button> btns, String[] selected, Runnable onChange) {
         LinearLayout row = null;
         for (int i = 0; i < items.length; i++) {
             if (i % 2 == 0) {
@@ -289,6 +338,7 @@ public class DescribeSheet {
             b.setOnClickListener(v -> {
                 selected[0] = item;
                 for (Button x : btns) styleCat(c, x, String.valueOf(x.getTag()).equals(selected[0]));
+                if (onChange != null) onChange.run();
             });
             styleCat(c, b, item.equals(selected[0]));
             row.addView(b, Ui.weight(1f, (i % 2 == 0) ? Ui.dp(c, 6) : 0));

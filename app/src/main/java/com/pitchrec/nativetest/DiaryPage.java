@@ -177,6 +177,7 @@ public class DiaryPage {
                     JSONObject e = list.optJSONObject(i);
                     if (e == null || !draft.date.equals(e.optString("date", ""))) continue;
                     draft.existingId = e.optString("id", "");
+                    ReminderReceiver.markDiary(a, draft.date);
                     draft.locked = !e.isNull("reviewed_at") && !e.optString("reviewed_at", "").isEmpty();
                     draft.jacobson = e.optInt("meditation_count", 0);
                     draft.scan = 0;
@@ -662,6 +663,7 @@ public class DiaryPage {
                 if (!isUpdate) {
                     try { draft.existingId = new JSONObject(r.body).optString("id", ""); } catch (Exception e) { }
                 }
+                ReminderReceiver.markDiary(a, draft.date);
                 sendCopies(notes, comment, subst, meditation);
                 new AlertDialog.Builder(a).setTitle(isUpdate ? L.t("Wpis dziennika zaktualizowany!") : L.t("Zapisano ✓"))
                         .setMessage(L.t("Dziękujemy — wpis z dnia ") + draft.date + L.t(" jest zapisany w NewSpeech."))

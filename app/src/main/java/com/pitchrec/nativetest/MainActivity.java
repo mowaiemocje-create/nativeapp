@@ -233,6 +233,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         setupBottomNav();
         showPage("daw");
+        // Przypomnienie o 20:00 (nagranie + dziennik) — domyslnie wlaczone
+        ReminderReceiver.schedule(this);
+        askNotificationPermissionOnce();
+        openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
         statusText.setOnClickListener(v -> {
             String[] fx = loadFixTarget();
@@ -403,6 +407,29 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             TextView lb = findViewById(navLabels[i]);
             if (lb != null) lb.setText(L.t(navTexts[i]));
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        openPageFromIntent(intent);
+    }
+
+    // Powiadomienie "przypomnienie" otwiera DAW (brak nagrania) albo dziennik
+    private void openPageFromIntent(Intent in) {
+        if (in == null) return;
+        String pg = in.getStringExtra("open_page");
+        if (pg == null) return;
+        in.removeExtra("open_page");
+        if ("diary".equals(pg) && isLoggedIn()) showPage("diary"); else showPage("daw");
+    }
+
+    private void askNotificationPermissionOnce() {
+        if (android.os.Build.VERSION.SDK_INT < 33 || !ReminderReceiver.enabled(this)) return;
+        if (ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) return;
+        if (prefs().getBoolean("notif_asked", false)) return;
+        prefs().edit().putBoolean("notif_asked", true).apply();
+        ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
     }
 
     private void showPage(String page) {
@@ -975,6 +1002,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.dawBackgroundColor = p.getInt("daw_bg", LiveAudioData.dawBackgroundColor);
         LiveAudioData.waveColor = p.getInt("wave_color", LiveAudioData.waveColor);
         LiveAudioData.autoNormalize = p.getBoolean("auto_normalize", true);
+        LiveAudioData.outputBoost = p.getInt("out_boost", 1);
         LiveAudioData.noiseGateEnabled = p.getBoolean("noise_gate", LiveAudioData.noiseGateEnabled);
         keepScreenOnEnabled = p.getBoolean("keep_screen_on", true); // domyslnie ekran NIE gasnie
         selectedFormat = p.getString("format", "mp3"); // domyslnie MP3
@@ -989,6 +1017,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         applyKeepScreenOnSetting();
     }
 
+    private static String boostLabel(int b) {
+        return "🔊 " + L.t("Głośność wynikowa") + ": " + (b <= 1 ? "0 dB" : "×" + b + "  (+" + Math.round(20 * Math.log10(b)) + " dB)");
+    }
+
     private void saveDawSettings() {
         getSharedPreferences("app_settings", MODE_PRIVATE).edit()
                 .putFloat("pitch_width", LiveAudioData.pitchLineWidthDp)
@@ -998,6 +1030,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putInt("daw_bg", LiveAudioData.dawBackgroundColor)
                 .putInt("wave_color", LiveAudioData.waveColor)
                 .putBoolean("auto_normalize", LiveAudioData.autoNormalize)
+                .putInt("out_boost", LiveAudioData.outputBoost)
                 .putBoolean("noise_gate", LiveAudioData.noiseGateEnabled)
                 .putBoolean("keep_screen_on", keepScreenOnEnabled)
                 .putString("format", selectedFormat)
@@ -1062,6 +1095,33 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         rec.addView(divider());
         rec.addView(toggleRow("🔊 " + L.t("Automatyczna głośność (0 dB)"), LiveAudioData.autoNormalize, on -> { LiveAudioData.autoNormalize = on; saveDawSettings(); }));
         rec.addView(hint(LiveAudioData.autoNormalize ? L.t("Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)") : L.t("Wyłączone — nagranie zostaje bez zmian")));
+        // GLOSNOSC WYNIKOWA: 0 dB albo dodatkowe wzmocnienie ×2…×10 (z miekkim limiterem)
+        final int[] boosts = {1, 2, 4, 6, 8, 10};
+        int bi = 0;
+        for (int i = 0; i < boosts.length; i++) if (boosts[i] == LiveAudioData.outputBoost) bi = i;
+        TextView boostLbl = Ui.text(this, boostLabel(LiveAudioData.outputBoost), 13f, R.color.pr_text);
+        boostLbl.setPadding(0, (int) (8 * d), 0, 0);
+        rec.addView(boostLbl);
+        SliderView boostSlider = new SliderView(this);
+        boostSlider.setLayoutParams(new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * d)));
+        boostSlider.setValue(bi / 5f);
+        boostSlider.setOnValueChangeListener(v -> {
+            int k = Math.max(0, Math.min(5, Math.round(v * 5)));
+            if (boosts[k] != LiveAudioData.outputBoost) {
+                LiveAudioData.outputBoost = boosts[k];
+                boostLbl.setText(boostLabel(boosts[k]));
+                saveDawSettings();
+            }
+        });
+        rec.addView(boostSlider);
+        android.widget.LinearLayout ticks = Ui.row(this);
+        for (int i = 0; i < boosts.length; i++) {
+            TextView tk = Ui.text(this, i == 0 ? "0 dB" : "×" + boosts[i], 10f, R.color.pr_muted);
+            tk.setGravity(i == 0 ? android.view.Gravity.START : i == boosts.length - 1 ? android.view.Gravity.END : android.view.Gravity.CENTER);
+            ticks.addView(tk, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        rec.addView(ticks);
+        rec.addView(hint(L.t("Gdy nagranie po zapisie jest za ciche — podgłośnij ×2…×10. Najgłośniejsze miejsca są łagodnie ograniczane (bez trzasków).")));
         rec.addView(divider());
         rec.addView(toggleRow("🔆 " + L.t("Ekran nie gaśnie (wyłączony wygaszacz)"), keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
         rec.addView(toggleRow("🎚 " + L.t("Bramka szumów (tłumi cichy szum tła)"), LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); }));
@@ -1071,6 +1131,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         gpsRow.setOnClickListener(v -> requestLocationPermission(this));
         rec.addView(gpsRow);
         c.addView(rec);
+
+        // 3a) Przypomnienia
+        c.addView(sectionHeader(L.t("PRZYPOMNIENIA")));
+        android.widget.LinearLayout rem = Ui.card(this);
+        rem.addView(toggleRow("🔔 " + L.t("Przypomnienie o 20:00"), ReminderReceiver.enabled(this), on -> {
+            prefs().edit().putBoolean("reminder_on", on).apply();
+            ReminderReceiver.schedule(this);
+            if (on && android.os.Build.VERSION.SDK_INT >= 33
+                    && ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED)
+                ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
+        }));
+        rem.addView(hint(L.t("Jeśli do 20:00 nie wgrasz nagrania do NewSpeech albo nie napiszesz dziennika, telefon Ci o tym przypomni.")));
+        c.addView(rem);
 
         // 3b) Podpowiedzi na wykresie i w statystykach
         c.addView(sectionHeader(L.t("PODPOWIEDZI")));

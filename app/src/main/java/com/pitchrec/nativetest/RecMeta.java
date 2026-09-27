@@ -24,6 +24,7 @@ public class RecMeta {
     public String nsRecordId = "";
     public String fixRecordId = ""; // nagranie jest POPRAWKA rekordu NS o tym ID (PUT bez limitu)
     public String fixSys = "";      // poprawka MUSI byc w tym samym systemie mowy co oryginal
+    public String special = "";     // zadanie specjalne (kategoria Special) — pelna nazwa z SpecialTasks
 
     public static final String[] EMOTION_LABELS = {"", "luz", "komfortowo", "neutralnie", "niekomfortowo", "stres"};
     public static final String[] SYS_LEVELS = {"Basic", "U1", "U1K", "FIX", "K1", "K2", "Full"};
@@ -51,6 +52,7 @@ public class RecMeta {
                 m.nsRecordId = o.optString("nsId", "");
                 m.fixRecordId = o.optString("fixId", "");
                 m.fixSys = o.optString("fixSys", "");
+                m.special = o.optString("special", "");
             } catch (Exception e) { /* uszkodzony wpis — traktujemy jak brak opisu */ }
         }
         // Zgodnosc: nagrania wyslane przed wprowadzeniem opisow (lista "ns_sent_files")
@@ -75,6 +77,7 @@ public class RecMeta {
             o.put("nsId", nsRecordId);
             o.put("fixId", fixRecordId);
             o.put("fixSys", fixSys);
+            o.put("special", special);
             sp(c).edit().putString(fileName, o.toString()).apply();
         } catch (Exception e) { /* ignorowane */ }
     }
