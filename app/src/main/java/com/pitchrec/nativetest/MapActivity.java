@@ -36,7 +36,7 @@ public class MapActivity extends Activity {
         loading.setGravity(android.view.Gravity.CENTER);
         root.addView(loading, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        // Zawsze widoczny przycisk zamkniecia mapy (prawy gorny rog, pod paskiem mapy)
+        // Zawsze widoczny przycisk zamkniecia mapy (na dole, na srodku)
         android.widget.TextView closeBtn = new android.widget.TextView(this);
         closeBtn.setText("✕");
         closeBtn.setTextSize(18f);
@@ -47,9 +47,9 @@ public class MapActivity extends Activity {
         cbg.setCornerRadius(100f);
         closeBtn.setBackground(cbg);
         float dd = getResources().getDisplayMetrics().density;
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams((int) (44 * dd), (int) (44 * dd), android.view.Gravity.TOP | android.view.Gravity.END);
-        clp.topMargin = (int) (64 * dd);
-        clp.rightMargin = (int) (10 * dd);
+        // na dole, nad legenda mapy — nie zaslania przyciskow na gorze
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams((int) (48 * dd), (int) (48 * dd), android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL);
+        clp.bottomMargin = (int) (64 * dd);
         closeBtn.setOnClickListener(v -> finish());
         root.addView(closeBtn, clp);
         setContentView(root);

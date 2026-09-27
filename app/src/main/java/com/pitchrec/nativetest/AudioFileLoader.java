@@ -69,7 +69,7 @@ public class AudioFileLoader {
         }
         nm.finish(frames * YIN_WINDOW / (double) LiveAudioData.SAMPLE_RATE);
         java.util.List<Norms.Segment> out = new java.util.ArrayList<>();
-        for (Norms.Segment sg : nm.segmentsSnapshot()) if (sg.buf != null && sg.end - sg.start >= 0.5) out.add(sg);
+        for (Norms.Segment sg : nm.segmentsSnapshot()) if (sg.buf != null && sg.fourPhase) out.add(sg);
         return out;
     }
 

@@ -984,6 +984,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.showNorms = p.getBoolean("show_norms", true);
         LiveAudioData.showArrows = p.getBoolean("show_arrows", true);
         LiveAudioData.showTempo = p.getBoolean("show_tempo", true);
+        LiveAudioData.arrowThresholdSt = p.getFloat("arrow_thr_st", 1.5f);
         Norms.load(p);
         applyKeepScreenOnSetting();
     }
@@ -1006,6 +1007,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putBoolean("show_norms", LiveAudioData.showNorms)
                 .putBoolean("show_arrows", LiveAudioData.showArrows)
                 .putBoolean("show_tempo", LiveAudioData.showTempo)
+                .putFloat("arrow_thr_st", LiveAudioData.arrowThresholdSt)
                 .apply();
         if (pitchWaveView != null) pitchWaveView.refreshStyle();
     }
@@ -1076,7 +1078,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
         hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
         hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
-        hints.addView(toggleRow("🗣 " + L.t("Tempo mowy (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
+        if (LiveAudioData.showArrows) {
+            hints.addView(normStepper("   " + L.t("Strzałka od zmiany tonu o"), LiveAudioData.arrowThresholdSt, 0.5f, 6f, 0.5f, "%.1f st", v -> { LiveAudioData.arrowThresholdSt = v; saveDawSettings(); }));
+            hints.addView(hint(L.t("st = półton. Mniejsza zmiana tonu w sylabie nie daje strzałki; im większa zmiana, tym bardziej stroma strzałka.")));
+        }
+        hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
         hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
         c.addView(hints);
@@ -1197,7 +1203,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(pageTitle("🎯 " + L.t("NORMY")));
 
         android.widget.LinearLayout info = Ui.card(this);
-        info.addView(hint(L.t("Każda porcja mowy jest oceniana w 4 fazach: 1) łagodne wejście, 2) narastanie, 3) plateau — utrzymanie, 4) opadanie — wyciszenie. Wynik pojawia się na wykresie nad porcją mowy i na żywo w czasie nagrywania.")));
+        info.addView(hint(L.t("Pierwsza sylaba każdej porcji mowy (sylaba 4-fazowa) jest oceniana w 4 fazach: 1) faza leniwa — cichy start, 2) narastanie, 3) szczyt, 4) opadanie — wyciszenie. Dalsze, zwykłe sylaby nie są oceniane wg faz (liczone są do tempa). Wynik pojawia się na wykresie jako „4F …%” i na żywo w czasie nagrywania.")));
         info.addView(new PhaseDiagram(this));
         c.addView(info);
 
@@ -1313,11 +1319,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 }
                 StringBuilder sc = new StringBuilder();
                 for (int v : res.scoresAfter) { if (sc.length() > 0) sc.append(", "); sc.append(v).append('%'); }
-                String msg = L.f("Znalezione próbki wzorca: {0}", res.samples) + "\n"
-                        + L.f("Wynik próbek wzorca po kalibracji: {0}", sc) + "\n\n"
-                        + String.format(Locale.US, "2 · %s: %.1f s\n3 · %s: %.1f s\n4 · %s: %.1f s\n%s: ×%.1f",
-                        L.t("Narastanie"), res.ph2, L.t("Plateau"), res.plateau, L.t("Opadanie"), res.ph3,
-                        L.t("Szczyt / cisza (wzorzec)"), Norms.mPk)
+                String msg = L.f("Znalezione sylaby 4-fazowe wzorca: {0}", res.samples) + "\n"
+                        + L.f("Wynik próbek wzorca po kalibracji: {0}", sc) + "\n"
+                        + (res.rejected > 0 ? "⚠ " + L.f("Pominięte próbki wyraźnie inne niż reszta: {0}", res.rejected) + "\n" : "") + "\n"
+                        + String.format(Locale.US, "1 · %s: %.1f s\n2 · %s: %.1f s\n3 · %s: %.1f s\n4 · %s: %.1f s",
+                        L.t("Faza leniwa (cichy start)"), res.lazyT, L.t("Narastanie"), res.riseT, L.t("Plateau"), res.platT, L.t("Opadanie"), res.fallT)
                         + "\n\n" + L.t("Wskazówka: nagraj 3–5 próbek (mogą być w jednym nagraniu, oddzielone pauzą) — ocena będzie stabilniejsza.");
                 new AlertDialog.Builder(this).setTitle(L.t("Wynik kalibracji")).setMessage(msg)
                         .setPositiveButton(L.t("Zastosuj"), (dd, w) -> {
@@ -1603,10 +1609,69 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok && r.body != null) {
                 java.util.regex.Matcher mm = SYS_IN_NAME.matcher(r.body);
                 if (mm.find()) sys = mm.group(1);
-                if (sys.isEmpty()) sys = matchLocalByTime(r.body, files);
             }
-            if (r.ok) FIX_SYS_CACHE.put(recordId, sys);
-            cb.done(sys);
+            if (!sys.isEmpty() || !r.ok) {
+                if (r.ok) FIX_SYS_CACHE.put(recordId, sys);
+                cb.done(sys);
+                return;
+            }
+            // Mapa nagran: przy kazdym opisie wysylamy tam system mowy razem z kategoria
+            // i data — szukamy punktu tego kursanta, tej kategorii, najblizszego w czasie.
+            final String body = r.body;
+            matchFromMap(body, mapSys -> {
+                String res = !mapSys.isEmpty() ? mapSys : matchLocalByTime(body, files);
+                FIX_SYS_CACHE.put(recordId, res);
+                cb.done(res);
+            });
+        });
+    }
+
+    private static org.json.JSONArray MAP_POINTS = null;
+    private static long MAP_POINTS_AT = 0L;
+
+    private void matchFromMap(String recordBody, StrCb cb) {
+        final long ts; final String catName;
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(recordBody);
+            if (o.optJSONObject("record") != null) o = o.optJSONObject("record");
+            String created = o.optString("created_at", "");
+            ts = created.isEmpty() ? 0L : java.time.OffsetDateTime.parse(created.replace(" ", "T")).toInstant().toEpochMilli();
+            org.json.JSONObject cat = o.optJSONObject("record_category");
+            catName = cat != null ? cat.optString("name_pl", cat.optString("name", "")) : "";
+        } catch (Exception e) { cb.done(""); return; }
+        if (ts == 0L) { cb.done(""); return; }
+        Runnable match = () -> {
+            String me1 = mapName(prefs().getString("student_name", "")).trim().toLowerCase(Locale.ROOT);
+            String me2 = prefs().getString("student_name", "").trim().toLowerCase(Locale.ROOT);
+            String best = "";
+            long bestD = 3 * 60 * 60 * 1000L;
+            org.json.JSONArray pts = MAP_POINTS;
+            for (int i = 0; pts != null && i < pts.length(); i++) {
+                org.json.JSONObject p = pts.optJSONObject(i);
+                if (p == null || p.optString("sys", "").isEmpty()) continue;
+                String nm = p.optString("name", "").trim().toLowerCase(Locale.ROOT);
+                if (!nm.equals(me1) && !nm.equals(me2)) continue;
+                if (!catName.isEmpty() && !catName.equalsIgnoreCase(p.optString("cat", ""))) continue;
+                long d = Math.abs(p.optLong("ts", 0L) - ts);
+                if (d < bestD) { bestD = d; best = p.optString("sys", ""); }
+            }
+            cb.done(best);
+        };
+        if (MAP_POINTS != null && System.currentTimeMillis() - MAP_POINTS_AT < 5 * 60 * 1000L) { match.run(); return; }
+        NsClient.request("GET", "/map/points", nsToken(), nsEmail(), null, null, mr -> {
+            if (mr.ok) {
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject(mr.body);
+                    org.json.JSONArray all = new org.json.JSONArray();
+                    for (String k : new String[]{"history", "live"}) {
+                        org.json.JSONArray a = d.optJSONArray(k);
+                        for (int i = 0; a != null && i < a.length(); i++) all.put(a.opt(i));
+                    }
+                    MAP_POINTS = all;
+                    MAP_POINTS_AT = System.currentTimeMillis();
+                } catch (Exception e) { }
+            }
+            match.run();
         });
     }
 

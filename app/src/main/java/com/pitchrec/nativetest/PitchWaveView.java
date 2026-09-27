@@ -541,9 +541,10 @@ public class PitchWaveView extends View {
     // f(t): wzrost > 3%/s = strzalka w gore (zielona), spadek = w dol (niebieska), inaczej plaska.
     private final Paint arrowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    // STRZALKI NA KAZDA SYLABE: w obrebie sylaby liczymy kierunek tonu (regresja liniowa);
-    // sasiednie sylaby o tym samym kierunku lacza sie w jedna strzalke, a zmiana kierunku
-    // (np. pierwsza sylaba w dol, druga w gore) daje dwie strzalki obok siebie.
+    // STRZALKI NA KAZDA SYLABE: w obrebie sylaby liczymy zmiane tonu w POLTONACH (regresja
+    // liniowa na skali logarytmicznej). Strzalka pojawia sie tylko, gdy ton zmienia sie w danym
+    // kierunku o wiecej niz prog z Ustawien (domyslnie 1,5 poltonu); im ostrzejsza zmiana, tym
+    // bardziej stroma strzalka. Sasiednie sylaby w tym samym kierunku lacza sie w jedna strzalke.
     private void drawArrows(Canvas canvas, int w, int h, float top, List<LiveAudioData.PitchPoint> pts,
                             List<LiveAudioData.Pause> pz, long visStart, float visRange) {
         double visA = visStart / (double) LiveAudioData.SAMPLE_RATE;
@@ -551,9 +552,11 @@ public class PitchWaveView extends View {
         List<SyllableDetector.Syl> syl = new java.util.ArrayList<>();
         for (SyllableDetector.Syl sy : LiveAudioData.syllablesSnapshot()) if (sy.end >= visA && sy.start <= visB) syl.add(sy);
         if (syl.isEmpty()) { drawArrowsWindows(canvas, w, h, top, pts, pz, visStart, visRange); return; }
-        // kierunek kazdej sylaby
-        int[] dir = new int[syl.size()];
-        for (int i = 0; i < syl.size(); i++) {
+        float thr = LiveAudioData.arrowThresholdSt;
+        int n = syl.size();
+        double[] ch = new double[n];
+        boolean[] ok = new boolean[n];
+        for (int i = 0; i < n; i++) {
             SyllableDetector.Syl sy = syl.get(i);
             List<LiveAudioData.PitchPoint> in = new java.util.ArrayList<>();
             for (LiveAudioData.PitchPoint p : pts) {
@@ -561,51 +564,49 @@ public class PitchWaveView extends View {
                 double t = (p.sampleIndex + 1024) / (double) LiveAudioData.SAMPLE_RATE;
                 if (t >= sy.start && t <= sy.end) in.add(p);
             }
-            dir[i] = in.size() >= 2 ? sylDir(in) : 2; // 2 = brak tonu (nie rysujemy)
+            ok[i] = in.size() >= 2;
+            ch[i] = ok[i] ? semitoneChange(in) : 0;
         }
         float arrowY = top + h * 0.82f;
-        double angle = Math.PI / 7;
         float y = arrowY;
         int i = 0;
         double prevEnd = -1;
-        boolean first = true;
-        while (i < syl.size()) {
-            if (dir[i] == 2) { i++; first = true; y = arrowY; continue; }
+        while (i < n) {
+            int d = !ok[i] ? 0 : ch[i] >= thr ? 1 : ch[i] <= -thr ? -1 : 0;
+            if (d == 0) { i++; continue; }
             int j = i;
-            while (j + 1 < syl.size() && dir[j + 1] == dir[i] && syl.get(j + 1).start - syl.get(j).end < 0.05) j++;
+            double total = ch[i];
+            while (j + 1 < n && ok[j + 1] && syl.get(j + 1).start - syl.get(j).end < 0.05
+                    && (d > 0 ? ch[j + 1] >= thr : ch[j + 1] <= -thr)) { j++; total += ch[j]; }
             double t0 = syl.get(i).start, t1 = syl.get(j).end;
-            if (prevEnd >= 0 && t0 - prevEnd > 0.3) { y = arrowY; first = true; } // nowa porcja mowy
+            if (prevEnd < 0 || t0 - prevEnd > 0.3) y = arrowY; // nowa porcja mowy
             float x0 = (float) ((t0 * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) + dp(2);
             float x1 = (float) ((t1 * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) - dp(2);
             if (x1 - x0 >= dp(6) && x1 > 0 && x0 < w) {
-                int d = dir[i];
-                float dx = x1 - x0;
-                float dy = (float) (Math.min(dx, dp(40)) * Math.tan(angle));
-                float ye = y + (d > 0 ? -dy : d < 0 ? dy : 0);
-                drawOneArrow(canvas, x0, y, x1, ye, d, first);
-                y = ye;
-                // nie uciekamy poza pas strzalek
-                if (y < arrowY - dp(28) || y > arrowY + dp(28)) y = arrowY;
-                first = false;
+                // stromosc = wielkosc zmiany (ok. 7 dp na poltonu, maks. 34 dp)
+                float dy = (float) Math.max(dp(6), Math.min(dp(34), Math.abs(total) * dp(7)));
+                float ye = y + (d > 0 ? -dy : dy);
+                drawOneArrow(canvas, x0, y, x1, ye, d, true);
+                y = (ye < arrowY - dp(34) || ye > arrowY + dp(34)) ? arrowY : ye;
             }
             prevEnd = t1;
             i = j + 1;
         }
     }
 
-    // Wzgledna zmiana tonu w sylabie (nachylenie × czas / srednia): >= 5% = w gore / w dol
-    private static int sylDir(List<LiveAudioData.PitchPoint> pts) {
+    // Zmiana tonu w poltonach od poczatku do konca fragmentu (regresja na 12·log2 f)
+    private static double semitoneChange(List<LiveAudioData.PitchPoint> pts) {
         int n = pts.size();
         double sx = 0, sy = 0, sxy = 0, sx2 = 0;
         for (LiveAudioData.PitchPoint p : pts) {
             double x = p.sampleIndex / (double) LiveAudioData.SAMPLE_RATE;
-            sx += x; sy += p.freq; sxy += x * p.freq; sx2 += x * x;
+            double yv = 12 * Math.log(p.freq) / Math.log(2);
+            sx += x; sy += yv; sxy += x * yv; sx2 += x * x;
         }
         double den = n * sx2 - sx * sx;
         double sl = den > 0 ? (n * sxy - sx * sy) / den : 0;
         double dur = (pts.get(n - 1).sampleIndex - pts.get(0).sampleIndex) / (double) LiveAudioData.SAMPLE_RATE;
-        double change = sl * Math.max(dur, 0.05) / (sy / n) * 100;
-        return Math.abs(change) < 5 ? 0 : change > 0 ? 1 : -1;
+        return sl * dur;
     }
 
     private void drawOneArrow(Canvas canvas, float x0, float y0, float x1, float y1, int dir, boolean dot) {
@@ -663,35 +664,23 @@ public class PitchWaveView extends View {
             float xs = ((vis.get(0).sampleIndex - visStart) / visRange) * w;
             float xe = ((vis.get(vis.size() - 1).sampleIndex - visStart) / visRange) * w;
             if (xe - xs < dp(8)) continue;
-            int chunks = Math.max(1, (int) Math.ceil((xe - xs) / (3.5f * secPx)));
+            int chunks = Math.max(1, (int) Math.ceil((xe - xs) / (1.0f * secPx)));
             int per = Math.max(1, vis.size() / chunks);
             float[] cx = new float[chunks + 1];
             cx[0] = xs + dp(4);
             for (int c = 0; c < chunks; c++) cx[c + 1] = Math.min(xe - dp(4), xs + dp(4) + (c + 1) * (xe - xs - dp(8)) / chunks);
             float y = arrowY;
+            // okna ~1 s (bez policzonych sylab) — ta sama zasada progu w poltonach
             for (int c = 0; c < chunks; c++) {
                 int i0 = c * per, i1 = Math.min(vis.size() - 1, (c + 1) * per);
-                int dir = chunkDir(vis.subList(i0, i1 + 1));
-                float dx = cx[c + 1] - cx[c];
-                float dy = (float) (dx * Math.tan(angle));
-                float ye = y + (dir > 0 ? -dy : dir < 0 ? dy : 0);
-                int col = dir > 0 ? 0xFF00E5A0 : dir < 0 ? 0xFF00CFFF : 0xFF8888BB;
-                float thick = Math.max(dp(2.5f), Math.min(dp(5), dx / 30f));
-                float head = Math.max(dp(8), Math.min(dp(16), dx / 6f));
-                arrowPaint.setColor(col);
-                arrowPaint.setAlpha(225);
-                arrowPaint.setStyle(Paint.Style.STROKE);
-                arrowPaint.setStrokeWidth(thick);
-                arrowPaint.setStrokeCap(Paint.Cap.ROUND);
-                canvas.drawLine(cx[c], y, cx[c + 1], ye, arrowPaint);
-                double ga = Math.atan2(ye - y, cx[c + 1] - cx[c]), ha = Math.PI / 5;
-                canvas.drawLine(cx[c + 1], ye, (float) (cx[c + 1] - Math.cos(ga - ha) * head), (float) (ye - Math.sin(ga - ha) * head), arrowPaint);
-                canvas.drawLine(cx[c + 1], ye, (float) (cx[c + 1] - Math.cos(ga + ha) * head), (float) (ye - Math.sin(ga + ha) * head), arrowPaint);
-                if (c == 0) {
-                    arrowPaint.setStyle(Paint.Style.FILL);
-                    canvas.drawCircle(cx[0], y, thick * 0.9f, arrowPaint);
-                }
-                y = ye;
+                if (i1 - i0 < 1) continue;
+                double chg = semitoneChange(vis.subList(i0, i1 + 1));
+                int dir = chg >= LiveAudioData.arrowThresholdSt ? 1 : chg <= -LiveAudioData.arrowThresholdSt ? -1 : 0;
+                if (dir == 0) continue;
+                float dy = (float) Math.max(dp(6), Math.min(dp(34), Math.abs(chg) * dp(7)));
+                float ye = y + (dir > 0 ? -dy : dy);
+                drawOneArrow(canvas, cx[c], y, cx[c + 1], ye, dir, true);
+                y = (ye < arrowY - dp(34) || ye > arrowY + dp(34)) ? arrowY : ye;
             }
         }
     }
@@ -726,13 +715,21 @@ public class PitchWaveView extends View {
             float x0 = (float) ((sg.start * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
             float x1 = (float) ((sg.end * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
             if (x1 < 0 || x0 > w) continue;
-            int col = LiveAudioData.showNorms ? scoreColor(sg.result.score) : 0xFFB388FF;
-            normPaint.setColor((col & 0x00FFFFFF) | 0xCC000000);
+            boolean scored = LiveAudioData.showNorms && sg.result != null;
+            int col = scored ? scoreColor(sg.result.score) : 0xFFB388FF;
             normPaint.setStyle(Paint.Style.FILL);
-            // pasek pod podzialka na dlugosc porcji
-            canvas.drawRect(Math.max(0, x0), top + dp(2), Math.min(w, x1), top + dp(5), normPaint);
+            // pasek pod podzialka: sylaba 4-fazowa w kolorze oceny, dalsze sylaby fioletowe
+            float xu = sg.unitEnd > 0 ? (float) ((sg.unitEnd * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w) : x1;
+            if (scored) {
+                normPaint.setColor((col & 0x00FFFFFF) | 0xCC000000);
+                canvas.drawRect(Math.max(0, x0), top + dp(2), Math.min(w, xu), top + dp(5), normPaint);
+            }
+            if (!scored || xu < x1) {
+                normPaint.setColor(0x99B388FF);
+                canvas.drawRect(Math.max(0, scored ? xu : x0), top + dp(3), Math.min(w, x1), top + dp(4.5f), normPaint);
+            }
             String tempo = LiveAudioData.showTempo && sg.syllables >= 0 ? sg.syllables + " " + L.t("syl") + " · " + Math.round(sg.rate) + "/min" : "";
-            String lbl = LiveAudioData.showNorms ? sg.result.score + "%" + (tempo.isEmpty() ? "" : "  " + tempo) : tempo;
+            String lbl = scored ? (sg.fourPhase ? "4F " : "") + sg.result.score + "%" + (tempo.isEmpty() ? "" : "  " + tempo) : tempo;
             if (lbl.isEmpty()) continue;
             float tw = normTextPaint.measureText(lbl);
             float cx = Math.max(tw / 2 + dp(6), Math.min(w - tw / 2 - dp(6), (x0 + x1) / 2f));
@@ -767,7 +764,7 @@ public class PitchWaveView extends View {
         Norms.Result r = LiveAudioData.norms.live;
         if (LiveAudioData.showNorms && r != null && System.currentTimeMillis() - LiveAudioData.norms.liveAtMs < 2500) {
             int col = scoreColor(r.score);
-            String l1 = L.t("EMISJA") + " " + r.score + "%  ·  " + L.f(r.detail, r.args);
+            String l1 = L.t("SYLABA 4-FAZOWA") + " " + r.score + "%  ·  " + L.f(r.detail, r.args);
             String q = r.hasQuiet == null ? L.t("WEJŚCIE") + ": …" : r.hasQuiet ? L.t("WEJŚCIE") + ": " + L.t("łagodne ✓") : L.t("WEJŚCIE") + ": " + L.t("za głośno ✗");
             String l2 = q + (r.shapeSimilarity != null ? "  ·  " + L.t("KSZTAŁT") + ": " + r.shapeSimilarity + "%" : "");
             y = hintBox(canvas, w, y, pad, l1, col, l2, 0xFFDDDDDD);

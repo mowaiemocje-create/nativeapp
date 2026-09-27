@@ -17,6 +17,7 @@ public class VadDetector {
     private final float[] cal = new float[400];
     private int calN = 0;
     private boolean calDone = false;
+    private float minEnv = Float.MAX_VALUE;
     private float floor = 0.004f, thr = 0.02f, ratio = 3f;
     private boolean inSpeech = false;
     private double runStart = 0, lastSpeechT = 0, lastRunEnd = -1, lastRunDur = 0;
@@ -26,7 +27,7 @@ public class VadDetector {
     public double[] pendingPause = null;
 
     public synchronized void reset() {
-        env = 0f; lastT = -1; t0 = -1; calN = 0; calDone = false;
+        env = 0f; lastT = -1; t0 = -1; calN = 0; calDone = false; minEnv = Float.MAX_VALUE;
         floor = 0.004f; thr = 0.02f; ratio = 3f;
         inSpeech = false; runStart = 0; lastSpeechT = 0; lastRunEnd = -1; lastRunDur = 0;
         pitchHist[0] = pitchHist[1] = pitchHist[2] = 0;
@@ -48,21 +49,26 @@ public class VadDetector {
         pitchHist[2] = (f0 > 70 && f0 < 600) ? f0 : 0;
 
         if (!calDone) {
-            if (t - t0 > 0.3 && calN < cal.length) cal[calN++] = env; // pomijamy narastanie obwiedni
-            if (t - t0 >= CAL_S && calN > 5) {
-                float[] s = java.util.Arrays.copyOf(cal, calN);
-                java.util.Arrays.sort(s);
-                float fl = Math.max(0.0015f, s[(int) (s.length * 0.3)]);
-                float hi = s[(int) (s.length * 0.9)];
-                floor = fl;
-                ratio = Math.max(2.5f, Math.min(6f, (hi / fl) * 1.6f));
-                thr = floor * ratio;
+            // Kalibracja szumu tla w pierwszych 1,5 s — ale mowa MOZE juz trwac (ktos zaczyna
+            // mowic od razu po REC): wykrywamy ja od razu z progu tymczasowego (najcichszy
+            // moment × 4), a do kalibracji bierzemy tylko okna BEZ mowy.
+            if (t - t0 > 0.1) minEnv = Math.min(minEnv, env);
+            if (minEnv < Float.MAX_VALUE) { floor = Math.max(0.0015f, minEnv); ratio = 4f; thr = floor * ratio; }
+            if (t - t0 > 0.3 && !inSpeech && calN < cal.length) cal[calN++] = env;
+            if (t - t0 >= CAL_S) {
+                if (calN > 5) {
+                    float[] s = java.util.Arrays.copyOf(cal, calN);
+                    java.util.Arrays.sort(s);
+                    float fl = Math.max(0.0015f, s[(int) (s.length * 0.3)]);
+                    float hi = s[(int) (s.length * 0.9)];
+                    floor = fl;
+                    ratio = Math.max(2.5f, Math.min(6f, (hi / fl) * 1.6f));
+                    thr = floor * ratio;
+                }
                 calDone = true;
             }
-            return false;
-        }
-        // Szum tla sledzony na biezaco (tylko w ciszy) — prog sam sie dopasowuje do otoczenia
-        if (!inSpeech && env < thr) {
+        } else if (!inSpeech && env < thr) {
+            // Szum tla sledzony na biezaco (tylko w ciszy) — prog sam sie dopasowuje do otoczenia
             float k = (float) (1 - Math.exp(-dt / (env < floor ? 0.5 : 4.0)));
             floor += (env - floor) * k;
             floor = Math.max(0.0015f, floor);

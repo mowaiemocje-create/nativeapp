@@ -14,6 +14,7 @@ public class YinPitchDetector {
     // znalazl tonu, bierzemy globalne minimum, jesli jest wyrazne (< 0,35) — standardowy
     // wariant YIN. Uzywane tylko do rysowania ciaglej linii pitch (NIE do wykrywania mowy).
     public static float lastRelaxed = -1;
+    static final int WIN = 256;
 
     public static float detect(float[] buf) {
         lastRelaxed = -1;
@@ -25,7 +26,9 @@ public class YinPitchDetector {
 
         int minL = (int) Math.round(SR / 900.0);
         int maxL = (int) Math.round(SR / 70.0);
-        int w = Math.min(256, n - maxL - 1);
+        // Okno calkowania 256 probek (jak w PWA) — dluzsze okna sprawdzone na nagraniach
+        // pogarszaly liczenie sylab i wykrywanie mowy.
+        int w = Math.min(WIN, n - maxL - 1);
         if (w < 32) return -1;
 
         for (int tau = minL; tau <= maxL; tau++) {

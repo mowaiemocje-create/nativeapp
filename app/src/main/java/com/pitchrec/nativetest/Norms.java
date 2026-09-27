@@ -25,7 +25,7 @@ public class Norms {
     // i kazde identyczne powtorzenie dostaje 100%). Ocena kursanta = porownanie z tymi cechami.
     public static volatile boolean calibrated = false;
     public static volatile int calSamples = 0;
-    public static volatile float mGrowth = 2f, mPlatRel = 0.6f, mPlatFrac = 0.6f, mFall = 0.4f, mQuiet = 0.3f, mPk = 5f, mRiseT = 0.5f, mFallT = 0.2f;
+    public static volatile float mLazyT = 0.5f, mLazyL = 0.4f, mRiseT = 0.3f, mPlatT = 0.2f, mFallT = 0.2f, mPk = 5f;
 
     public static void load(SharedPreferences p) {
         ph1 = p.getFloat("norm_ph1", 0.5f);
@@ -36,14 +36,13 @@ public class Norms {
         pkRatio = p.getFloat("norm_pk", 5.0f);
         calibrated = p.getBoolean("norm_cal", false);
         calSamples = p.getInt("norm_cal_n", 0);
-        mGrowth = p.getFloat("norm_m_growth", 2f);
-        mPlatRel = p.getFloat("norm_m_prel", 0.6f);
-        mPlatFrac = p.getFloat("norm_m_pfrac", 0.6f);
-        mFall = p.getFloat("norm_m_fall", 0.4f);
-        mQuiet = p.getFloat("norm_m_quiet", 0.3f);
-        mPk = p.getFloat("norm_m_pk", 5f);
-        mRiseT = p.getFloat("norm_m_riset", 0.5f);
-        mFallT = p.getFloat("norm_m_fallt", 0.2f);
+        mLazyT = p.getFloat("norm4_lazyt", 0.5f);
+        mLazyL = p.getFloat("norm4_lazyl", 0.4f);
+        mRiseT = p.getFloat("norm4_riset", 0.3f);
+        mPlatT = p.getFloat("norm4_platt", 0.2f);
+        mFallT = p.getFloat("norm4_fallt", 0.2f);
+        mPk = p.getFloat("norm4_pk", 5f);
+        if (!p.contains("norm4_lazyt")) calibrated = false; // stara kalibracja (inna metoda) — do powtorzenia
         String s = p.getString("norm_shape", "");
         shapeRef = null;
         if (!s.isEmpty()) {
@@ -63,9 +62,8 @@ public class Norms {
                 .putFloat("norm_quiet", quietThresh).putFloat("norm_tol", tolerance).putFloat("norm_pk", pkRatio)
                 .putString("norm_shape", sb.toString())
                 .putBoolean("norm_cal", calibrated).putInt("norm_cal_n", calSamples)
-                .putFloat("norm_m_growth", mGrowth).putFloat("norm_m_prel", mPlatRel).putFloat("norm_m_pfrac", mPlatFrac)
-                .putFloat("norm_m_fall", mFall).putFloat("norm_m_quiet", mQuiet).putFloat("norm_m_pk", mPk)
-                .putFloat("norm_m_riset", mRiseT).putFloat("norm_m_fallt", mFallT).apply();
+                .putFloat("norm4_lazyt", mLazyT).putFloat("norm4_lazyl", mLazyL).putFloat("norm4_riset", mRiseT)
+                .putFloat("norm4_platt", mPlatT).putFloat("norm4_fallt", mFallT).putFloat("norm4_pk", mPk).apply();
     }
 
     public static void resetDefaults() {
@@ -89,7 +87,9 @@ public class Norms {
         public final Result result;
         public volatile int syllables = -1;     // liczba sylab (po analizie), -1 = jeszcze nie policzono
         public volatile float rate = 0f;        // tempo [sylab/min]
-        public float[] buf;                     // RMS okien porcji (tylko przy kalibracji)
+        public double unitEnd = -1, unitPeak = -1; // oceniana (pierwsza) sylaba: koniec i szczyt [s]
+        public boolean fourPhase = false;           // czy pierwsza sylaba miala ksztalt 4-fazowy
+        public float[] buf;                     // RMS okien sylaby 4-fazowej (tylko przy kalibracji)
         public int preLen;
         Segment(double s, double e, Result r) { start = s; end = e; result = r; }
     }
@@ -111,12 +111,13 @@ public class Norms {
     private int bufPreLen = 0;
     private double segStart = -1, lastVoiceT = -1;
     private final List<Segment> segments = new ArrayList<>();
+    private boolean unitDone = false;
     public boolean keepBuffers = false;                 // kalibracja: zachowaj RMS porcji
     public volatile Result live = null;                 // wynik biezacej porcji (do podpowiedzi)
     public volatile long liveAtMs = 0L;
 
     public synchronized void reset() {
-        preIdx = 0; preCount = 0; buf.clear(); bufPreLen = 0; segStart = -1; lastVoiceT = -1;
+        preIdx = 0; preCount = 0; buf.clear(); bufPreLen = 0; segStart = -1; lastVoiceT = -1; unitDone = false;
         segments.clear(); live = null; liveAtMs = 0L; finished = null;
     }
 
@@ -137,24 +138,45 @@ public class Norms {
         if (segStart >= 0) {
             buf.add(rms);
             if (speech && buf.size() - bufPreLen > 5) {
-                live = analyze(toArray(buf), bufPreLen);
-                liveAtMs = System.currentTimeMillis();
+                // Na zywo: dopoki trwa sylaba 4-fazowa (pierwsza w porcji) — ocena biezaca;
+                // po jej wyciszeniu wynik zostaje zamrozony (dalej sa juz sylaby zwykle).
+                if (!unitDone) {
+                    float[] arr = toArray(buf);
+                    int ue = unitEnd(arr, bufPreLen);
+                    if (ue < 0) { live = analyze(arr, bufPreLen); }
+                    else {
+                        unitDone = true;
+                        if (!isFourPhase(arr, bufPreLen, ue)) ue = firstSyllableEnd(arr, bufPreLen);
+                        live = analyze(java.util.Arrays.copyOf(arr, ue), bufPreLen);
+                    }
+                    liveAtMs = System.currentTimeMillis();
+                }
             }
             if (!speech && t - lastVoiceT > HOLD_S) {
                 // koniec porcji: obcinamy cisze po ostatnim glosie
                 int keep = buf.size() - (int) Math.round((t - lastVoiceT) * FPS);
                 double dur = lastVoiceT - (segStart + bufPreLen / FPS);
                 if (keep > bufPreLen + 3 && dur >= 0.3) {
-                    Result r = analyze(toArray(buf.subList(0, keep)), bufPreLen);
+                    float[] arr = toArray(buf.subList(0, keep));
+                    int ue = unitEnd(arr, bufPreLen);
+                    if (ue < 0) ue = arr.length;
+                    boolean four = isFourPhase(arr, bufPreLen, ue);
+                    if (!four) ue = firstSyllableEnd(arr, bufPreLen);
+                    float[] unit = java.util.Arrays.copyOf(arr, ue);
+                    Result r = analyze(unit, bufPreLen);
                     live = r;
                     liveAtMs = System.currentTimeMillis();
                     Segment sg = new Segment(segStart + bufPreLen / FPS, lastVoiceT, r);
-                    if (keepBuffers) { sg.buf = toArray(buf.subList(0, keep)); sg.preLen = bufPreLen; }
+                    sg.fourPhase = four;
+                    sg.unitEnd = segStart + ue / FPS;
+                    sg.unitPeak = segStart + peakIndex(unit, bufPreLen) / FPS;
+                    if (keepBuffers && four) { sg.buf = unit; sg.preLen = bufPreLen; }
                     segments.add(sg);
                     finished = sg;
                     if (segments.size() > 400) segments.remove(0);
                 }
                 segStart = -1;
+                unitDone = false;
                 buf.clear();
             }
         }
@@ -179,17 +201,64 @@ public class Norms {
         return sm / Math.max(1, e - s);
     }
 
-    // ── cechy porcji (liczone identycznie dla wzorca i kursanta) ──
+    // ── SYLABA 4-FAZOWA = pierwsza sylaba porcji mowy: cichy start, narastanie, szczyt,
+    // wyciszenie. Po niej moga byc "zwykle" sylaby (ciszej) — one nie sa oceniane wg 4 faz.
+    // Koniec sylaby = pierwszy dolek po najglosniejszym miejscu porcji (spadek < 30% szczytu).
+    static int peakIndex(float[] raw, int preLen) {
+        float[] b = smooth3(raw);
+        int pkI = Math.min(preLen, b.length - 1);
+        for (int i = Math.min(preLen, b.length); i < b.length; i++) if (b[i] > b[pkI]) pkI = i;
+        return pkI;
+    }
+
+    // Indeks konca sylaby 4-fazowej (wylacznie) albo -1, gdy jeszcze sie nie wyciszyla
+    public static int unitEnd(float[] raw, int preLen) {
+        float[] b = smooth3(raw);
+        int n = b.length;
+        int pkI = peakIndex(raw, preLen);
+        float pk = b[pkI];
+        if (pk <= 0.0005f) return -1;
+        int j = -1;
+        for (int i = pkI + 1; i < n; i++) if (b[i] < pk * 0.3f) { j = i; break; }
+        if (j < 0) return -1;
+        while (j + 1 < n && b[j + 1] < b[j]) j++;       // do najnizszego punktu dolka
+        return Math.min(n, j + 1);
+    }
+
+    // Czy to sylaba 4-fazowa: dlugi, cichy start (faza leniwa) i wyrazny szczyt?
+    public static boolean isFourPhase(float[] raw, int preLen, int end) {
+        if (end <= preLen + 3 || (end - preLen) / FPS < 0.6f) return false;
+        Features f = features(java.util.Arrays.copyOf(raw, end), preLen);
+        return f.lazyT >= 0.35f && f.lazyLevel <= 0.55f;
+    }
+
+    // Koniec pierwszej sylaby (gdy nie jest 4-fazowa): pierwszy wyrazny szczyt i dolek po nim
+    public static int firstSyllableEnd(float[] raw, int preLen) {
+        float[] b = smooth3(raw);
+        int n = b.length, st = Math.min(preLen, n - 1);
+        float gpk = 0;
+        for (int i = st; i < n; i++) gpk = Math.max(gpk, b[i]);
+        int m1 = -1;
+        for (int i = st + 1; i < n - 1; i++) if (b[i] >= gpk * 0.3f && b[i] >= b[i - 1] && b[i] >= b[i + 1]) { m1 = i; break; }
+        if (m1 < 0) return n;
+        int j = -1;
+        for (int i = m1 + 1; i < n; i++) if (b[i] < b[m1] * 0.5f) { j = i; break; }
+        if (j < 0) return n;
+        while (j + 1 < n && b[j + 1] < b[j]) j++;
+        return Math.min(n, j + 1);
+    }
+
+    // ── CECHY SYLABY 4-FAZOWEJ (liczone identycznie dla wzorca i kursanta) ──
+    // Wszystko wzgledem szczytu i jego progow — NIE zalezy od tego, ile trwa cicha faza
+    // leniwa ani kiedy dokladnie wykrywanie uznalo start mowy:
+    //   faza leniwa  = od startu do przekroczenia 50% szczytu: czas i poziom (mediana / szczyt)
+    //   narastanie   = od ostatniego miejsca < 50% do osiagniecia 90% szczytu
+    //   szczyt       = jak dlugo glos trzyma >= 80% szczytu
+    //   opadanie     = od ostatniego >= 80% do spadku < 30% szczytu
     public static class Features {
-        public float quiet = Float.NaN;   // srednia cisza przed startem / szczyt (NaN = brak danych)
-        public float pk = 1f;             // szczyt / cisza
-        public float growth = 1f;         // koniec / poczatek okna narastania
-        public boolean gradual = false;   // narastanie bez duzych spadkow
-        public float platRel = 0f, platFrac = 0f;
-        public float fall = 1f;           // srednia w oknie opadania / szczyt
-        public boolean hasRise, hasPlat, hasFallWin;
-        public float riseT = 0f, fallT = 0f;  // czas narastania 20→80% szczytu i opadania 80→20% [s]
-        public int riseEnd;
+        public float lazyT = 0f, lazyLevel = 1f, riseT = 0f, platT = 0f, fallT = 0f;
+        public float pk = 1f;             // szczyt / cisza przed startem
+        public float quiet = Float.NaN;   // (zgodnosc) = lazyLevel
     }
 
     private static float[] smooth3(float[] b) {
@@ -206,80 +275,66 @@ public class Norms {
         Features f = new Features();
         float[] b = smooth3(raw);
         int n = b.length;
-        float pk = 0;
-        int pkI = Math.min(preLen, n - 1);
-        for (int i = Math.min(preLen, n); i < n; i++) if (b[i] > pk) { pk = b[i]; pkI = i; }
-        if (pk <= 0) return f;
-        // koncowka porcji bez glosu (opoznienie wykrywania konca mowy) nie moze udawac wyciszenia
-        int nEff = n;
-        while (nEff - 1 > pkI && b[nEff - 1] < pk * 0.15f) nEff--;
-        n = nEff;
-        // czasy narastania i opadania (odporne na to, gdzie VAD uznal start/koniec porcji)
-        int r20 = -1, r80 = pkI;
-        for (int i = 0; i <= pkI; i++) { if (r20 < 0 && b[i] >= pk * 0.2f) r20 = i; if (b[i] >= pk * 0.8f) { r80 = i; break; } }
-        f.riseT = r20 >= 0 ? (r80 - r20) / FPS : 0f;
-        int f80 = pkI, f20 = n - 1;
-        for (int i = n - 1; i >= pkI; i--) if (b[i] >= pk * 0.8f) { f80 = i; break; }
-        for (int i = f80; i < n; i++) if (b[i] < pk * 0.2f) { f20 = i; break; }
-        f.fallT = (f20 - f80) / FPS;
-        int s2 = Math.round(ph2 * FPS), s3 = Math.round(ph3 * FPS);
-        int riseStart = Math.min(preLen, n);
-        int riseEnd = Math.min(n, riseStart + Math.max(3, s2));
-        int fallStart = Math.max(riseEnd, n - Math.max(3, s3));
-        f.riseEnd = riseEnd;
-        int minPre = Math.round(0.15f * FPS), liveWin = Math.round(0.5f * FPS);
-        float quiet;
-        if (preLen >= minPre) quiet = avg(b, 0, preLen);
-        else quiet = avg(b, riseStart, Math.min(n, riseStart + liveWin));
-        if (preLen >= minPre || n - riseStart >= minPre) f.quiet = quiet / pk;
-        f.pk = quiet > 0.0005f ? pk / quiet : 999f;
-        if (riseEnd > riseStart + 3) {
-            f.hasRise = true;
-            int len = riseEnd - riseStart, w = Math.max(1, len / 3);
-            float a1 = avg(b, riseStart, riseStart + w), a2 = avg(b, riseStart + w, riseStart + 2 * w), a3 = avg(b, riseStart + 2 * w, riseEnd);
-            f.growth = a1 > 0.0005f ? a3 / a1 : 1f;
-            f.gradual = a2 >= a1 * 0.7f && a3 >= a2 * 0.7f;
-        }
-        if (fallStart > riseEnd + 3) {
-            f.hasPlat = true;
-            float[] ps = java.util.Arrays.copyOfRange(b, riseEnd, fallStart);
-            float[] sorted = ps.clone();
-            java.util.Arrays.sort(sorted);
-            f.platRel = sorted[sorted.length / 2] / pk;
-            int above = 0;
-            for (float v : ps) if (v > pk * 0.60f) above++;
-            f.platFrac = above / (float) ps.length;
-        }
-        if (n - fallStart >= 3) { f.hasFallWin = true; f.fall = avg(b, fallStart, n) / pk; }
+        int st = Math.min(preLen, n - 1);
+        int pkI = st;
+        for (int i = st; i < n; i++) if (b[i] > b[pkI]) pkI = i;
+        float pk = b[pkI];
+        if (pk <= 0.0005f) return f;
+        while (n - 1 > pkI && b[n - 1] < pk * 0.15f) n--;
+        // faza leniwa
+        int t50 = pkI;
+        for (int i = st; i <= pkI; i++) if (b[i] >= pk * 0.5f) { t50 = i; break; }
+        f.lazyT = (t50 - st) / FPS;
+        if (t50 - st >= 2) {
+            float[] lz = java.util.Arrays.copyOfRange(b, st, t50);
+            java.util.Arrays.sort(lz);
+            f.lazyLevel = lz[lz.length / 2] / pk;
+        } else f.lazyLevel = b[st] / pk;
+        f.quiet = f.lazyLevel;
+        // narastanie
+        int r90 = pkI;
+        for (int i = st; i <= pkI; i++) if (b[i] >= pk * 0.9f) { r90 = i; break; }
+        int r50 = st;
+        for (int i = r90; i >= st; i--) if (b[i] < pk * 0.5f) { r50 = i; break; }
+        f.riseT = (r90 - r50) / FPS;
+        // szczyt
+        int p0 = pkI, p1 = pkI;
+        while (p0 - 1 >= st && b[p0 - 1] >= pk * 0.8f) p0--;
+        while (p1 + 1 < n && b[p1 + 1] >= pk * 0.8f) p1++;
+        f.platT = (p1 - p0 + 1) / FPS;
+        // opadanie
+        int f30 = n - 1;
+        for (int i = p1; i < n; i++) if (b[i] < pk * 0.3f) { f30 = i; break; }
+        f.fallT = (f30 - p1) / FPS;
+        // glosnosc szczytu wzgledem ciszy przed mowa
+        float q = preLen >= 3 ? avg(b, 0, preLen) : b[st];
+        f.pk = q > 0.0005f ? pk / q : 999f;
         return f;
     }
 
-    // Ocena porcji: 4 fazy + glosnosc szczytu. Po kalibracji progi = cechy wzorca z tolerancja.
+    // Ocena sylaby 4-fazowej. Po kalibracji progi = cechy wzorca (najslabsza probka) z tolerancja.
     public static Result analyze(float[] b, int preLen) {
         Result r = new Result();
         int n = b.length;
         float mx = 0;
         for (float v : b) mx = Math.max(mx, v);
         if (n < 6 || mx < 0.001f) { r.score = 20; r.detail = "LENIWA: czekam…"; return r; }
-        float tol = tolerance;
+        float tol = tolerance, k = 1 - 2.5f * tol;
         Features f = features(b, preLen);
-        float needGrowth;
+        float nLazyT, nLazyL, nRise, nPlat, nFall, nPk;
         if (calibrated) {
-            r.hasQuiet = Float.isNaN(f.quiet) ? null : f.quiet <= mQuiet * (1 + 3 * tol) + 0.05f;
-            r.hasAmplitude = f.pk >= mPk * (1 - 2 * tol);
-            needGrowth = Math.max(1.1f, mGrowth * (1 - 2.5f * tol));
-            r.hasGrowth = f.hasRise && f.growth >= needGrowth && f.gradual && f.riseT >= Math.max(0.1f, mRiseT * (1 - 2.5f * tol));
-            r.hasPlateau = f.hasPlat && f.platRel >= mPlatRel - 2 * tol && f.platFrac >= mPlatFrac - 2.5f * tol;
-            r.hasFall = f.hasFallWin && f.fall <= Math.min(0.97f, mFall + 2 * tol) && f.fallT >= Math.max(0.05f, mFallT * (1 - 2.5f * tol));
+            nLazyT = mLazyT * k; nLazyL = Math.min(0.9f, mLazyL + 2 * tol + 0.05f);
+            nRise = mRiseT * k; nPlat = mPlatT * k; nFall = mFallT * k; nPk = mPk * (1 - 2 * tol);
         } else {
-            r.hasQuiet = Float.isNaN(f.quiet) ? null : f.quiet < (quietThresh + tol * 0.3f);
-            r.hasAmplitude = f.pk >= pkRatio * (1 - tol * 1.5f) || pkRatio <= 2;
-            needGrowth = Math.max(1.3f, 2.0f - tol * 3);
-            r.hasGrowth = f.hasRise && f.growth >= needGrowth && f.gradual && f.riseT >= Math.max(0.2f, ph2 * 0.3f);
-            r.hasPlateau = f.hasPlat && f.platRel > (0.55f - tol) && f.platFrac > Math.max(0.30f, 0.55f - tol);
-            r.hasFall = f.hasFallWin && f.fall < (0.50f + tol) && f.fallT >= Math.max(0.1f, ph3 * 0.3f);
+            nLazyT = Math.max(0.2f, ph1 * 0.5f); nLazyL = quietThresh + tol * 0.3f;
+            nRise = Math.max(0.15f, ph2 * 0.2f); nPlat = 0.1f; nFall = Math.max(0.1f, ph3 * 0.3f); nPk = pkRatio * (1 - tol * 1.5f);
         }
-        r.growthRatio = f.growth;
+        r.hasQuiet = f.lazyT >= nLazyT && f.lazyLevel <= nLazyL;
+        r.hasGrowth = f.riseT >= nRise;
+        r.hasPlateau = f.platT >= nPlat;
+        r.hasFall = f.fallT >= nFall;
+        r.hasAmplitude = f.pk >= nPk || (!calibrated && pkRatio <= 2);
+        r.growthRatio = f.riseT;
         r.studentPkRatio = f.pk;
 
         int score = 20;
@@ -288,23 +343,17 @@ public class Norms {
         if (r.hasPlateau) score += 20;
         if (r.hasFall) score += 10;
         if (r.hasAmplitude) score += 10;
-        if (!Boolean.FALSE.equals(r.hasQuiet) && r.hasGrowth && r.hasPlateau && r.hasFall && r.hasAmplitude) score = 100;
-        else if (r.hasGrowth && r.hasPlateau && r.hasFall && r.hasAmplitude) score = Math.max(score, 88);
-        else if (r.hasGrowth && r.hasPlateau && r.hasFall) score = Math.max(score, 78);
-        else if (r.hasGrowth && r.hasPlateau) score = Math.max(score, 70);
         r.score = score;
         r.complete = r.hasGrowth && r.hasPlateau && r.hasFall && r.hasAmplitude;
 
-        float gp = Math.round(r.growthRatio * 10) / 10f;
-        int s2 = Math.round(ph2 * FPS);
-        float refPk = calibrated ? mPk : pkRatio;
-        if (n < preLen + s2 * 0.3f) { r.detail = "LENIWA: czekam…"; }
-        else if (!r.hasGrowth) { r.detail = "NARASTANIE: ×{0} (cel ×{1})"; r.args = new Object[]{fmt(gp), fmt(needGrowth)}; }
-        else if (!r.hasPlateau && n < f.riseEnd + 6) { r.detail = "NARASTANIE ✓ ×{0} — trzymaj szczyt"; r.args = new Object[]{fmt(gp)}; }
-        else if (!r.hasPlateau) r.detail = "PLATEAU: zbyt krótki";
-        else if (!r.hasFall) r.detail = "PLATEAU ✓ — zacznij wyciszać";
-        else if (!r.hasAmplitude) { r.detail = "KSZTAŁT ✓ — za cicho! (×{0} / wzorzec ×{1})"; r.args = new Object[]{fmt(r.studentPkRatio), fmt(refPk)}; }
-        else if (Boolean.FALSE.equals(r.hasQuiet)) r.detail = "EMISJA ✓ — na starcie trochę za głośno";
+        if (!Boolean.TRUE.equals(r.hasQuiet)) {
+            if (f.lazyT < nLazyT) { r.detail = "FAZA LENIWA: za krótka ({0} s / wzorzec {1} s)"; r.args = new Object[]{fmt(f.lazyT), fmt(nLazyT)}; }
+            else { r.detail = "FAZA LENIWA: za głośno — zacznij ciszej"; }
+        }
+        else if (!r.hasGrowth) { r.detail = "NARASTANIE: za szybkie ({0} s / wzorzec {1} s)"; r.args = new Object[]{fmt(f.riseT), fmt(nRise)}; }
+        else if (!r.hasPlateau) { r.detail = "SZCZYT: za krótki ({0} s / wzorzec {1} s)"; r.args = new Object[]{fmt(f.platT), fmt(nPlat)}; }
+        else if (!r.hasFall) { r.detail = "OPADANIE: za szybkie ({0} s / wzorzec {1} s)"; r.args = new Object[]{fmt(f.fallT), fmt(nFall)}; }
+        else if (!r.hasAmplitude) { r.detail = "KSZTAŁT ✓ — za cicho! (×{0} / wzorzec ×{1})"; r.args = new Object[]{fmt(f.pk), fmt(nPk)}; }
         else r.detail = "DOBRA EMISJA ✓";
 
         float[] ref = shapeRef;
@@ -335,13 +384,14 @@ public class Norms {
         return (float) (den == 0 ? 0 : dot / den);
     }
 
-    // ── KALIBRACJA z probek wzorca (1 lub wiecej nagran, w kazdym 1 lub wiecej porcji) ──
-    // Porcje sa wyciete TA SAMA metoda co przy ocenie (VAD + te same okna RMS), wiec wzorzec i
-    // kursant sa mierzeni identycznie. Czasy faz = srednia z probek; progi = cechy najslabszej probki.
+    // ── KALIBRACJA z probek wzorca (sylaby 4-fazowe z 1 lub wiecej nagran) ──
+    // Probki wycinane TA SAMA metoda co przy ocenie. Progi = najslabsza probka, wiec kazda
+    // probka wzorca i kazde identyczne powtorzenie dostaje 100%.
     public static class Calib {
         public int samples;
-        public float ph2, ph3, plateau;
+        public float lazyT, riseT, platT, fallT;
         public int[] scoresAfter;
+        public int rejected;
         public String error;
     }
 
@@ -349,57 +399,62 @@ public class Norms {
         Calib c = new Calib();
         c.samples = bufs.size();
         if (bufs.isEmpty()) { c.error = "none"; return c; }
-        float sumRise = 0, sumFall = 0, sumPlat = 0;
-        for (int k = 0; k < bufs.size(); k++) {
-            float[] b = smooth3(bufs.get(k));
-            int pre = pres.get(k), n = b.length;
-            float pk = 0; int pkI = pre;
-            for (int i = pre; i < n; i++) if (b[i] > pk) { pk = b[i]; pkI = i; }
-            while (n - 1 > pkI && b[n - 1] < pk * 0.15f) n--;
-            int riseEnd = pkI;
-            for (int i = pre; i <= pkI; i++) if (b[i] >= pk * 0.9f) { riseEnd = i; break; }
-            int fallStart = pkI;
-            for (int i = n - 1; i >= pkI; i--) if (b[i] >= pk * 0.7f) { fallStart = i; break; }
-            sumRise += (riseEnd - pre) / FPS;
-            sumFall += (n - 1 - fallStart) / FPS;
-            sumPlat += (fallStart - riseEnd) / FPS;
-        }
         int m = bufs.size();
-        ph2 = clamp(r1(sumRise / m), 0.3f, 4.0f);
-        ph3 = clamp(r1(sumFall / m), 0.2f, 1.5f);
-        c.ph2 = ph2; c.ph3 = ph3; c.plateau = r1(sumPlat / m);
-        // cechy z nowymi oknami — najslabsza probka wyznacza prog
-        float g = Float.MAX_VALUE, pr = Float.MAX_VALUE, pf = Float.MAX_VALUE, fl = 0, q = 0, pkr = Float.MAX_VALUE, rt = Float.MAX_VALUE, ft = Float.MAX_VALUE;
-        boolean anyQ = false;
-        float[] shapeSum = new float[60];
-        for (int k = 0; k < m; k++) {
-            Features f = features(bufs.get(k), pres.get(k));
-            g = Math.min(g, f.growth);
-            pr = Math.min(pr, f.platRel);
-            pf = Math.min(pf, f.platFrac);
-            fl = Math.max(fl, f.fall);
-            if (!Float.isNaN(f.quiet)) { q = Math.max(q, f.quiet); anyQ = true; }
-            pkr = Math.min(pkr, Math.min(f.pk, 200f));
-            rt = Math.min(rt, f.riseT);
-            ft = Math.min(ft, f.fallT);
-            float[] sh = shape(bufs.get(k), 60);
-            for (int i = 0; i < 60; i++) shapeSum[i] += sh[i] / m;
+        Features[] fs = new Features[m];
+        for (int i = 0; i < m; i++) fs[i] = features(bufs.get(i), pres.get(i));
+        // Odrzucenie probek wyraznie innych niz reszta (np. nieudana probka): probka jest
+        // "inna", gdy co najmniej 2 z 4 czasow faz odbiegaja o > 50% od mediany wszystkich.
+        boolean[] in = new boolean[m];
+        float medL = median(fs, 0), medR = median(fs, 1), medP = median(fs, 2), medF = median(fs, 3);
+        int inliers = 0;
+        for (int i = 0; i < m; i++) {
+            int off = 0;
+            if (far(fs[i].lazyT, medL)) off++;
+            if (far(fs[i].riseT, medR)) off++;
+            if (far(fs[i].platT, medP)) off++;
+            if (far(fs[i].fallT, medF)) off++;
+            in[i] = m < 3 || off < 2;
+            if (in[i]) inliers++;
         }
-        // Gorne limity progow: cisza przed mowa i szum tla zaleza od pomieszczenia, wiec bardzo
-        // wysokie wartosci ze studia trenera nie moga blokowac kursanta w zwyklym otoczeniu.
-        mGrowth = Math.max(1.05f, Math.min(3.0f, g));
-        mPlatRel = pr; mPlatFrac = pf; mFall = Math.max(0.2f, fl);
-        mQuiet = Math.max(0.25f, anyQ ? q : 0.5f);
-        mPk = Math.max(1.5f, Math.min(8f, pkr));
-        mRiseT = Math.min(2.0f, rt);
-        mFallT = Math.min(1.0f, ft);
-        pkRatio = mPk; quietThresh = mQuiet;
+        if (inliers == 0) { java.util.Arrays.fill(in, true); inliers = m; }
+        c.rejected = m - inliers;
+        float lt = Float.MAX_VALUE, ll = 0, rt = Float.MAX_VALUE, pt = Float.MAX_VALUE, ft = Float.MAX_VALUE, pkr = Float.MAX_VALUE;
+        float sl = 0, sr = 0, sp = 0, sf = 0;
+        float[] shapeSum = new float[60];
+        for (int i = 0; i < m; i++) {
+            if (!in[i]) continue;
+            Features f = fs[i];
+            lt = Math.min(lt, f.lazyT); ll = Math.max(ll, f.lazyLevel);
+            rt = Math.min(rt, f.riseT); pt = Math.min(pt, f.platT); ft = Math.min(ft, f.fallT);
+            pkr = Math.min(pkr, Math.min(f.pk, 200f));
+            sl += f.lazyT; sr += f.riseT; sp += f.platT; sf += f.fallT;
+            float[] sh = shape(bufs.get(i), 60);
+            for (int j = 0; j < 60; j++) shapeSum[j] += sh[j] / inliers;
+        }
+        m = inliers;
+        mLazyT = lt; mLazyL = ll; mRiseT = rt; mPlatT = pt; mFallT = ft;
+        // cisza przed mowa zalezy od pomieszczenia — gorny limit, zeby nie blokowac kursanta
+        mPk = Math.max(1.5f, Math.min(6f, pkr));
+        ph1 = r1(sl / m); ph2 = r1(sr / m); ph3 = r1(sf / m);
+        c.lazyT = r1(sl / m); c.riseT = r1(sr / m); c.platT = r1(sp / m); c.fallT = r1(sf / m);
         shapeRef = shapeSum;
         calibrated = true;
         calSamples = m;
-        c.scoresAfter = new int[m];
-        for (int k = 0; k < m; k++) c.scoresAfter[k] = analyze(bufs.get(k), pres.get(k)).score;
+        c.scoresAfter = new int[bufs.size()];
+        for (int i = 0; i < bufs.size(); i++) c.scoresAfter[i] = analyze(bufs.get(i), pres.get(i)).score;
         return c;
+    }
+
+    private static float median(Features[] fs, int which) {
+        float[] v = new float[fs.length];
+        for (int i = 0; i < fs.length; i++) v[i] = which == 0 ? fs[i].lazyT : which == 1 ? fs[i].riseT : which == 2 ? fs[i].platT : fs[i].fallT;
+        java.util.Arrays.sort(v);
+        return v[v.length / 2];
+    }
+
+    private static boolean far(float v, float med) {
+        if (med <= 0.05f) return v > 0.3f;
+        return Math.abs(v - med) / med > 0.5f;
     }
 
     private static float clamp(float v, float a, float b) { return Math.max(a, Math.min(b, v)); }

@@ -16,7 +16,7 @@ public class SyllableDetector {
 
     public static class Syl {
         public final double start, nucleus, end;
-        Syl(double s, double n, double e) { start = s; nucleus = n; end = e; }
+        public Syl(double s, double n, double e) { start = s; nucleus = n; end = e; }
     }
 
     private static final int CHUNK = 256;
