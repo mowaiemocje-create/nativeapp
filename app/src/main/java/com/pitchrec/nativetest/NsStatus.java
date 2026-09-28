@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 // STATUS NAGRAN W NS (pewne dane): id rekordu -> "ok" (zaliczone), "bad" (do poprawy),
-// "wait" (czeka na ocene; tez po podmianie pliku). Odswiezane najwyzej co 2 minuty.
+// "wait" (czeka na ocene; tez po podmianie pliku). Odswiezane najwyzej co 15 s (na liscie nagran co 30 s, gdy cos czeka).
 public final class NsStatus {
 
     private static final Map<String, String> MAP = new HashMap<>();
@@ -29,7 +29,7 @@ public final class NsStatus {
         SharedPreferences p = c.getSharedPreferences("app_settings", Context.MODE_PRIVATE);
         String token = p.getString("ns_token", null);
         synchronized (NsStatus.class) {
-            if (token == null || busy || System.currentTimeMillis() - fetchedAt < 120000L) return;
+            if (token == null || busy || System.currentTimeMillis() - fetchedAt < 15000L) return;
             busy = true;
         }
         NsClient.request("GET", "/records?page_size=100&sort_by=date&sort_order=desc", token, p.getString("ns_email", ""), null, null, r -> {
@@ -47,7 +47,7 @@ public final class NsStatus {
                             String id = o.optString("id", "");
                             boolean reviewed = !o.isNull("reviewed_at") && !o.optString("reviewed_at", "").isEmpty() && !o.isNull("is_correct");
                             String upd = o.optString("record_file_updated_by_author_at", o.optString("updated_by_author_at", ""));
-                            boolean re = reviewed && !upd.isEmpty() && upd.compareTo(o.optString("reviewed_at", "")) > 0;
+                            boolean re = reviewed && newer(upd, o.optString("reviewed_at", ""));
                             String st = !reviewed || re ? "wait" : o.optBoolean("is_correct", false) ? "ok" : "bad";
                             if (!st.equals(MAP.put(id, st))) diff = true;
                             if (o.optString("date", "").startsWith(today)) tc++;
@@ -64,4 +64,37 @@ public final class NsStatus {
     }
 
     public static synchronized void invalidate() { fetchedAt = 0L; }
+
+    public static synchronized boolean anyWaiting() { return MAP.containsValue("wait"); }
+
+    // Czy plik podmieniony (upd) jest NOWSZY niz ocena (rev)? Porownanie czasow, nie napisow —
+    // NS potrafi zwracac rozne formaty (Z / +02:00 / ulamki sekund / spacja zamiast T).
+    public static boolean newer(String upd, String rev) {
+        long u = isoMs(upd), r = isoMs(rev);
+        return u > 0 && r > 0 && u > r + 1000L;
+    }
+
+    public static long isoMs(String s) {
+        if (s == null) return 0L;
+        s = s.trim();
+        if (s.isEmpty() || "null".equals(s)) return 0L;
+        if (s.matches("\\d{9,13}")) { long v = Long.parseLong(s); return v < 100000000000L ? v * 1000L : v; }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(\\d{4})-(\\d{2})-(\\d{2})[T ](\\d{2}):(\\d{2})(?::(\\d{2})(?:[.,](\\d+))?)?\\s*(Z|[+-]\\d{2}:?\\d{2})?").matcher(s);
+        if (!m.find()) return 0L;
+        java.util.Calendar c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"));
+        c.clear();
+        c.set(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)) - 1, Integer.parseInt(m.group(3)),
+                Integer.parseInt(m.group(4)), Integer.parseInt(m.group(5)), m.group(6) == null ? 0 : Integer.parseInt(m.group(6)));
+        long ms = c.getTimeInMillis();
+        if (m.group(7) != null) { String f = (m.group(7) + "000").substring(0, 3); ms += Integer.parseInt(f); }
+        String tz = m.group(8);
+        if (tz == null) ms -= java.util.TimeZone.getDefault().getOffset(ms); // bez strefy = czas lokalny
+        else if (!"Z".equals(tz)) {
+            String t = tz.replace(":", "");
+            int off = Integer.parseInt(t.substring(1, 3)) * 60 + Integer.parseInt(t.substring(3, 5));
+            ms -= (t.charAt(0) == '-' ? -1 : 1) * off * 60000L;
+        }
+        return ms;
+    }
 }

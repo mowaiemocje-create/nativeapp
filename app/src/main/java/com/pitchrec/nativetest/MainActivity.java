@@ -2643,7 +2643,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         // Filtry wg statusu (pewne dane: wysylka z telefonu + ocena w NS)
         if (finalFiles.length > 0) {
-            if (isLoggedIn()) NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
+            if (isLoggedIn()) { NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); })); scheduleRecsPoll(); }
             android.widget.LinearLayout fl = Ui.row(this);
             String[][] fs = {{"all", L.t("Wszystkie")}, {"bad", "↺ " + L.t("Do poprawy")}, {"wait", "⏳ " + L.t("Czekają")}, {"unsent", "☁ " + L.t("Niewysłane")}};
             for (String[] f : fs) {
@@ -2687,6 +2687,29 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private String recsFilter = "all";
+
+    // Gdy lista NAGRANIA jest otwarta i cos czeka na ocene — sprawdzaj NS co 30 s,
+    // zeby ocena trenera pojawila sie bez wychodzenia z ekranu.
+    private final Runnable recsPoll = () -> {
+        if (!"recs".equals(currentPage) || !isLoggedIn() || !NsStatus.anyWaiting()) return;
+        NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
+        scheduleRecsPoll();
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
+        if ("recs".equals(currentPage) && isLoggedIn())
+            NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
+    }
+
+    private void scheduleRecsPoll() {
+        View root = findViewById(android.R.id.content);
+        if (root == null) return;
+        root.removeCallbacks(recsPoll);
+        root.postDelayed(recsPoll, 30000L);
+    }
 
     // Status nagrania w NS: "ok" / "bad" / "wait" albo null (nieznany / niewyslane)
     private String recStatus(RecMeta m) {

@@ -76,7 +76,7 @@ public final class TrainerWatch {
             if (o == null || o.isNull("reviewed_at") || o.optString("reviewed_at", "").isEmpty() || o.isNull("is_correct")) continue;
             String rev = o.optString("reviewed_at", "");
             String upd = o.optString("record_file_updated_by_author_at", o.optString("updated_by_author_at", ""));
-            if (!upd.isEmpty() && upd.compareTo(rev) > 0) continue; // plik podmieniony po ocenie — czeka na nowa
+            if (NsStatus.newer(upd, rev)) continue; // plik podmieniony po ocenie — czeka na nowa
             String key = o.optString("id", "") + "|" + rev;
             if (seen.contains(key)) continue;
             seen.add(key);

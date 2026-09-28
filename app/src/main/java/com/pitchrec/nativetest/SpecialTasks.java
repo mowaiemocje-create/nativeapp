@@ -113,7 +113,7 @@ public class SpecialTasks {
                         String nm = ALL[k - 1].name;
                         boolean reviewed = !o.isNull("reviewed_at") && !o.optString("reviewed_at", "").isEmpty();
                         String upd = o.optString("record_file_updated_by_author_at", o.optString("updated_by_author_at", ""));
-                        boolean reReview = reviewed && !upd.isEmpty() && upd.compareTo(o.optString("reviewed_at", "")) > 0;
+                        boolean reReview = reviewed && NsStatus.newer(upd, o.optString("reviewed_at", ""));
                         String s;
                         if (reviewed && !reReview && !o.isNull("is_correct") && o.optBoolean("is_correct", false)) s = "ok";
                         else if (reviewed && !reReview && !o.isNull("is_correct")) s = "rejected";
