@@ -838,6 +838,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // Wysyla nagranie w kategorii z jego OPISU (jak w PitchRec). Bez opisu -> najpierw ekran opisu.
     // Pliki w trakcie wysylki — blokada wielokrotnego klikniecia (kazde klikniecie = nowy rekord w NS)
+    private boolean limitOverride = false;
     private final java.util.Set<String> sendingNow = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
     private void sendToNs(File file) {
@@ -848,6 +849,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             return;
         }
         if ("sent".equals(meta.ns)) { Toast.makeText(this, L.t("☁✓ To nagranie jest już wysłane do NS"), Toast.LENGTH_SHORT).show(); return; }
+        if (meta.fixRecordId.isEmpty() && limitHitToday() && !limitOverride) {
+            new AlertDialog.Builder(this)
+                    .setCustomTitle(nsLogoTitle(L.t("⛔ Limit na dziś wyczerpany")))
+                    .setMessage(L.t("Dziś NS już odrzucił nowe nagranie z powodu dziennego limitu. Nagranie zostaje w telefonie — wyślij je jutro."))
+                    .setPositiveButton(L.t("OK"), null)
+                    .setNeutralButton(L.t("Spróbuj mimo to"), (d, w) -> { limitOverride = true; sendToNs(file); limitOverride = false; })
+                    .show();
+            return;
+        }
         if (!sendingNow.add(file.getName())) { Toast.makeText(this, L.t("⏳ Wysyłanie już trwa…"), Toast.LENGTH_SHORT).show(); return; }
         if ("recs".equals(currentPage)) renderRecsPage();
         String catId = NsClient.categoryId(meta.cat);
@@ -858,7 +868,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             sendingNow.remove(file.getName());
             if (r.ok) {
                 markNs(file, "sent");
-                if (!isFix) rememberNsId(file, r.body);
+                if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); }
                 setStatus(isFix ? L.t("☁✓ Poprawka wysłana! Czeka na ocenę trenera.") : L.t("☁✓ NS: wysłano (") + L.cat(meta.cat) + ")");
                 Toast.makeText(this, isFix ? L.t("☁✓ Poprawka wysłana") : L.t("☁✓ Wysłano do NS"), Toast.LENGTH_SHORT).show();
                 if (isFix) fixListCache = null;
@@ -873,11 +883,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 markSessionExpired();
                 setStatus(L.t("⚠ Sesja wygasła — zaloguj się ponownie"));
             } else if (r.isLimitError()) {
-                markNs(file, "error");
-                setStatus(L.t("⛔ Dzienny limit NOWYCH nagrań wyczerpany"));
-                new AlertDialog.Builder(this).setTitle(L.t("Limit nagrań"))
-                        .setMessage(L.t("Serwer NS: ") + r.err + L.t("\n\nDzienny limit dotyczy tylko nowych nagrań. Poprawki odrzuconych nagrań nie mają limitu (sekcja Korekta)."))
-                        .setPositiveButton(getString(R.string.btn_close), null).show();
+                // nagranie NIE jest bledne — zostaje "do wyslania" (bez ☁✗), jutro zwykle "Wyslij NS"
+                showDailyLimit(null);
             } else {
                 markNs(file, "error");
                 setStatus(L.t("☁✗ NS: ") + r.err);
@@ -914,6 +921,25 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .show();
     }
 
+    // Wyrazny komunikat o dziennym limicie NS (zamiast "Blad 429")
+    private void showDailyLimit(String extra) {
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new java.util.Date());
+        getSharedPreferences("app_settings", MODE_PRIVATE).edit().putString("ns_limit_day", today).apply();
+        setStatus(L.t("⛔ Dzienny limit nowych nagrań wyczerpany — wyślij jutro"));
+        new AlertDialog.Builder(this)
+                .setCustomTitle(nsLogoTitle(L.t("⛔ Limit na dziś wyczerpany")))
+                .setMessage(L.t("Dzienny limit NOWYCH nagrań w NewSpeech na dziś się skończył.") + (extra == null ? "" : "\n" + extra)
+                        + "\n\n" + L.t("Nagranie jest bezpiecznie zapisane w telefonie (NAGRANIA → ☁ Niewysłane) — wyślij je jutro.")
+                        + "\n\n" + L.t("Poprawki odrzuconych nagrań (KOREKTA) nie mają limitu."))
+                .setPositiveButton(L.t("OK"), null).show();
+        if ("recs".equals(currentPage)) renderRecsPage();
+    }
+
+    private boolean limitHitToday() {
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new java.util.Date());
+        return today.equals(getSharedPreferences("app_settings", MODE_PRIVATE).getString("ns_limit_day", ""));
+    }
+
     private void sendNext(java.util.List<File> todo, int idx, int okCount) {
         if (idx >= todo.size()) {
             setStatus(L.t("☁✓ Wysłano ") + okCount + L.t(" nagrań do NS"));
@@ -930,6 +956,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 markNs(f, "sent");
                 rememberNsId(f, r.body);
                 sendNext(todo, idx + 1, okCount + 1);
+            } else if (r.isLimitError() && fm.fixRecordId.isEmpty()) {
+                showDailyLimit(L.f("Wysłano teraz: {0}, czeka: {1}.", okCount, todo.size() - idx));
             } else {
                 if (r.isAuthError()) markSessionExpired(); else markNs(f, "error");
                 setStatus(L.t("☁✗ Wysłano ") + okCount + "/" + todo.size() + L.t(" — zatrzymano: ") + r.err);

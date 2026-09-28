@@ -82,7 +82,8 @@ public class NsClient {
         public String token, email, userId;
         public String body;
         public boolean isAuthError() { return status == 401 || status == 403; }
-        public boolean isLimitError() { return err != null && err.toLowerCase(Locale.ROOT).contains("limit"); }
+        // 429 = dzienny limit NOWYCH nagran w NS (serwer nie zawsze dodaje opis ze slowem "limit")
+        public boolean isLimitError() { return status == 429 || (err != null && err.toLowerCase(Locale.ROOT).contains("limit")); }
     }
 
     public interface Callback { void done(Result r); }
@@ -134,7 +135,7 @@ public class NsClient {
         r.ok = r.status >= 200 && r.status < 300;
         if (!r.ok) {
             String msg = null;
-            try { msg = new JSONObject(r.body).optString("message", null); } catch (Exception e) { }
+            try { JSONObject eo = new JSONObject(r.body); msg = eo.optString("message", ""); if (msg.isEmpty()) msg = eo.optString("error", ""); } catch (Exception e) { }
             r.err = (msg != null && !msg.isEmpty()) ? msg : (L.t("Błąd ") + r.status);
         }
         return r;
