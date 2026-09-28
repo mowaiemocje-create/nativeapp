@@ -22,34 +22,49 @@ public class AudioFileLoader {
     private static void loadSamples(File file) throws IOException {
         short[] samples = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
 
-        float[] yinWindow = new float[YIN_WINDOW];
-        int yinFillCount = 0;
-        long samplePos = 0;
-        float lastSmoothedFreq = 0f;
-
-        int chunkSize = 2048;
-        for (int offset = 0; offset < samples.length; offset += chunkSize) {
-            int len = Math.min(chunkSize, samples.length - offset);
+        // 1) FALA od razu — obwiednia calego pliku (bardzo szybko), wykres jest widoczny zanim
+        //    policzy sie pitch
+        final int CH = 1 << 16;
+        for (int off = 0; off < samples.length; off += CH) {
+            int len = Math.min(CH, samples.length - off);
             short[] chunk = new short[len];
-            System.arraycopy(samples, offset, chunk, 0, len);
+            System.arraycopy(samples, off, chunk, 0, len);
             LiveAudioData.appendSamples(chunk, len);
+        }
 
-            for (int i = 0; i < len; i++) {
-                yinWindow[yinFillCount] = chunk[i] / 32768f;
-                yinFillCount++;
-                if (yinFillCount >= YIN_WINDOW) {
+        // 2) PITCH (YIN) ROWNOLEGLE na wszystkich rdzeniach — okna 2048 probek sa niezalezne.
+        //    Ciche okna (RMS < 0,003) pomijamy: VAD, linia pitch i sylaby i tak ich nie uzywaja.
+        final int frames = samples.length / YIN_WINDOW;
+        final float[] rmsA = new float[frames], f0A = new float[frames], relA = new float[frames];
+        final short[] src = samples;
+        int threads = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors()));
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        final java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.util.List<java.util.concurrent.Future<?>> jobs = new java.util.ArrayList<>();
+        for (int t = 0; t < threads; t++) {
+            jobs.add(pool.submit(() -> {
+                YinPitchDetector.Work w = new YinPitchDetector.Work();
+                float[] win = new float[YIN_WINDOW];
+                int f;
+                while ((f = next.getAndIncrement()) < frames) {
+                    int base = f * YIN_WINDOW;
                     float sum = 0;
-                    for (int j = 0; j < YIN_WINDOW; j++) sum += yinWindow[j] * yinWindow[j];
+                    for (int j = 0; j < YIN_WINDOW; j++) { float v = src[base + j] / 32768f; win[j] = v; sum += v * v; }
                     float rms = (float) Math.sqrt(sum / YIN_WINDOW);
-
-                    float freq = YinPitchDetector.detect(yinWindow);
-                    long windowStartSample = samplePos + i - YIN_WINDOW + 1;
-                    // VAD + pauzy, ciagla linia pitch (PitchTracker) i ocena emisji wg norm
-                    LiveAudioData.processFrame(windowStartSample, rms, freq, YinPitchDetector.lastRelaxed);
-                    yinFillCount = 0;
+                    rmsA[f] = rms;
+                    if (rms < 0.003f) { f0A[f] = -1; relA[f] = -1; continue; }
+                    f0A[f] = YinPitchDetector.detect(win, w);
+                    relA[f] = w.relaxed;
                 }
-            }
-            samplePos += len;
+            }));
+        }
+        try { for (java.util.concurrent.Future<?> j : jobs) j.get(); }
+        catch (Exception e) { throw new IOException("Analiza pitch: " + e.getMessage()); }
+        finally { pool.shutdown(); }
+
+        // 3) Reszta analizy po kolei (VAD + pauzy, linia pitch, normy, sylaby) — jak na zywo
+        for (int f = 0; f < frames; f++) {
+            LiveAudioData.processFrame((long) f * YIN_WINDOW, rmsA[f], f0A[f], relA[f]);
         }
         LiveAudioData.finishAnalysis();
     }
