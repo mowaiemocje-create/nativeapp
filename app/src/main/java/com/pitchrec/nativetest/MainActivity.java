@@ -2302,6 +2302,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 pitchWaveView.resetPan();
                 pitchWaveView.invalidate();
                 if (fe != null) { statusText.setText(L.t("Błąd wczytywania: ") + fe); return; }
+                // dlugosc wczytanego nagrania na liczniku (pozycja / calosc), jak po nagraniu
+                lastRecordingTotalDurationMs = LiveAudioData.getTotalSamplesWritten() * 1000L / LiveAudioData.SAMPLE_RATE;
+                timeText.setText(formatMs(0) + " / " + formatMs(lastRecordingTotalDurationMs));
                 statusText.setText(L.t("Wczytano nagranie"));
                 // 2) pitch tylko na zyczenie (pauz przy odsluchu nie liczymy)
                 if (prefs().getBoolean("auto_pitch", false)) { loadPitchFor(file, gen); return; }
