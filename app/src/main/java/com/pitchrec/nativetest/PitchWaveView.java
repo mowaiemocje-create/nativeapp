@@ -157,8 +157,17 @@ public class PitchWaveView extends View {
         seekListener = l;
     }
 
+    private long lastTouchMs = 0L;
+    private long lastFollowSample = -1L;
+
     public void setPlayheadSample(long sample) {
+        // Podazanie za odtwarzaniem TYLKO gdy linia sie przesuwa (trwa odtwarzanie) i palec
+        // nie przewijal przed chwila — wczesniej petla odtwarzacza (dzialajaca tez w pauzie)
+        // co 50 ms "sciagala" widok z powrotem i nie dalo sie przewinac do poczatku.
+        boolean moving = sample != lastFollowSample;
+        lastFollowSample = sample;
         playheadSample = sample;
+        if (!moving || System.currentTimeMillis() - lastTouchMs < 2500) { invalidate(); return; }
         // Auto-przewijanie do przodu podczas odtwarzania wczytanego pliku (tryb
         // statyczny) — bez tego, widok zostawal zablokowany na stalym oknie (np. 8s) i
         // playhead po prostu "wychodzil" poza widoczny zakres podczas dluzszego
@@ -215,6 +224,9 @@ public class PitchWaveView extends View {
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (isLiveMode) return false;
+        lastTouchMs = System.currentTimeMillis();
+        // przewijanie w poziomie nie moze byc przejmowane przez przewijana strone
+        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(event.getAction() != MotionEvent.ACTION_UP && event.getAction() != MotionEvent.ACTION_CANCEL);
 
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
