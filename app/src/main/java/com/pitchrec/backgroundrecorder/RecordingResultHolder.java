@@ -7,6 +7,8 @@ public class RecordingResultHolder {
 
     public interface Listener {
         void onSuccess(String base64, long durationMs, String mimeType);
+        // gotowy plik (bez przepisywania przez Base64 — szybciej przy dlugich nagraniach)
+        void onSuccessFile(String path, long durationMs, String mimeType);
         void onError(String code, String message);
     }
 
@@ -18,6 +20,10 @@ public class RecordingResultHolder {
 
     public static void resolveStop(String base64, long durationMs, String mimeType) {
         if (listener != null) listener.onSuccess(base64, durationMs, mimeType);
+    }
+
+    public static void resolveStopFile(String path, long durationMs, String mimeType) {
+        if (listener != null) listener.onSuccessFile(path, durationMs, mimeType);
     }
 
     public static void rejectStop(String code, String message) {

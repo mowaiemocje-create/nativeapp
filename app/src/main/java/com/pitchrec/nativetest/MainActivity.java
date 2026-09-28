@@ -881,10 +881,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             formAdd(f, "entry.528183348", m.sys);
             formAdd(f, "entry.242728015", hf.format(new java.util.Date(timeMs)));
             formAdd(f, "entry.1345317394", m.note);
-            NsClient.postForm("https://docs.google.com/forms/d/e/1FAIpQLSfTippGzWsqV6vX9ZovUTqsGYW-GQyqcvmTiJkIsvpoRysJ9g/formResponse", f.toString(), (ok, info) -> {
-                if (ok) Toast.makeText(this, L.t("📋 Formularz Google: wysłano ✓"), Toast.LENGTH_SHORT).show();
-                else Toast.makeText(this, L.t("⚠ Formularz Google nie wysłany") + " (" + info + ") — " + L.t("ponowię automatycznie"), Toast.LENGTH_LONG).show();
-            });
+            // wysylka w tle, bez komunikatow (nieudane ida do kolejki i sa ponawiane automatycznie)
+            NsClient.postForm("https://docs.google.com/forms/d/e/1FAIpQLSfTippGzWsqV6vX9ZovUTqsGYW-GQyqcvmTiJkIsvpoRysJ9g/formResponse", f.toString(), (ok, info) -> { });
         } catch (Exception e) { /* nieblokujace */ }
         if (!m.hasGps() || m.cat.isEmpty()) return;
         String name = mapName(m.name);
@@ -2102,9 +2100,35 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     @Override
     public void onSuccess(String base64, long durationMs, String mimeType) {
-        runOnUiThread(() -> {
+        runOnUiThread(() -> afterRecordingSaved(durationMs, () -> saveRecordingForPlayback(base64, mimeType)));
+    }
+
+    @Override
+    public void onSuccessFile(String path, long durationMs, String mimeType) {
+        runOnUiThread(() -> afterRecordingSaved(durationMs, () -> {
+            // plik z cache przenosimy do katalogu nagran (ten sam dysk = natychmiast, bez kopiowania)
+            File src = new File(path);
+            String ext = "audio/mpeg".equals(mimeType) ? ".mp3" : ".wav";
+            File dest = new File(getFilesDir(), "recording_" + System.currentTimeMillis() + ext);
+            if (!src.renameTo(dest)) {
+                try (java.io.FileInputStream in = new java.io.FileInputStream(src); FileOutputStream out = new FileOutputStream(dest)) {
+                    byte[] b = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(b)) > 0) out.write(b, 0, n);
+                    src.delete();
+                } catch (IOException e) {
+                    statusText.setText(L.t("Błąd zapisu: ") + e.getMessage());
+                    return;
+                }
+            }
+            lastSavedFilePath = dest.getAbsolutePath();
+        }));
+    }
+
+    private void afterRecordingSaved(long durationMs, Runnable save) {
+        {
             statusText.setText(L.t("Nagrano ") + (durationMs / 1000) + L.t("s — zapisano"));
-            saveRecordingForPlayback(base64, mimeType);
+            save.run();
             loadedFilePath = null; // swiezo nagrany plik jest juz w LiveAudioData, nie trzeba wczytywac ponownie
             pendingSeekSample = 0L;
             lastRecordingTotalDurationMs = durationMs;
@@ -2117,7 +2141,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             headerStatus.setTextColor(getResources().getColor(R.color.pr_muted));
             // Jak w PitchRec: po STOP od razu ekran "ZAPISZ NAGRANIE" (opis nagrania)
             if (lastSavedFilePath != null) describeNewRecording(new File(lastSavedFilePath));
-        });
+        }
     }
 
     private String formatMs(long ms) {

@@ -135,7 +135,7 @@ public class LiveAudioData {
                     s.add(u);
                     a = fe[k];
                 }
-                if (done.end - a > 0.15) s.addAll(countSyllables(a, done.end));
+                s.addAll(afterFour(done.start, a, done.end));
             } else s = countSyllables(done.start, done.end);
             double dur = Math.max(0.2, done.end - done.start);
             done.syllables = s.size();
@@ -162,11 +162,26 @@ public class LiveAudioData {
                 SyllableDetector.Syl u = new SyllableDetector.Syl(st, (st + ue) / 2, ue);
                 u.four = true;
                 s.add(u);
-                if (now - ue > 0.15) s.addAll(countSyllables(ue, now));
+                s.addAll(afterFour(st, ue, now));
             } else s = countSyllables(st, now);
             liveSyllables = s;
             liveRate = (float) (s.size() / (now - st) * 60);
         }
+    }
+
+    // Sylaby PO sylabie 4-fazowej: prog glosnosci liczony z CALEJ porcji (razem z 4-fazowa),
+    // a nie z samej koncowki — inaczej cichy "ogon" wyciszenia 4-fazowej liczyl sie jako
+    // osobna sylaba (1 sylaba pokazywala sie jako 2).
+    static List<SyllableDetector.Syl> afterFour(double portionStart, double unitEnd, double end) {
+        List<SyllableDetector.Syl> out = new ArrayList<>();
+        if (end - unitEnd <= 0.15) return out;
+        double prev = unitEnd;
+        for (SyllableDetector.Syl sy : countSyllables(portionStart, end)) {
+            if (sy.nucleus <= unitEnd + 0.05) continue;
+            out.add(new SyllableDetector.Syl(prev, sy.nucleus, sy.end));
+            prev = sy.end;
+        }
+        return out;
     }
 
     public static List<SyllableDetector.Syl> countSyllables(double start, double end) {

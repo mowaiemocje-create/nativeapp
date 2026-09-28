@@ -327,50 +327,104 @@ public class BackgroundRecorderService extends Service {
             stopSelf();
             return;
         }
-        try {
-            recording = false;
-            if (recordThread != null) {
-                try { recordThread.join(2000); } catch (InterruptedException ie) { }
-            }
-            cleanupAudioResources();
-
-            boolean hasData = outputFile != null && outputFile.exists() && outputFile.length() > 0;
-            if (!hasData) {
-                RecordingResultHolder.rejectStop("EMPTY_RECORDING", null);
-            } else {
-                // AUTO 0 dB: ciche nagranie podglasniamy tak, zeby najglosniejsza probka
-                // trafila w 0 dB (-0,1 dBFS). Czysto liniowo = bez znieksztalcen.
-                if (LiveAudioData.autoNormalize) normalizeWavInPlace(outputFile);
-                if (LiveAudioData.outputBoost > 1) boostWavInPlace(outputFile, LiveAudioData.outputBoost);
-                File finalFile = outputFile;
+        recording = false;
+        if (recordThread != null) {
+            try { recordThread.join(2000); } catch (InterruptedException ie) { }
+        }
+        try { cleanupAudioResources(); } catch (Exception e) { }
+        final File wav = outputFile;
+        final String fmt = outputFormat;
+        final long durationMs = System.currentTimeMillis() - recordingStartedAt - pausedAccumMs;
+        final boolean norm = LiveAudioData.autoNormalize;
+        final int boost = LiveAudioData.outputBoost;
+        currentStatus = "NONE";
+        LiveAudioData.isRecordingActive = false;
+        releaseAudioFocus();
+        releaseMediaSession();
+        updateNotification("Zapisywanie…");
+        // ZAPIS W TLE (wczesniej wszystko szlo na glownym watku: dwa przebiegi glosnosci,
+        // MP3 w najwolniejszej jakosci i przepisywanie calego pliku przez Base64 — stad
+        // dlugie czekanie). Teraz: jeden przebieg glosnosci, szybkie MP3, plik przekazywany
+        // bez kopiowania.
+        new Thread(() -> {
+            try {
+                boolean hasData = wav != null && wav.exists() && wav.length() > 44;
+                if (!hasData) {
+                    RecordingResultHolder.rejectStop("EMPTY_RECORDING", null);
+                    return;
+                }
+                if (norm || boost > 1) applyGainInPlace(wav, norm, boost);
+                File finalFile = wav;
                 String mime = "audio/wav";
-                if ("mp3".equals(outputFormat)) {
-                    // Konwersja calego, gotowego pliku WAV do MP3 — dzieje sie TERAZ,
-                    // dopiero po Stop (nie na zywo podczas nagrywania), zeby podglad
-                    // podczas pauzy dzialal zawsze (WAV), niezaleznie od wybranego
-                    // formatu koncowego.
-                    File mp3File = convertWavToMp3(outputFile);
-                    if (mp3File != null) {
-                        finalFile = mp3File;
-                        mime = "audio/mpeg";
+                if ("mp3".equals(fmt)) {
+                    File mp3File = convertWavToMp3(wav);
+                    if (mp3File != null) { finalFile = mp3File; mime = "audio/mpeg"; }
+                }
+                RecordingResultHolder.resolveStopFile(finalFile.getAbsolutePath(), durationMs, mime);
+            } catch (Exception e) {
+                RecordingResultHolder.rejectStop("FAILED_TO_FETCH_RECORDING", e.getMessage());
+            } finally {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    if (!"RECORDING".equals(currentStatus) && !"PAUSED".equals(currentStatus)) {
+                        releaseWakeLock();
+                        stopForegroundCompat();
+                        stopSelf();
+                    }
+                });
+            }
+        }, "rec-save").start();
+    }
+
+    // GLOSNOSC W JEDNYM PRZEBIEGU: 0 dB (szczyt -0,1 dBFS) i/lub wzmocnienie ×N z miekkim
+    // limiterem (powyzej 60% skali tanh — glosne miejsca lagodnie sciskane, bez trzaskow).
+    private void applyGainInPlace(File wavFile, boolean normalize, int boost) {
+        final double T = 0.6, K = 1.0 - T;
+        try (RandomAccessFile raf = new RandomAccessFile(wavFile, "rw")) {
+            long len = raf.length();
+            if (len <= 44) return;
+            byte[] buf = new byte[1 << 18];
+            double gain = 1.0;
+            if (normalize) {
+                int peak = 0, read;
+                raf.seek(44);
+                while ((read = raf.read(buf)) > 0) {
+                    for (int i = 0; i + 1 < read; i += 2) {
+                        int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                        int av = v < 0 ? -v : v;
+                        if (av > peak) peak = av;
                     }
                 }
-                long durationMs = System.currentTimeMillis() - recordingStartedAt - pausedAccumMs;
-                byte[] bytes = readFileBytes(finalFile);
-                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                RecordingResultHolder.resolveStop(base64, durationMs, mime);
+                if (peak >= 33) gain = Math.max(1.0, 32390.0 / peak); // cisza — nie wzmacniamy szumu
             }
-        } catch (Exception e) {
-            RecordingResultHolder.rejectStop("FAILED_TO_FETCH_RECORDING", e.getMessage());
-        } finally {
-            currentStatus = "NONE";
-            LiveAudioData.isRecordingActive = false;
-            releaseWakeLock();
-            releaseAudioFocus();
-            releaseMediaSession();
-            stopForegroundCompat();
-            stopSelf();
-        }
+            final double g = gain * Math.max(1, boost);
+            final boolean limit = boost > 1;
+            if (g <= 1.01) return;
+            long pos = 44;
+            raf.seek(pos);
+            int read;
+            while ((read = raf.read(buf)) > 0) {
+                int even = read & ~1;
+                if (even == 0) break;
+                for (int i = 0; i < even; i += 2) {
+                    int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                    long nv;
+                    if (!limit) {
+                        nv = Math.round(v * g);
+                    } else {
+                        double x = v / 32768.0 * g, ax = Math.abs(x);
+                        double y = ax <= T ? ax : T + K * Math.tanh((ax - T) / K);
+                        nv = Math.round(Math.signum(x) * Math.min(y, 1.0) * 0.985 * 32767);
+                    }
+                    if (nv > 32767) nv = 32767; else if (nv < -32768) nv = -32768;
+                    buf[i] = (byte) (nv & 0xff);
+                    buf[i + 1] = (byte) ((nv >> 8) & 0xff);
+                }
+                raf.seek(pos);
+                raf.write(buf, 0, even);
+                pos += even;
+                raf.seek(pos);
+            }
+        } catch (Exception e) { /* zostaje nagranie bez zmian */ }
     }
 
     // Konwertuje caly, gotowy plik WAV do MP3 (wsadowo, nie na zywo) — uzywane dopiero
@@ -380,13 +434,14 @@ public class BackgroundRecorderService extends Service {
             File mp3File = new File(getCacheDir(), "converted_" + System.currentTimeMillis() + ".mp3");
             javax.sound.sampled.AudioFormat lameFormat =
                     new javax.sound.sampled.AudioFormat(SAMPLE_RATE, 16, 1, true, false);
-            LameEncoder encoder = new LameEncoder(lameFormat, 192, MPEGMode.MONO, Lame.QUALITY_HIGHEST, false);
+            // jakosc 7 (szybka) i 128 kbps mono — dla mowy brzmi tak samo, a koduje sie kilka razy szybciej
+            LameEncoder encoder = new LameEncoder(lameFormat, 128, MPEGMode.MONO, 7, false);
             byte[] encodeBuffer = new byte[encoder.getPCMBufferSize()];
 
             try (RandomAccessFile in = new RandomAccessFile(wavFile, "r");
                  FileOutputStream out = new FileOutputStream(mp3File)) {
                 in.seek(44); // pomijamy naglowek WAV
-                byte[] pcmChunk = new byte[8192];
+                byte[] pcmChunk = new byte[encoder.getPCMBufferSize()];
                 int read;
                 while ((read = in.read(pcmChunk)) != -1) {
                     int bytesEncoded = encoder.encodeBuffer(pcmChunk, 0, read, encodeBuffer);
