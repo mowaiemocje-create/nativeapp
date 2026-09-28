@@ -124,6 +124,7 @@ public class StatsPage {
                 fillSummary(summary, local, total);
                 fillCats(cats, sent, correct, L.t("pełna historia z NewSpeech"));
                 fillMilestones(miles, sent, total);
+                Achievements.celebrate(a, Achievements.newlyEarned(a, sent, total)); // okienko przy nowej odznace
                 JSONObject ov = dj.optJSONObject("overall");
                 if (ov != null) fillReview(review, ov.optInt("reviewed", 0), ov.optInt("correct", 0));
             } catch (Exception e) { /* zostaja dane lokalne */ }

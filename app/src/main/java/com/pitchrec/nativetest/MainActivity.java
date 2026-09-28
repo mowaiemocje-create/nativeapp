@@ -240,6 +240,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         resetButton.setOnClickListener(v -> resetRecording());
 
         setupBottomNav();
+        setupGoalLine();
+        applySliderVisibility();
         showPage("daw");
         // Przypomnienie o 20:00 (nagranie + dziennik) — domyslnie wlaczone
         ReminderReceiver.schedule(this);
@@ -428,6 +430,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Powiadomienie "przypomnienie" otwiera DAW (brak nagrania) albo dziennik
     private void openPageFromIntent(Intent in) {
         if (in == null) return;
+        if ("com.pitchrec.nativetest.QUICK_REC".equals(in.getAction())) {
+            in.setAction(null);
+            showPage("daw");
+            // skrot "Nagraj" z ikony apki — start nagrywania od razu
+            if (!isRecording) new Handler(Looper.getMainLooper()).postDelayed(this::startRecordingFlow, 400);
+            return;
+        }
         String pg = in.getStringExtra("open_page");
         if (pg == null) return;
         in.removeExtra("open_page");
@@ -461,6 +470,102 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         if ("recs".equals(page)) renderRecsPage();
         if ("set".equals(page)) renderSettingsPage();
+        if ("daw".equals(page)) refreshGoal();
+    }
+
+    // ── CEL DNIA na ekranie nagrywania (z harmonogramu, pewne dane z NS) ──
+    private TextView goalText;
+
+    private void setupGoalLine() {
+        View st = findViewById(R.id.statusText);
+        if (st == null || !(st.getParent() instanceof android.widget.LinearLayout)) return;
+        android.widget.LinearLayout parent = (android.widget.LinearLayout) st.getParent();
+        goalText = Ui.text(this, "", 12f, R.color.pr_text);
+        goalText.setGravity(android.view.Gravity.CENTER);
+        float d = getResources().getDisplayMetrics().density;
+        goalText.setPadding((int) (8 * d), (int) (5 * d), (int) (8 * d), (int) (5 * d));
+        goalText.setBackgroundColor(getResources().getColor(R.color.pr_card));
+        goalText.setVisibility(View.GONE);
+        goalText.setOnClickListener(v -> openLoginOnlySection("stats", L.t("STATYSTYKI")));
+        parent.addView(goalText, parent.indexOfChild(st));
+    }
+
+    private int sentTodayLocal() {
+        File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files == null) return 0;
+        java.util.Calendar a = java.util.Calendar.getInstance(), b = java.util.Calendar.getInstance();
+        int n = 0;
+        for (File f : files) {
+            b.setTimeInMillis(f.lastModified());
+            if (a.get(java.util.Calendar.YEAR) != b.get(java.util.Calendar.YEAR) || a.get(java.util.Calendar.DAY_OF_YEAR) != b.get(java.util.Calendar.DAY_OF_YEAR)) continue;
+            RecMeta m = RecMeta.load(this, f.getName());
+            if ("sent".equals(m.ns) && m.fixRecordId.isEmpty()) n++;
+        }
+        return n;
+    }
+
+    private void updateGoalLine() {
+        if (goalText == null) return;
+        android.content.SharedPreferences p = prefs();
+        if (!isLoggedIn() || !p.getBoolean("goal_active", false)) { goalText.setVisibility(View.GONE); return; }
+        int per = p.getInt("goal_per_day", 0), missing = p.getInt("goal_missing", 0);
+        String dl = p.getString("goal_deadline", "");
+        String txt;
+        int col;
+        if (missing == 0) { txt = "🎉 " + L.t("Harmonogram wykonany!") + " · " + L.t("dalej trenuj swobodnie"); col = R.color.pr_accent; }
+        else {
+            int today = Math.max(sentTodayLocal(), NsStatus.todayCount);
+            boolean done = per > 0 && today >= per;
+            txt = (done ? "✅ " : "🎯 ") + L.f("Dziś: {0}/{1} nagrań", today, Math.max(1, per)) + "  ·  "
+                    + (p.getBoolean("goal_on_track", false) ? L.t("w tym tempie zdążysz ✓") : L.f("harmonogram do {0}", dl));
+            col = done ? R.color.pr_accent : R.color.pr_text;
+        }
+        goalText.setText(txt);
+        goalText.setTextColor(getResources().getColor(col));
+        goalText.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshGoal() {
+        updateGoalLine();
+        if (!isLoggedIn()) return;
+        HarmoGoal.refresh(this, () -> runOnUiThread(this::updateGoalLine));
+        NsStatus.refresh(this, () -> runOnUiThread(() -> { updateGoalLine(); if ("recs".equals(currentPage)) renderRecsPage(); }));
+    }
+
+    // MIC i ZOOM mozna schowac, gdy mikrofon jest juz dobrze ustawiony
+    private void applySliderVisibility() {
+        int v = prefs().getBoolean("show_sliders", true) ? View.VISIBLE : View.GONE;
+        View a = findViewById(R.id.micRow), b = findViewById(R.id.zoomRow);
+        if (a != null) a.setVisibility(v);
+        if (b != null) b.setVisibility(v);
+    }
+
+    // Po wyslaniu: swiezy status/cel dnia i ewentualne nowe odznaki (pelna historia z NS)
+    private void afterSendRefresh() {
+        NsStatus.invalidate();
+        HarmoGoal.invalidate(this);
+        refreshGoal();
+        String q = "/harmonogram-stats/from-ns?ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail())
+                + "&ns_server=new&date_from=1970-01-01&date_to=2999-12-31";
+        NsClient.backend("GET", q, null, r -> {
+            try {
+                org.json.JSONObject dj = new org.json.JSONObject(r.body);
+                org.json.JSONObject by = dj.optJSONObject("byCategory");
+                if (!dj.optBoolean("ok", false) || by == null) return;
+                java.util.Map<String, Integer> sent = new java.util.LinkedHashMap<>();
+                int total = 0;
+                java.util.Iterator<String> it = by.keys();
+                while (it.hasNext()) {
+                    org.json.JSONObject c = by.optJSONObject(it.next());
+                    if (c == null) continue;
+                    String nm = c.optString("category_name", "");
+                    int sn = c.optInt("sent", 0);
+                    sent.put(nm, sent.getOrDefault(nm, 0) + sn);
+                    total += sn;
+                }
+                Achievements.celebrate(this, Achievements.newlyEarned(this, sent, total));
+            } catch (Exception e) { }
+        });
     }
 
     // Wejscie do sekcji wymagajacej konta: najpierw sprawdzamy sesje (jak w PWA) —
@@ -750,6 +855,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 setStatus(isFix ? L.t("☁✓ Poprawka wysłana! Czeka na ocenę trenera.") : L.t("☁✓ NS: wysłano (") + L.cat(meta.cat) + ")");
                 Toast.makeText(this, isFix ? L.t("☁✓ Poprawka wysłana") : L.t("☁✓ Wysłano do NS"), Toast.LENGTH_SHORT).show();
                 if (isFix) fixListCache = null;
+                afterSendRefresh();
             } else if (isFix && r.isLimitError()) {
                 markNs(file, "error");
                 setStatus(L.t("⛔ Poprawka odrzucona z powodu limitu"));
@@ -994,10 +1100,40 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startActivity(i);
     }
 
+    // Tytul okienka z logo "new speech" (jak w naglowku apki)
+    private View nsLogoTitle(String question) {
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setPadding((int) (22 * d), (int) (18 * d), (int) (22 * d), (int) (4 * d));
+        android.widget.LinearLayout logo = new android.widget.LinearLayout(this);
+        logo.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        logo.setGravity(android.view.Gravity.BOTTOM);
+        TextView n1 = new TextView(this);
+        n1.setText("new ");
+        n1.setTextSize(24f);
+        n1.setTextColor(getResources().getColor(R.color.pr_text));
+        TextView n2 = new TextView(this);
+        n2.setText("speech");
+        n2.setTextSize(24f);
+        n2.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        n2.setTextColor(getResources().getColor(R.color.pr_accent));
+        logo.addView(n1);
+        logo.addView(n2);
+        box.addView(logo);
+        TextView q = new TextView(this);
+        q.setText(question);
+        q.setTextSize(16f);
+        q.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        q.setPadding(0, (int) (8 * d), 0, 0);
+        box.addView(q);
+        return box;
+    }
+
     private void askSendAfterSave(File file) {
         if (!isLoggedIn()) return;
         new AlertDialog.Builder(this)
-                .setTitle(L.t("Wysłać do NewSpeech?"))
+                .setCustomTitle(nsLogoTitle(L.t("Wysłać do NewSpeech?")))
                 .setMessage(L.t("Nagranie zostało zapisane. Wysłać je teraz do NS?"))
                 .setPositiveButton(L.t("☁ Wyślij"), (d, w) -> sendToNs(file))
                 .setNegativeButton(L.t("Później"), null)
@@ -1164,6 +1300,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         rec.addView(ticks);
         rec.addView(hint(L.t("Gdy nagranie po zapisie jest za ciche — podgłośnij ×2…×10. Najgłośniejsze miejsca są łagodnie ograniczane (bez trzasków).")));
         rec.addView(divider());
+        rec.addView(toggleRow("🎚 " + L.t("Suwaki MIC i ZOOM na ekranie nagrywania"), prefs().getBoolean("show_sliders", true), on -> { prefs().edit().putBoolean("show_sliders", on).apply(); applySliderVisibility(); }));
+        rec.addView(hint(L.t("Gdy mikrofon jest już dobrze ustawiony, możesz je schować — ekran nagrywania będzie prostszy.")));
         rec.addView(toggleRow("🔆 " + L.t("Ekran nie gaśnie (wyłączony wygaszacz)"), keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
         rec.addView(toggleRow("🎚 " + L.t("Bramka szumów (tłumi cichy szum tła)"), LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); }));
         rec.addView(divider());
@@ -2503,6 +2641,33 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(actions);
         c.addView(Ui.spacer(this, 14));
 
+        // Filtry wg statusu (pewne dane: wysylka z telefonu + ocena w NS)
+        if (finalFiles.length > 0) {
+            if (isLoggedIn()) NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
+            android.widget.LinearLayout fl = Ui.row(this);
+            String[][] fs = {{"all", L.t("Wszystkie")}, {"bad", "↺ " + L.t("Do poprawy")}, {"wait", "⏳ " + L.t("Czekają")}, {"unsent", "☁ " + L.t("Niewysłane")}};
+            for (String[] f : fs) {
+                if (!isLoggedIn() && !"all".equals(f[0]) && !"unsent".equals(f[0])) continue;
+                int cnt = 0;
+                if (!"all".equals(f[0])) for (File x : finalFiles) if (recMatches(x, f[0])) cnt++;
+                boolean on = f[0].equals(recsFilter);
+                TextView chip = Ui.text(this, f[1] + ("all".equals(f[0]) ? "" : " " + cnt), 11f, on ? R.color.pr_bg : R.color.pr_text);
+                chip.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                chip.setPadding((int) (10 * d), (int) (6 * d), (int) (10 * d), (int) (6 * d));
+                int ac = getResources().getColor(R.color.pr_accent);
+                chip.setBackground(Ui.rounded(on ? ac : 0x00000000, on ? ac : 0x55FFFFFF, d, 14 * d));
+                chip.setOnClickListener(v -> { recsFilter = f[0]; renderRecsPage(); });
+                android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.rightMargin = (int) (6 * d);
+                fl.addView(chip, lp);
+            }
+            android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(this);
+            hs.setHorizontalScrollBarEnabled(false);
+            hs.addView(fl);
+            c.addView(hs);
+            c.addView(Ui.spacer(this, 10));
+        }
+
         if (finalFiles.length == 0) {
             TextView empty = Ui.text(this, getString(R.string.recordings_empty), 13f, R.color.pr_muted);
             empty.setGravity(android.view.Gravity.CENTER);
@@ -2511,7 +2676,30 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             return;
         }
         java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("d.M HH:mm", Locale.getDefault());
-        for (File f : finalFiles) c.addView(buildRecordingCard(f, fmt));
+        int shownN = 0;
+        for (File f : finalFiles) if ("all".equals(recsFilter) || recMatches(f, recsFilter)) { c.addView(buildRecordingCard(f, fmt)); shownN++; }
+        if (shownN == 0) {
+            TextView none = Ui.text(this, L.t("Brak nagrań w tym filtrze"), 13f, R.color.pr_muted);
+            none.setGravity(android.view.Gravity.CENTER);
+            none.setPadding(0, (int) (20 * d), 0, 0);
+            c.addView(none);
+        }
+    }
+
+    private String recsFilter = "all";
+
+    // Status nagrania w NS: "ok" / "bad" / "wait" albo null (nieznany / niewyslane)
+    private String recStatus(RecMeta m) {
+        if (!"sent".equals(m.ns)) return null;
+        String id = !m.nsRecordId.isEmpty() ? m.nsRecordId : m.fixRecordId;
+        return NsStatus.get(id);
+    }
+
+    private boolean recMatches(File f, String filter) {
+        RecMeta m = RecMeta.load(this, f.getName());
+        if ("unsent".equals(filter)) return !"sent".equals(m.ns);
+        String st = recStatus(m);
+        return filter.equals(st);
     }
 
     // Karta nagrania = .rec-item z PitchRec: nazwa + kategoria (albo "bez opisu") + chmurka NS,
@@ -2547,6 +2735,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         ns.setPadding((int) (8 * d), 0, 0, 0);
         top.addView(ns);
         card.addView(top);
+        String st = recStatus(meta);
+        if (st != null) {
+            String stTxt = "ok".equals(st) ? "✅ " + L.t("zaliczone przez trenera") : "bad".equals(st) ? "↺ " + L.t("do poprawy — zobacz Korektę") : "⏳ " + L.t("czeka na ocenę trenera");
+            TextView stv = Ui.text(this, stTxt, 11f, "ok".equals(st) ? R.color.pr_accent : "bad".equals(st) ? R.color.pr_warn : R.color.pr_pause);
+            stv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            stv.setPadding(0, (int) (4 * d), 0, 0);
+            if ("bad".equals(st)) stv.setOnClickListener(v -> openLoginOnlySection("fix", L.t("KOREKTA")));
+            card.addView(stv);
+        }
 
         android.widget.LinearLayout metaRow = Ui.row(this);
         metaRow.setPadding(0, (int) (4 * d), 0, 0);

@@ -63,6 +63,73 @@ public final class Achievements {
     };
 
     // Grupy do wyswietlania (naglowki sekcji)
+    // Nowo zdobyte odznaki od ostatniego sprawdzenia (pierwsze sprawdzenie tylko zapamietuje stan)
+    public static java.util.List<A> newlyEarned(android.content.Context c, java.util.Map<String, Integer> counts, int total) {
+        android.content.SharedPreferences p = c.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+        java.util.Set<String> seen = new java.util.HashSet<>(p.getStringSet("ach_seen", new java.util.HashSet<>()));
+        boolean first = !p.getBoolean("ach_init", false);
+        java.util.List<A> out = new java.util.ArrayList<>();
+        for (A m : ALL) {
+            int cur = 0;
+            if (m.cats == null) cur = total;
+            else for (String cat : m.cats) for (java.util.Map.Entry<String, Integer> e : counts.entrySet()) if (norm(e.getKey()).equals(norm(cat))) cur += e.getValue();
+            if (cur >= m.count && seen.add(m.id) && !first) out.add(m);
+        }
+        p.edit().putStringSet("ach_seen", seen).putBoolean("ach_init", true).apply();
+        return out;
+    }
+
+    private static String norm(String s) {
+        if (s == null) return "";
+        return java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD).replaceAll("\\p{M}", "").replace('ł', 'l').replace('Ł', 'L').toLowerCase(java.util.Locale.ROOT).trim();
+    }
+
+    // Okienko z gratulacjami za nowa odznake
+    public static void celebrate(android.app.Activity a, java.util.List<A> list) {
+        if (list == null || list.isEmpty() || a.isFinishing()) return;
+        A m = list.get(0);
+        float d = a.getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout box = new android.widget.LinearLayout(a);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        box.setPadding((int) (20 * d), (int) (18 * d), (int) (20 * d), (int) (6 * d));
+        android.widget.TextView ic = new android.widget.TextView(a);
+        ic.setText(m.icon);
+        ic.setTextSize(56f);
+        ic.setGravity(android.view.Gravity.CENTER);
+        box.addView(ic);
+        android.widget.TextView t = new android.widget.TextView(a);
+        t.setText(L.t("Nowa odznaka!"));
+        t.setTextSize(13f);
+        t.setTextColor(0xFFE8820C);
+        t.setGravity(android.view.Gravity.CENTER);
+        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        box.addView(t);
+        android.widget.TextView n = new android.widget.TextView(a);
+        n.setText(m.label());
+        n.setTextSize(19f);
+        n.setGravity(android.view.Gravity.CENTER);
+        n.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        n.setPadding(0, (int) (6 * d), 0, (int) (6 * d));
+        box.addView(n);
+        if ("pl".equals(L.lang()) && m.msgPl != null) {
+            android.widget.TextView msg = new android.widget.TextView(a);
+            msg.setText(m.msgPl);
+            msg.setTextSize(14f);
+            msg.setGravity(android.view.Gravity.CENTER);
+            box.addView(msg);
+        }
+        if (list.size() > 1) {
+            android.widget.TextView more = new android.widget.TextView(a);
+            more.setText("+ " + (list.size() - 1) + " " + L.t("kolejne odznaki w Statystykach"));
+            more.setTextSize(12f);
+            more.setGravity(android.view.Gravity.CENTER);
+            more.setPadding(0, (int) (8 * d), 0, 0);
+            box.addView(more);
+        }
+        new android.app.AlertDialog.Builder(a).setView(box).setPositiveButton("🎉 " + L.t("Super!"), null).show();
+    }
+
     public static String group(A a) {
         String id = a.id;
         if (id.startsWith("total")) return L.t("Łącznie");

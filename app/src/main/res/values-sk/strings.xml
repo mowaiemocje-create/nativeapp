@@ -61,4 +61,6 @@
     <string name="nav_diary_full">📖\nDenník</string>
     <string name="nav_stats_full">📊\nŠtatistiky</string>
     <string name="nav_settings_full">⚙\nNastavenia</string>
+    <string name="shortcut_rec">Nahrať</string>
+    <string name="shortcut_rec_long">Nahrávať hneď</string>
 </resources>

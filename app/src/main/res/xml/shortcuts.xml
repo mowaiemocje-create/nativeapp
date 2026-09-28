@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Przytrzymaj ikone apki -> "Nagraj": od razu start nagrywania -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="quick_rec"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_rec"
+        android:shortcutLongLabel="@string/shortcut_rec_long">
+        <intent
+            android:action="com.pitchrec.nativetest.QUICK_REC"
+            android:targetPackage="com.pitchrec.nativetest"
+            android:targetClass="com.pitchrec.nativetest.MainActivity" />
+    </shortcut>
+</shortcuts>

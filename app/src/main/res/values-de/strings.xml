@@ -61,4 +61,6 @@
     <string name="nav_diary_full">📖\nTagebuch</string>
     <string name="nav_stats_full">📊\nStatistik</string>
     <string name="nav_settings_full">⚙\nEinstellungen</string>
+    <string name="shortcut_rec">Aufnehmen</string>
+    <string name="shortcut_rec_long">Sofort aufnehmen</string>
 </resources>

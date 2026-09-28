@@ -61,4 +61,6 @@
     <string name="nav_diary_full">📖\nNapló</string>
     <string name="nav_stats_full">📊\nStatisztika</string>
     <string name="nav_settings_full">⚙\nBeállítások</string>
+    <string name="shortcut_rec">Felvétel</string>
+    <string name="shortcut_rec_long">Felvétel azonnal</string>
 </resources>

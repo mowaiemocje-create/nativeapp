@@ -89,6 +89,7 @@
 
         <!-- Suwak MIC (gain) -->
         <LinearLayout
+            android:id="@+id/micRow"
             android:layout_width="match_parent"
             android:layout_height="36dp"
             android:orientation="horizontal"
@@ -117,6 +118,7 @@
 
         <!-- Suwak ZOOM -->
         <LinearLayout
+            android:id="@+id/zoomRow"
             android:layout_width="match_parent"
             android:layout_height="36dp"
             android:orientation="horizontal"

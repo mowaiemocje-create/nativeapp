@@ -61,4 +61,6 @@
     <string name="nav_diary_full">📖\nDiario</string>
     <string name="nav_stats_full">📊\nEstadíst.</string>
     <string name="nav_settings_full">⚙\nAjustes</string>
+    <string name="shortcut_rec">Grabar</string>
+    <string name="shortcut_rec_long">Grabar ahora</string>
 </resources>
