@@ -66,6 +66,10 @@ public class StatsPage {
         LinearLayout harm = Ui.card(a);
         root.addView(harm);
         loadHarmonogram(harm);
+        LinearLayout where = Ui.card(a);
+        where.setVisibility(View.GONE);
+        root.addView(where);
+        loadWhereToTrain(where);
         LinearLayout improve = Ui.card(a);
         improve.setVisibility(View.GONE);
         root.addView(improve);
@@ -124,6 +128,123 @@ public class StatsPage {
                 if (ov != null) fillReview(review, ov.optInt("reviewed", 0), ov.optInt("correct", 0));
             } catch (Exception e) { /* zostaja dane lokalne */ }
         });
+    }
+
+    // ═════════════ GDZIE DZIS POTRENOWAC ═════════════
+    // Z pewnych danych: sytuacje zaznaczane w dzienniku jako TRUDNE (ostatnie 30 wpisow, swiezsze
+    // licza sie mocniej) + kiedy ostatnio bylo nagranie w tej kategorii (NS). Propozycja = trudna
+    // sytuacja, ktora dawno nie byla cwiczona; rozgrzewka = najczesciej zaznaczana jako latwa.
+    private static final java.util.Map<String, String[]> TRAIN_TIPS = new java.util.HashMap<>();
+    static {
+        TRAIN_TIPS.put("Sklepy", new String[]{"Zapytaj sprzedawcę o skład lub pochodzenie produktu.", "Poproś o pomoc w wyborze i dopytaj o różnice między dwoma produktami."});
+        TRAIN_TIPS.put("Przechodzień", new String[]{"Zapytaj przechodnia o drogę do najbliższej apteki lub przystanku.", "Zapytaj o godzinę i dodaj jedno zdanie od siebie."});
+        TRAIN_TIPS.put("Telefon do miasta", new String[]{"Zadzwoń do przychodni lub urzędu i zapytaj o godziny otwarcia.", "Zadzwoń do sklepu i zapytaj, czy mają dany produkt."});
+        TRAIN_TIPS.put("Telefon rodzina/znajomi", new String[]{"Zadzwoń do kogoś bliskiego i opowiedz, co dziś robiłeś.", "Umów się przez telefon na spotkanie."});
+        TRAIN_TIPS.put("Restauracja Kelner", new String[]{"Zapytaj kelnera, co poleca, i zamów samodzielnie.", "Zamów kawę i dopytaj o rodzaj mleka lub deseru."});
+        TRAIN_TIPS.put("Wystąpienie", new String[]{"Przygotuj 1-minutową wypowiedź i nagraj ją przed kilkoma osobami.", "Opowiedz krótko o swoim dniu na forum rodziny lub grupy."});
+        TRAIN_TIPS.put("Praca / Szkoła", new String[]{"Zadaj pytanie na zajęciach lub w pracy.", "Przekaż współpracownikowi jedną informację na głos."});
+        TRAIN_TIPS.put("Rodzina", new String[]{"Opowiedz przy stole jedną historię z dnia.", "Zapytaj domownika o jego plany na jutro."});
+        TRAIN_TIPS.put("Przyjaciele", new String[]{"Opowiedz znajomemu o czymś, co Cię ostatnio zaciekawiło.", "Zaproponuj wspólne wyjście i ustal szczegóły."});
+        TRAIN_TIPS.put("W grupie", new String[]{"Zabierz głos w grupie co najmniej raz.", "Zadaj pytanie całej grupie i poprowadź krótką rozmowę."});
+    }
+
+    private static java.util.List<String> listOf(Object v) {
+        java.util.List<String> out = new ArrayList<>();
+        try {
+            JSONArray arr = v instanceof JSONArray ? (JSONArray) v : (v instanceof String && ((String) v).trim().startsWith("[")) ? new JSONArray((String) v) : null;
+            for (int i = 0; arr != null && i < arr.length(); i++) out.add(arr.optString(i, ""));
+        } catch (Exception e) { }
+        return out;
+    }
+
+    private void loadWhereToTrain(LinearLayout card) {
+        if (host.token() == null) return;
+        String q = "/diary/from-ns?ns_token=" + NsClient.enc(host.token()) + "&ns_email=" + NsClient.enc(host.email()) + "&ns_server=new&limit=30";
+        NsClient.backend("GET", q, null, r -> {
+            if (!host.isCurrent() || !r.ok) return;
+            final Map<String, Double> hard = new LinkedHashMap<>();
+            final Map<String, Integer> hardN = new LinkedHashMap<>(), easy = new LinkedHashMap<>();
+            try {
+                JSONArray es = new JSONObject(r.body).optJSONArray("entries");
+                long now = System.currentTimeMillis();
+                for (int i = 0; es != null && i < es.length(); i++) {
+                    JSONObject e = es.optJSONObject(i);
+                    if (e == null) continue;
+                    long t = parseDay(e.optString("entry_date", ""));
+                    double days = t > 0 ? (now - t) / 86400000.0 : 30;
+                    double w = days <= 7 ? 1.0 : days <= 30 ? 0.5 : 0.25;
+                    for (String s : listOf(e.opt("hard_situations"))) if (!s.isEmpty()) { hard.put(s, hard.getOrDefault(s, 0.0) + w); hardN.put(s, hardN.getOrDefault(s, 0) + 1); }
+                    for (String s : listOf(e.opt("easy_situations"))) if (!s.isEmpty()) easy.put(s, easy.getOrDefault(s, 0) + 1);
+                }
+            } catch (Exception e) { return; }
+            if (hard.isEmpty()) return;
+            // kiedy ostatnio nagranie w danej kategorii (NS)
+            NsClient.request("GET", "/records?page_size=100&sort_by=date&sort_order=desc", host.token(), host.email(), null, null, r2 -> {
+                if (!host.isCurrent()) return;
+                Map<String, Long> last = new LinkedHashMap<>();
+                try {
+                    String b = r2.ok ? r2.body.trim() : "[]";
+                    JSONArray arr = b.startsWith("[") ? new JSONArray(b) : new JSONObject(b).optJSONArray("collection");
+                    for (int i = 0; arr != null && i < arr.length(); i++) {
+                        JSONObject o = arr.optJSONObject(i);
+                        JSONObject c = o != null ? o.optJSONObject("record_category") : null;
+                        if (c == null) continue;
+                        String cn = c.optString("name_pl", "").isEmpty() ? c.optString("name", "") : c.optString("name_pl", "");
+                        long t = parseDay(o.optString("date", ""));
+                        if (t > 0 && t > last.getOrDefault(cn, 0L)) last.put(cn, t);
+                    }
+                } catch (Exception e) { }
+                showWhereToTrain(card, hard, hardN, easy, last);
+            });
+        });
+    }
+
+    private void showWhereToTrain(LinearLayout card, Map<String, Double> hard, Map<String, Integer> hardN, Map<String, Integer> easy, Map<String, Long> last) {
+        long now = System.currentTimeMillis();
+        List<String> order = new ArrayList<>(hard.keySet());
+        // wynik = jak czesto trudna (swiezsze wazniejsze) + premia, gdy dawno nie cwiczona
+        java.util.Collections.sort(order, (x, y) -> {
+            double dx = last.containsKey(x) ? (now - last.get(x)) / 86400000.0 : 30, dy = last.containsKey(y) ? (now - last.get(y)) / 86400000.0 : 30;
+            double sx = hard.get(x) * (1 + Math.min(dx, 30) / 10.0), sy = hard.get(y) * (1 + Math.min(dy, 30) / 10.0);
+            return Double.compare(sy, sx);
+        });
+        card.removeAllViews();
+        card.setVisibility(View.VISIBLE);
+        card.addView(Ui.label(a, "🎯 " + L.t("GDZIE DZIŚ POTRENOWAĆ")));
+        String top = order.get(0);
+        TextView h = Ui.text(a, L.cat(top), 17f, R.color.pr_text);
+        h.setTypeface(Typeface.DEFAULT_BOLD);
+        h.setPadding(0, (int) (4 * d), 0, 0);
+        card.addView(h);
+        String why = L.f("W dzienniku {0}× jako trudna sytuacja", hardN.getOrDefault(top, 1));
+        if (last.containsKey(top)) {
+            long days = Math.max(0, (now - last.get(top)) / 86400000L);
+            why += " · " + (days == 0 ? L.t("ostatnie nagranie dziś") : L.f("ostatnie nagranie {0} dni temu", days));
+        } else why += " · " + L.t("jeszcze bez nagrania w tej kategorii");
+        TextView w = Ui.text(a, why, 11f, R.color.pr_muted);
+        card.addView(w);
+        String[] tips = TRAIN_TIPS.get(top);
+        if (tips != null) {
+            int dayIdx = (int) ((now / 86400000L) % tips.length);
+            TextView t = Ui.text(a, "💡 " + L.t(tips[dayIdx]), 13f, R.color.pr_text);
+            t.setPadding(0, (int) (8 * d), 0, 0);
+            card.addView(t);
+        }
+        // rozgrzewka z najlatwiejszej
+        String warm = null; int best = 0;
+        for (Map.Entry<String, Integer> e : easy.entrySet()) if (e.getValue() > best && !e.getKey().equals(top)) { best = e.getValue(); warm = e.getKey(); }
+        if (warm != null) {
+            TextView wu = Ui.text(a, "🔥 " + L.t("Rozgrzewka") + ": " + L.cat(warm) + " — " + L.t("sytuacja, którą zaznaczasz jako łatwą"), 11f, R.color.pr_accent);
+            wu.setPadding(0, (int) (6 * d), 0, 0);
+            card.addView(wu);
+        }
+        if (order.size() > 1) {
+            StringBuilder more = new StringBuilder(L.t("Następne trudne") + ": ");
+            for (int i = 1; i < Math.min(4, order.size()); i++) { if (i > 1) more.append(", "); more.append(L.cat(order.get(i))); }
+            TextView m = Ui.text(a, more.toString(), 11f, R.color.pr_muted);
+            m.setPadding(0, (int) (6 * d), 0, 0);
+            card.addView(m);
+        }
     }
 
     // ═════════════ ZADANIA SPECJALNE ═════════════

@@ -235,6 +235,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         showPage("daw");
         // Przypomnienie o 20:00 (nagranie + dziennik) — domyslnie wlaczone
         ReminderReceiver.schedule(this);
+        TrainerWatch.schedule(this);
+        TrainerWatch.check(this, null); // oceny trenera od ostatniego otwarcia
         askNotificationPermissionOnce();
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
@@ -421,7 +423,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String pg = in.getStringExtra("open_page");
         if (pg == null) return;
         in.removeExtra("open_page");
-        if ("diary".equals(pg) && isLoggedIn()) showPage("diary"); else showPage("daw");
+        if (("diary".equals(pg) || "fix".equals(pg) || "stats".equals(pg)) && isLoggedIn()) showPage(pg); else showPage("daw");
     }
 
     private void askNotificationPermissionOnce() {
@@ -573,6 +575,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 NsClient.loadCategories(r.token, r.email);
                 prefs().edit().remove("map_name").apply();
                 loadProfileFromNs(true);
+                TrainerWatch.schedule(this);
+                TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
                 updateNavForLogin();
                 refreshAccountSection();
                 Toast.makeText(this, L.t("✓ Zalogowano do NewSpeech"), Toast.LENGTH_SHORT).show();
@@ -1172,6 +1176,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
         }));
         rem.addView(hint(L.t("Jeśli do 20:00 nie wgrasz nagrania do NewSpeech albo nie napiszesz dziennika, telefon Ci o tym przypomni.")));
+        rem.addView(toggleRow("✅ " + L.t("Powiadomienia o ocenie trenera"), TrainerWatch.enabled(this), on -> {
+            prefs().edit().putBoolean("trainer_notif", on).apply();
+            TrainerWatch.schedule(this);
+        }));
+        rem.addView(hint(L.t("Gdy trener zaliczy nagranie, poprosi o poprawkę albo odpowie na dziennik — dostaniesz powiadomienie.")));
         if (logged) c.addView(rem);
 
         // 3b) Podpowiedzi na wykresie i w statystykach

@@ -69,6 +69,12 @@ public class ReminderReceiver extends BroadcastReceiver {
         String act = intent != null ? intent.getAction() : null;
         if (Intent.ACTION_BOOT_COMPLETED.equals(act) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(act)) {
             schedule(c);
+            TrainerWatch.schedule(c);
+            return;
+        }
+        if (TrainerWatch.ACTION.equals(act)) {
+            final PendingResult pr = goAsync();
+            TrainerWatch.check(c, () -> { try { pr.finish(); } catch (Exception e) { } });
             return;
         }
         schedule(c); // kolejny dzien
