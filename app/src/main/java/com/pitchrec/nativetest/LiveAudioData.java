@@ -89,6 +89,13 @@ public class LiveAudioData {
         handleSyllables(t);
     }
 
+    // Tylko linia pitch (wczytany plik, bez pauz/norm/sylab) — szybciej
+    public static void processPitchOnly(long windowStartSample, float rms, float strictF0, float relaxedF0) {
+        tracker.frame(windowStartSample, rms, strictF0, relaxedF0, PITCH_SINK);
+    }
+
+    public static void finishPitchOnly() { tracker.flush(PITCH_SINK); }
+
     public static void finishAnalysis() {
         tracker.flush(PITCH_SINK);
         norms.finish(getTotalSamplesWritten() / (double) SAMPLE_RATE);

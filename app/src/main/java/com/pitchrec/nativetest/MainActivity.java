@@ -1159,6 +1159,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             hints.addView(hint(L.t("st = półton. Mniejsza zmiana tonu w sylabie nie daje strzałki; im większa zmiana, tym bardziej stroma strzałka.")));
         }
         hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
+        hints.addView(toggleRow("📈 " + L.t("Pitch przy otwieraniu nagrania — bez pytania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
         hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
         c.addView(hints);
@@ -2257,10 +2258,39 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pitchWaveView.setLiveMode(false);
         pitchWaveView.resetPan();
         statusText.setText("⏳ " + L.t("Wczytywanie nagrania…"));
+        // 1) sama fala — szybko
+        new Thread(() -> {
+            String err = null;
+            try { AudioFileLoader.loadWave(file); }
+            catch (Exception e) { err = e.getMessage(); }
+            final String fe = err;
+            runOnUiThread(() -> {
+                if (gen != loadGen) return;
+                pitchWaveView.resetPan();
+                pitchWaveView.invalidate();
+                if (fe != null) { statusText.setText(L.t("Błąd wczytywania: ") + fe); return; }
+                statusText.setText(L.t("Wczytano nagranie"));
+                // 2) pitch tylko na zyczenie (pauz przy odsluchu nie liczymy)
+                if (prefs().getBoolean("auto_pitch", false)) { loadPitchFor(file, gen); return; }
+                new AlertDialog.Builder(this)
+                        .setTitle(L.t("Załadować linię pitch?"))
+                        .setMessage(L.t("Fala nagrania jest gotowa. Linia intonacji (pitch) liczy się kilka sekund."))
+                        .setPositiveButton(L.t("Tak"), (d, w) -> loadPitchFor(file, gen))
+                        .setNeutralButton(L.t("Zawsze"), (d, w) -> { prefs().edit().putBoolean("auto_pitch", true).apply(); loadPitchFor(file, gen); })
+                        .setNegativeButton(L.t("Nie"), null)
+                        .show();
+            });
+        }, "load-daw").start();
+    }
+
+    private void loadPitchFor(File file, int gen) {
+        if (gen != loadGen) return;
+        statusText.setText("⏳ " + L.t("Liczenie linii pitch…"));
         final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final boolean[] done = {false};
         final Runnable tick = new Runnable() {
             @Override public void run() {
-                if (gen != loadGen) return;
+                if (done[0] || gen != loadGen) return;
                 pitchWaveView.invalidate();
                 h.postDelayed(this, 300);
             }
@@ -2268,17 +2298,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         h.postDelayed(tick, 300);
         new Thread(() -> {
             String err = null;
-            try { AudioFileLoader.loadIntoLiveData(file); }
+            try { AudioFileLoader.addPitch(file, false); }
             catch (Exception e) { err = e.getMessage(); }
             final String fe = err;
             runOnUiThread(() -> {
+                done[0] = true;
                 if (gen != loadGen) return;
-                loadGen++; // zatrzymuje odswiezanie w trakcie
-                pitchWaveView.resetPan();
                 pitchWaveView.invalidate();
-                statusText.setText(fe == null ? L.t("Wczytano nagranie") : L.t("Błąd wczytywania: ") + fe);
+                statusText.setText(fe == null ? L.t("Wczytano nagranie z linią pitch") : L.t("Błąd wczytywania: ") + fe);
             });
-        }, "load-daw").start();
+        }, "load-pitch").start();
     }
 
     // startSampleIndex: pozycja (w próbkach), od której ma zacząć się odtwarzanie — 0 =

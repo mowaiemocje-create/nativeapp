@@ -13,17 +13,21 @@ public class AudioFileLoader {
 
     private static final int YIN_WINDOW = 2048;
 
+    // Ostatnio wczytany plik (probki w pamieci) — zeby "zaladuj pitch" nie dekodowal go drugi raz
+    private static String lastPath = null;
+    private static short[] lastSamples = null;
+
     public static void loadIntoLiveData(File file) throws IOException {
-        LiveAudioData.reset();
-        LiveAudioData.batch = true; // wczytywanie pliku: bez obliczen "na zywo" (podpowiedzi, sylaby w trakcie)
-        try { loadSamples(file); } finally { LiveAudioData.batch = false; }
+        loadWave(file);
+        addPitch(file, true);
     }
 
-    private static void loadSamples(File file) throws IOException {
+    // 1) Sama FALA — bardzo szybko (bez pitch, pauz, norm)
+    public static synchronized void loadWave(File file) throws IOException {
+        LiveAudioData.reset();
         short[] samples = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
-
-        // 1) FALA od razu — obwiednia calego pliku (bardzo szybko), wykres jest widoczny zanim
-        //    policzy sie pitch
+        lastPath = file.getAbsolutePath();
+        lastSamples = samples;
         final int CH = 1 << 16;
         for (int off = 0; off < samples.length; off += CH) {
             int len = Math.min(CH, samples.length - off);
@@ -31,9 +35,16 @@ public class AudioFileLoader {
             System.arraycopy(samples, off, chunk, 0, len);
             LiveAudioData.appendSamples(chunk, len);
         }
+    }
 
-        // 2) PITCH (YIN) ROWNOLEGLE na wszystkich rdzeniach — okna 2048 probek sa niezalezne.
-        //    Ciche okna (RMS < 0,003) pomijamy: VAD, linia pitch i sylaby i tak ich nie uzywaja.
+    // 2) PITCH dla wczytanej fali. full=false: tylko linia pitch (bez pauz, norm i sylab).
+    public static synchronized void addPitch(File file, boolean full) throws IOException {
+        short[] samples = file.getAbsolutePath().equals(lastPath) ? lastSamples : null;
+        if (samples == null) {
+            samples = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
+        }
+        // PITCH (YIN) ROWNOLEGLE na wszystkich rdzeniach — okna 2048 probek sa niezalezne.
+        // Ciche okna (RMS < 0,003) pomijamy: VAD, linia pitch i sylaby i tak ich nie uzywaja.
         final int frames = samples.length / YIN_WINDOW;
         final float[] rmsA = new float[frames], f0A = new float[frames], relA = new float[frames];
         final short[] src = samples;
@@ -62,11 +73,20 @@ public class AudioFileLoader {
         catch (Exception e) { throw new IOException("Analiza pitch: " + e.getMessage()); }
         finally { pool.shutdown(); }
 
-        // 3) Reszta analizy po kolei (VAD + pauzy, linia pitch, normy, sylaby) — jak na zywo
-        for (int f = 0; f < frames; f++) {
-            LiveAudioData.processFrame((long) f * YIN_WINDOW, rmsA[f], f0A[f], relA[f]);
+        lastSamples = null; lastPath = null; // pamiec zwalniamy — pitch juz policzony
+        if (!full) {
+            for (int f = 0; f < frames; f++) LiveAudioData.processPitchOnly((long) f * YIN_WINDOW, rmsA[f], f0A[f], relA[f]);
+            LiveAudioData.finishPitchOnly();
+            return;
         }
-        LiveAudioData.finishAnalysis();
+        // Pelna analiza po kolei (VAD + pauzy, linia pitch, normy, sylaby) — jak na zywo
+        LiveAudioData.batch = true;
+        try {
+            for (int f = 0; f < frames; f++) {
+                LiveAudioData.processFrame((long) f * YIN_WINDOW, rmsA[f], f0A[f], relA[f]);
+            }
+            LiveAudioData.finishAnalysis();
+        } finally { LiveAudioData.batch = false; }
     }
 
     // Porcje mowy z pliku wzorca — wyciete DOKLADNIE jak przy ocenie na zywo (ten sam VAD,

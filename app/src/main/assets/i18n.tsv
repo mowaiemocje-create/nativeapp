@@ -452,3 +452,10 @@ ZADANIA SPECJALNE	SPECIAL TASKS	SPECIÁLNÍ ÚKOLY	ŠPECIÁLNE ÚLOHY	SONDERAUFG
 wykonane	done	splněno	splnené	erledigt	hecha	kész
 Głośność wynikowa	Output volume	Výsledná hlasitost	Výsledná hlasitosť	Ausgangslautstärke	Volumen final	Kimeneti hangerő
 każdy system	any system	každý systém	každý systém	jedes System	cualquier sistema	bármely rendszer
+Załadować linię pitch?	Load the pitch line?	Načíst linii výšky tónu?	Načítať líniu výšky tónu?	Tonhöhenlinie laden?	¿Cargar la línea de tono?	Betöltsük a hangmagasság-vonalat?
+Fala nagrania jest gotowa. Linia intonacji (pitch) liczy się kilka sekund.	The waveform is ready. The pitch line takes a few seconds to compute.	Vlna nahrávky je hotová. Linie intonace se počítá několik sekund.	Vlna nahrávky je hotová. Línia intonácie sa počíta niekoľko sekúnd.	Die Wellenform ist fertig. Die Tonhöhenlinie braucht ein paar Sekunden.	La onda está lista. La línea de tono tarda unos segundos.	A hullámforma kész. A hangmagasság-vonal néhány másodpercig tart.
+Zawsze	Always	Vždy	Vždy	Immer	Siempre	Mindig
+Liczenie linii pitch…	Computing pitch line…	Počítání linie tónu…	Počítanie línie tónu…	Tonhöhe wird berechnet…	Calculando el tono…	Hangmagasság számítása…
+Wczytano nagranie z linią pitch	Recording loaded with pitch line	Nahrávka načtena s linií tónu	Nahrávka načítaná s líniou tónu	Aufnahme mit Tonhöhenlinie geladen	Grabación cargada con línea de tono	Felvétel betöltve hangmagasság-vonallal
+Pitch przy otwieraniu nagrania — bez pytania	Pitch when opening a recording — don't ask	Tón při otevření nahrávky — bez ptaní	Tón pri otvorení nahrávky — bez pýtania	Tonhöhe beim Öffnen — ohne Nachfrage	Tono al abrir grabación — sin preguntar	Hangmagasság megnyitáskor — kérdés nélkül
+Wczytywanie nagrania…	Loading recording…	Načítání nahrávky…	Načítanie nahrávky…	Aufnahme wird geladen…	Cargando grabación…	Felvétel betöltése…
