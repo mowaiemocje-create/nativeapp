@@ -325,6 +325,45 @@ public class LiveAudioData {
         }
     }
 
+    // ── PAMIEC PODRECZNA WIDOKU (fala + pitch) — zapis/odczyt bez ponownego dekodowania pliku ──
+    public static final class CacheData {
+        public float[] env, rms;
+        public long total;
+        public long[] pitchS;
+        public float[] pitchF;
+    }
+
+    public static CacheData exportCache(float gain) {
+        synchronized (lock) {
+            CacheData c = new CacheData();
+            c.env = new float[envelopeSize];
+            c.rms = new float[envelopeSize];
+            for (int i = 0; i < envelopeSize; i++) {
+                c.env[i] = Math.min(1f, envelope[i] * gain);
+                c.rms[i] = Math.min(1f, rmsEnvelope[i] * gain);
+            }
+            c.total = totalSamplesWritten;
+            c.pitchS = new long[pitchPts.size()];
+            c.pitchF = new float[pitchPts.size()];
+            for (int i = 0; i < pitchPts.size(); i++) { c.pitchS[i] = pitchPts.get(i).sampleIndex; c.pitchF[i] = pitchPts.get(i).freq; }
+            return c;
+        }
+    }
+
+    public static void importCache(CacheData c, boolean withPitch) {
+        synchronized (lock) {
+            envelope = new float[Math.max(4096, c.env.length)];
+            rmsEnvelope = new float[envelope.length];
+            System.arraycopy(c.env, 0, envelope, 0, c.env.length);
+            System.arraycopy(c.rms, 0, rmsEnvelope, 0, c.rms.length);
+            envelopeSize = c.env.length;
+            envelopeChunkMax = 0f; envelopeChunkCount = 0; envelopeChunkSq = 0;
+            totalSamplesWritten = c.total;
+            pitchPts.clear();
+            if (withPitch && c.pitchS != null) for (int i = 0; i < c.pitchS.length; i++) pitchPts.add(new PitchPoint(c.pitchS[i], c.pitchF[i]));
+        }
+    }
+
     public static void appendPitch(long sampleIndex, float freq) {
         synchronized (lock) {
             if (freq > 0) {

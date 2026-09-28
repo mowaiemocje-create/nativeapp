@@ -109,6 +109,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         super.onCreate(savedInstanceState);
         L.init(this);
         NsClient.initForms(this);
+        AudioFileLoader.cacheDir = new File(getFilesDir(), ".dawcache");
+        new Thread(() -> { // sprzatanie pamieci podrecznej DAW: najwyzej 300 najnowszych
+            File[] cf = AudioFileLoader.cacheDir.listFiles();
+            if (cf != null && cf.length > 300) {
+                java.util.Arrays.sort(cf, (x, y) -> Long.compare(y.lastModified(), x.lastModified()));
+                for (int i = 300; i < cf.length; i++) cf[i].delete();
+            }
+        }, "dawcache-clean").start();
         setContentView(R.layout.activity_main);
 
         View rootLayout = findViewById(R.id.rootLayout);
@@ -2303,9 +2311,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // 1) sama fala — szybko
         new Thread(() -> {
             String err = null;
-            try { AudioFileLoader.loadWave(file); }
+            boolean withPitch = false;
+            try { withPitch = AudioFileLoader.loadWave(file); }
             catch (Exception e) { err = e.getMessage(); }
             final String fe = err;
+            final boolean hasPitch = withPitch;
             runOnUiThread(() -> {
                 if (gen != loadGen) return;
                 pitchWaveView.resetPan();
@@ -2314,6 +2324,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 // dlugosc wczytanego nagrania na liczniku (pozycja / calosc), jak po nagraniu
                 lastRecordingTotalDurationMs = LiveAudioData.getTotalSamplesWritten() * 1000L / LiveAudioData.SAMPLE_RATE;
                 timeText.setText(formatMs(0) + " / " + formatMs(lastRecordingTotalDurationMs));
+                if (hasPitch) { statusText.setText(L.t("Wczytano nagranie z linią pitch")); return; } // z pamieci podrecznej
                 statusText.setText(L.t("Wczytano nagranie"));
                 // 2) pitch tylko na zyczenie (pauz przy odsluchu nie liczymy)
                 if (prefs().getBoolean("auto_pitch", false)) { loadPitchFor(file, gen); return; }

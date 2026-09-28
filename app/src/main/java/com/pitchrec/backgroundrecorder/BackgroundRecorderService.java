@@ -404,6 +404,14 @@ public class BackgroundRecorderService extends Service {
                         if (conv != null) { finalFile = conv; mime = "audio/mpeg"; }
                     }
                 }
+                // fala + pitch z nagrywania od razu do pamieci podrecznej DAW (otwarcie z NAGRAN bez dekodowania)
+                try {
+                    double gEff = g;
+                    if ("audio/mpeg".equals(mime) && mp3 != null) gEff = Math.pow(10, Math.floor(20 * Math.log10(g) / 1.5) * 1.5 / 20);
+                    if (com.pitchrec.nativetest.AudioFileLoader.cacheDir == null)
+                        com.pitchrec.nativetest.AudioFileLoader.cacheDir = new File(getFilesDir(), ".dawcache");
+                    com.pitchrec.nativetest.AudioFileLoader.saveCache(finalFile, LiveAudioData.exportCache((float) gEff));
+                } catch (Throwable t) { }
                 RecordingResultHolder.resolveStopFile(finalFile.getAbsolutePath(), durationMs, mime);
             } catch (Exception e) {
                 RecordingResultHolder.rejectStop("FAILED_TO_FETCH_RECORDING", e.getMessage());

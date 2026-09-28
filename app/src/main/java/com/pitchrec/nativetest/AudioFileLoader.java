@@ -13,18 +13,78 @@ public class AudioFileLoader {
 
     private static final int YIN_WINDOW = 2048;
 
+    // ── PAMIEC PODRECZNA (fala + pitch) w <pliki aplikacji>/.dawcache — klucz: rozmiar i data pliku
+    //    (zmiana nazwy przy opisie nagrania ich nie zmienia). Wczytanie z niej trwa ulamek sekundy.
+    public static volatile File cacheDir = null;
+
+    private static File cacheFor(File f) {
+        if (cacheDir == null) return null;
+        if (!cacheDir.exists()) cacheDir.mkdirs();
+        return new File(cacheDir, f.length() + "_" + f.lastModified() + ".dawc");
+    }
+
+    public static void saveCache(File f, LiveAudioData.CacheData c) {
+        File cf = cacheFor(f);
+        if (cf == null || c == null || c.env == null) return;
+        try (java.io.DataOutputStream out = new java.io.DataOutputStream(new java.io.BufferedOutputStream(new java.io.FileOutputStream(cf)))) {
+            out.writeInt(0x44415731); // "DAW1"
+            out.writeLong(c.total);
+            out.writeInt(c.env.length);
+            for (float v : c.env) out.writeFloat(v);
+            for (float v : c.rms) out.writeFloat(v);
+            int pn = c.pitchS == null ? 0 : c.pitchS.length;
+            out.writeInt(pn);
+            for (int i = 0; i < pn; i++) { out.writeLong(c.pitchS[i]); out.writeFloat(c.pitchF[i]); }
+        } catch (Exception e) { cf.delete(); }
+    }
+
+    public static LiveAudioData.CacheData readCache(File f) {
+        File cf = cacheFor(f);
+        if (cf == null || !cf.exists()) return null;
+        try (java.io.DataInputStream in = new java.io.DataInputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(cf)))) {
+            if (in.readInt() != 0x44415731) return null;
+            LiveAudioData.CacheData c = new LiveAudioData.CacheData();
+            c.total = in.readLong();
+            int n = in.readInt();
+            if (n < 0 || n > 50_000_000) return null;
+            c.env = new float[n]; c.rms = new float[n];
+            for (int i = 0; i < n; i++) c.env[i] = in.readFloat();
+            for (int i = 0; i < n; i++) c.rms[i] = in.readFloat();
+            int pn = in.readInt();
+            c.pitchS = new long[Math.max(0, pn)]; c.pitchF = new float[Math.max(0, pn)];
+            for (int i = 0; i < pn; i++) { c.pitchS[i] = in.readLong(); c.pitchF[i] = in.readFloat(); }
+            return c;
+        } catch (Exception e) { return null; }
+    }
+
+    // Czy dla pliku jest juz zapamietana linia pitch
+    public static boolean cachedPitch(File f) {
+        LiveAudioData.CacheData c = readCache(f);
+        return c != null && c.pitchS != null && c.pitchS.length > 0;
+    }
+
     // Ostatnio wczytany plik (probki w pamieci) — zeby "zaladuj pitch" nie dekodowal go drugi raz
     private static String lastPath = null;
     private static short[] lastSamples = null;
 
     public static void loadIntoLiveData(File file) throws IOException {
-        loadWave(file);
+        loadWave(file, false);
         addPitch(file, true);
     }
 
     // 1) Sama FALA — bardzo szybko (bez pitch, pauz, norm)
-    public static synchronized void loadWave(File file) throws IOException {
+    // Zwraca true, gdy wczytano z pamieci podrecznej razem z linia pitch
+    public static boolean loadWave(File file) throws IOException { return loadWave(file, true); }
+
+    public static synchronized boolean loadWave(File file, boolean useCache) throws IOException {
         LiveAudioData.reset();
+        LiveAudioData.CacheData cached = useCache ? readCache(file) : null;
+        if (cached != null) {
+            boolean hasPitch = cached.pitchS != null && cached.pitchS.length > 0;
+            LiveAudioData.importCache(cached, hasPitch);
+            lastPath = null; lastSamples = null;
+            return hasPitch;
+        }
         short[] samples = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
         lastPath = file.getAbsolutePath();
         lastSamples = samples;
@@ -35,6 +95,8 @@ public class AudioFileLoader {
             System.arraycopy(samples, off, chunk, 0, len);
             LiveAudioData.appendSamples(chunk, len);
         }
+        saveCache(file, LiveAudioData.exportCache(1f));
+        return false;
     }
 
     // 2) PITCH dla wczytanej fali. full=false: tylko linia pitch (bez pauz, norm i sylab).
@@ -77,6 +139,7 @@ public class AudioFileLoader {
         if (!full) {
             for (int f = 0; f < frames; f++) LiveAudioData.processPitchOnly((long) f * YIN_WINDOW, rmsA[f], f0A[f], relA[f]);
             LiveAudioData.finishPitchOnly();
+            saveCache(file, LiveAudioData.exportCache(1f)); // nastepnym razem pitch od razu
             return;
         }
         // Pelna analiza po kolei (VAD + pauzy, linia pitch, normy, sylaby) — jak na zywo
@@ -201,9 +264,11 @@ public class AudioFileLoader {
         // a na wynik czekamy krotko — wczesniej kazda ramka MP3 mogla czekac po 10 ms
         // (tysiace ramek = kilkanascie sekund przy dluzszym nagraniu).
         while (!outputDone) {
+            boolean progressed = false;
             while (!inputDone) {
                 int inIdx = codec.dequeueInputBuffer(0);
                 if (inIdx < 0) break;
+                progressed = true;
                 {
                     java.nio.ByteBuffer inBuf = codec.getInputBuffer(inIdx);
                     int sampleSize = inBuf != null ? extractor.readSampleData(inBuf, 0) : -1;
@@ -217,7 +282,8 @@ public class AudioFileLoader {
                 }
             }
 
-            int outIdx = codec.dequeueOutputBuffer(info, inputDone ? 5000 : 1000);
+            // czekamy tylko wtedy, gdy nic sie nie ruszylo (wczesniej: do 1 ms na kazda ramke MP3)
+            int outIdx = codec.dequeueOutputBuffer(info, progressed ? 0 : 2000);
             while (outIdx >= 0) {
                 java.nio.ByteBuffer outBuf = codec.getOutputBuffer(outIdx);
                 if (outBuf != null && info.size > 0) {
