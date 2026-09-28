@@ -168,7 +168,15 @@ public class BackgroundRecorderService extends Service {
             writeWavHeaderPlaceholder(wavOutputStream);
             pcmBytesWritten = 0L;
             currentOutputFilePath = outputFile.getAbsolutePath();
-            currentOutputFormat = "wav"; // podczas nagrywania ZAWSZE wav, konwersja przy Stop
+            currentOutputFormat = "wav"; // podczas nagrywania ZAWSZE wav (podglad w pauzie)
+            // MP3 kodowane NA BIEZACO obok WAV — po STOP nie trzeba juz nic przeliczac
+            mp3Stream = null;
+            if ("mp3".equals(outputFormat)) {
+                try { mp3Stream = new Mp3Stream(new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".mp3"), SAMPLE_RATE); }
+                catch (Throwable t) { mp3Stream = null; } // awaryjnie: konwersja po STOP jak dawniej
+            }
+            peakAbs = 0;
+            liveBoost = Math.max(1, LiveAudioData.outputBoost);
 
             audioRecord.startRecording();
             if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
@@ -230,9 +238,24 @@ public class BackgroundRecorderService extends Service {
                                 }
                             }
 
+                            // Glosnosc wynikowa ×N — od razu, z miekkim limiterem (bez trzaskow)
+                            if (liveBoost > 1) {
+                                final double T = 0.6, K = 0.4;
+                                for (int i = 0; i < read; i++) {
+                                    double x = buffer[i] / 32768.0 * liveBoost, ax = Math.abs(x);
+                                    double y = ax <= T ? ax : T + K * Math.tanh((ax - T) / K);
+                                    buffer[i] = (short) Math.round(Math.signum(x) * Math.min(y, 1.0) * 0.985 * 32767);
+                                }
+                            }
+                            for (int i = 0; i < read; i++) {
+                                int av = buffer[i] < 0 ? -buffer[i] : buffer[i];
+                                if (av > peakAbs) peakAbs = av;
+                            }
                             try {
                                 writeAudioChunk(buffer, read);
                             } catch (IOException ioe) { /* kontynuuj */ }
+                            Mp3Stream ms = mp3Stream;
+                            if (ms != null) ms.feed(buffer, read);
 
                             LiveAudioData.appendSamples(buffer, read);
 
@@ -267,6 +290,7 @@ public class BackgroundRecorderService extends Service {
         } catch (Exception e) {
             currentStatus = "NONE";
             LiveAudioData.isRecordingActive = false;
+            if (mp3Stream != null) { mp3Stream.abort(); mp3Stream = null; }
             cleanupAudioResources();
             releaseWakeLock();
             releaseAudioFocus();
@@ -320,6 +344,10 @@ public class BackgroundRecorderService extends Service {
         updateNotification("Nagrywanie…");
     }
 
+    private volatile Mp3Stream mp3Stream = null;
+    private volatile int peakAbs = 0;
+    private volatile int liveBoost = 1;
+
     private void handleStop() {
         if ("NONE".equals(currentStatus)) {
             RecordingResultHolder.rejectStop("RECORDING_HAS_NOT_STARTED", null);
@@ -346,19 +374,35 @@ public class BackgroundRecorderService extends Service {
         // MP3 w najwolniejszej jakosci i przepisywanie calego pliku przez Base64 — stad
         // dlugie czekanie). Teraz: jeden przebieg glosnosci, szybkie MP3, plik przekazywany
         // bez kopiowania.
+        final Mp3Stream ms = mp3Stream;
+        mp3Stream = null;
+        final int peak = peakAbs;
         new Thread(() -> {
             try {
                 boolean hasData = wav != null && wav.exists() && wav.length() > 44;
                 if (!hasData) {
+                    if (ms != null) ms.abort();
                     RecordingResultHolder.rejectStop("EMPTY_RECORDING", null);
                     return;
                 }
-                if (norm || boost > 1) applyGainInPlace(wav, norm, boost);
+                // AUTO 0 dB: ile podglosnic, zeby szczyt trafil w -0,1 dBFS (cisza — nie wzmacniamy szumu)
+                double g = (norm && peak >= 33) ? Math.max(1.0, 32390.0 / peak) : 1.0;
                 File finalFile = wav;
                 String mime = "audio/wav";
-                if ("mp3".equals(fmt)) {
-                    File mp3File = convertWavToMp3(wav);
-                    if (mp3File != null) { finalFile = mp3File; mime = "audio/mpeg"; }
+                File mp3 = ms != null ? ms.finish() : null;
+                if (mp3 != null) {
+                    // MP3 gotowe z nagrywania — podglosnienie bez ponownego kodowania (krok 1,5 dB)
+                    int steps = (int) Math.floor(20 * Math.log10(g) / 1.5);
+                    if (steps > 0) Mp3Gain.apply(mp3, steps);
+                    wav.delete();
+                    finalFile = mp3;
+                    mime = "audio/mpeg";
+                } else {
+                    if (g > 1.01) scaleWavInPlace(wav, g);
+                    if ("mp3".equals(fmt)) {
+                        File conv = convertWavToMp3(wav); // awaryjnie (gdy kodowanie na biezaco sie nie udalo)
+                        if (conv != null) { finalFile = conv; mime = "audio/mpeg"; }
+                    }
                 }
                 RecordingResultHolder.resolveStopFile(finalFile.getAbsolutePath(), durationMs, mime);
             } catch (Exception e) {
@@ -373,6 +417,32 @@ public class BackgroundRecorderService extends Service {
                 });
             }
         }, "rec-save").start();
+    }
+
+    // Liniowe podglosnienie WAV (wzmocnienie ×N jest juz zrobione w trakcie nagrywania)
+    private void scaleWavInPlace(File wavFile, double g) {
+        try (RandomAccessFile raf = new RandomAccessFile(wavFile, "rw")) {
+            if (raf.length() <= 44) return;
+            byte[] buf = new byte[1 << 18];
+            long pos = 44;
+            raf.seek(pos);
+            int read;
+            while ((read = raf.read(buf)) > 0) {
+                int even = read & ~1;
+                if (even == 0) break;
+                for (int i = 0; i < even; i += 2) {
+                    int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                    long nv = Math.round(v * g);
+                    if (nv > 32767) nv = 32767; else if (nv < -32768) nv = -32768;
+                    buf[i] = (byte) (nv & 0xff);
+                    buf[i + 1] = (byte) ((nv >> 8) & 0xff);
+                }
+                raf.seek(pos);
+                raf.write(buf, 0, even);
+                pos += even;
+                raf.seek(pos);
+            }
+        } catch (Exception e) { /* zostaje bez zmian */ }
     }
 
     // GLOSNOSC W JEDNYM PRZEBIEGU: 0 dB (szczyt -0,1 dBFS) i/lub wzmocnienie ×N z miekkim

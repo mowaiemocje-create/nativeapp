@@ -1009,7 +1009,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.showPauses = p.getBoolean("show_pauses", true);
         LiveAudioData.showNorms = p.getBoolean("show_norms", true);
         LiveAudioData.showArrows = p.getBoolean("show_arrows", true);
-        LiveAudioData.showTempo = p.getBoolean("show_tempo", true);
+        LiveAudioData.showTempo = p.getBoolean("show_tempo", false);
+        if (!p.getBoolean("tempo_off_v1", false)) {
+            // liczenie sylab/tempa na razie domyslnie WYLACZONE (do poprawy) — jednorazowo dla wszystkich
+            LiveAudioData.showTempo = false;
+            p.edit().putBoolean("tempo_off_v1", true).putBoolean("show_tempo", false).apply();
+        }
         LiveAudioData.arrowThresholdSt = p.getFloat("arrow_thr_st", 1.5f);
         Norms.load(p);
         applyKeepScreenOnSetting();
@@ -2243,17 +2248,37 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // Wczytuje plik z powrotem do wykresu (fala + pitch), przełącza widok w tryb statyczny
     // (przewijalny palcem, z możliwością wskazania miejsca odtwarzania).
+    // Wczytywanie w TLE (wczesniej na glownym watku — ekran stal, az caly plik sie przeliczyl)
+    private int loadGen = 0;
+
     private void loadAndDisplayFile(File file) {
-        try {
-            AudioFileLoader.loadIntoLiveData(file);
-            loadedFilePath = file.getAbsolutePath();
-            pitchWaveView.setLiveMode(false);
-            pitchWaveView.resetPan();
-            pitchWaveView.invalidate();
-            statusText.setText(L.t("Wczytano nagranie"));
-        } catch (IOException e) {
-            statusText.setText(L.t("Błąd wczytywania: ") + e.getMessage());
-        }
+        final int gen = ++loadGen;
+        loadedFilePath = file.getAbsolutePath();
+        pitchWaveView.setLiveMode(false);
+        pitchWaveView.resetPan();
+        statusText.setText("⏳ " + L.t("Wczytywanie nagrania…"));
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable tick = new Runnable() {
+            @Override public void run() {
+                if (gen != loadGen) return;
+                pitchWaveView.invalidate();
+                h.postDelayed(this, 300);
+            }
+        };
+        h.postDelayed(tick, 300);
+        new Thread(() -> {
+            String err = null;
+            try { AudioFileLoader.loadIntoLiveData(file); }
+            catch (Exception e) { err = e.getMessage(); }
+            final String fe = err;
+            runOnUiThread(() -> {
+                if (gen != loadGen) return;
+                loadGen++; // zatrzymuje odswiezanie w trakcie
+                pitchWaveView.resetPan();
+                pitchWaveView.invalidate();
+                statusText.setText(fe == null ? L.t("Wczytano nagranie") : L.t("Błąd wczytywania: ") + fe);
+            });
+        }, "load-daw").start();
     }
 
     // startSampleIndex: pozycja (w próbkach), od której ma zacząć się odtwarzanie — 0 =

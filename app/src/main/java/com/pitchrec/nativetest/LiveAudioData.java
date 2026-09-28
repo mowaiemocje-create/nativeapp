@@ -63,7 +63,9 @@ public class LiveAudioData {
     public static final PitchTracker tracker = new PitchTracker();
     public static final Norms norms = new Norms();
     // Podpowiedzi na wykresie — wlaczane/wylaczane w Ustawieniach
-    public static volatile boolean showPauses = true, showNorms = true, showArrows = true, showTempo = true;
+    public static volatile boolean showPauses = true, showNorms = true, showArrows = true, showTempo = false;
+    // wczytywanie pliku do DAW: pomijamy obliczenia potrzebne tylko na zywo (szybsze ladowanie)
+    public static volatile boolean batch = false;
     private static final PitchTracker.Sink PITCH_SINK = LiveAudioData::appendPitch;
 
     // JEDNO miejsce analizy okna (2048 probek) — wspolne dla nagrywania na zywo i wczytanego
@@ -150,6 +152,7 @@ public class LiveAudioData {
             liveRate = done.rate;
             return;
         }
+        if (batch) return; // sylaby trwajacej porcji liczymy tylko na zywo
         double st = norms.currentSpeechStart();
         if (st >= 0 && (++frameNo % 4 == 0) && now - st > 0.4) {
             // Pierwsza sylaba porcji moze byc 4-fazowa (dluga, z wahaniami glosnosci) — liczymy ja

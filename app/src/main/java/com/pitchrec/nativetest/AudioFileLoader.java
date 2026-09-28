@@ -15,6 +15,11 @@ public class AudioFileLoader {
 
     public static void loadIntoLiveData(File file) throws IOException {
         LiveAudioData.reset();
+        LiveAudioData.batch = true; // wczytywanie pliku: bez obliczen "na zywo" (podpowiedzi, sylaby w trakcie)
+        try { loadSamples(file); } finally { LiveAudioData.batch = false; }
+    }
+
+    private static void loadSamples(File file) throws IOException {
         short[] samples = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
 
         float[] yinWindow = new float[YIN_WINDOW];
@@ -157,10 +162,14 @@ public class AudioFileLoader {
         android.media.MediaCodec.BufferInfo info = new android.media.MediaCodec.BufferInfo();
         boolean inputDone = false, outputDone = false;
 
+        // Szybkie dekodowanie: wkladamy do dekodera wszystko, co przyjmie (bez czekania),
+        // a na wynik czekamy krotko — wczesniej kazda ramka MP3 mogla czekac po 10 ms
+        // (tysiace ramek = kilkanascie sekund przy dluzszym nagraniu).
         while (!outputDone) {
-            if (!inputDone) {
-                int inIdx = codec.dequeueInputBuffer(10000);
-                if (inIdx >= 0) {
+            while (!inputDone) {
+                int inIdx = codec.dequeueInputBuffer(0);
+                if (inIdx < 0) break;
+                {
                     java.nio.ByteBuffer inBuf = codec.getInputBuffer(inIdx);
                     int sampleSize = inBuf != null ? extractor.readSampleData(inBuf, 0) : -1;
                     if (sampleSize < 0) {
@@ -173,8 +182,8 @@ public class AudioFileLoader {
                 }
             }
 
-            int outIdx = codec.dequeueOutputBuffer(info, 10000);
-            if (outIdx >= 0) {
+            int outIdx = codec.dequeueOutputBuffer(info, inputDone ? 5000 : 1000);
+            while (outIdx >= 0) {
                 java.nio.ByteBuffer outBuf = codec.getOutputBuffer(outIdx);
                 if (outBuf != null && info.size > 0) {
                     byte[] chunk = new byte[info.size];
@@ -184,7 +193,9 @@ public class AudioFileLoader {
                 codec.releaseOutputBuffer(outIdx, false);
                 if ((info.flags & android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                     outputDone = true;
+                    break;
                 }
+                outIdx = codec.dequeueOutputBuffer(info, 0);
             }
         }
 

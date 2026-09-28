@@ -140,7 +140,7 @@ public class Norms {
         }
         if (segStart >= 0) {
             buf.add(rms);
-            if (speech && buf.size() - bufPreLen > 5) {
+            if (speech && buf.size() - bufPreLen > 5 && !LiveAudioData.batch) {
                 // Na zywo: dopoki trwa sylaba 4-fazowa (pierwsza w porcji) — ocena biezaca;
                 // po jej wyciszeniu wynik zostaje zamrozony (dalej sa juz sylaby zwykle).
                 if (!unitDone) {
