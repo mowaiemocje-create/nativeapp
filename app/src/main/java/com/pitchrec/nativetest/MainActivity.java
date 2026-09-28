@@ -843,6 +843,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             File renamed = RecMeta.renameWithMeta(this, file, meta);
             afterDescribed(meta, file.lastModified());
             if (file.getAbsolutePath().equals(lastSavedFilePath)) lastSavedFilePath = renamed.getAbsolutePath();
+            exportToFolder(renamed);
             if (isFix) {
                 clearFixTarget();
                 setStatus(L.t("💾 Poprawka zapisana (") + L.cat(meta.cat) + ")");
@@ -853,6 +854,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
         }, () -> {
             if (isFix) clearFixTarget();
+            exportToFolder(file);
             setStatus(L.t("💾 Zapisano bez opisu — opisz i wyślij w NAGRANIACH"));
         });
     }
@@ -1068,12 +1070,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (isLoggedIn()) verifySession(null);
 
         // 2) MAPA NAGRAN — duzy przycisk od razu pod logowaniem, obok NORMY
+        final boolean logged = isLoggedIn();
         android.widget.LinearLayout tiles = Ui.row(this);
         Button mapBtn = Ui.button(this, "🗺  " + L.t("MAPA NAGRAŃ"), R.color.pr_accent, true);
         mapBtn.setTextSize(14f);
         mapBtn.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
         mapBtn.setOnClickListener(v -> openMap());
-        tiles.addView(mapBtn, Ui.weight(2f, 8 * d));
+        if (logged) tiles.addView(mapBtn, Ui.weight(2f, 8 * d)); // mapa wymaga logowania NS
         Button normBtn = Ui.button(this, "🎯  " + L.t("NORMY"), R.color.pr_purple, false);
         normBtn.setTextSize(13f);
         normBtn.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
@@ -1095,6 +1098,29 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         fr.addView(mp3, Ui.weight(1f, 0));
         rec.addView(settingRow("🎵", L.t("Format nagrania"), "mp3".equals(selectedFormat) ? L.t("MP3 — mniejsze pliki, szybsza wysyłka") : L.t("WAV — pełna jakość, duże pliki"), null));
         rec.addView(fr);
+        rec.addView(divider());
+        // GDZIE SA NAGRANIA + wybor folderu docelowego (kopia kazdego nowego nagrania)
+        String tree = prefs().getString("export_tree_uri", null);
+        String where = tree == null
+                ? L.t("W pamięci aplikacji (lista NAGRANIA)") + "\n" + getFilesDir().getAbsolutePath()
+                : L.t("W pamięci aplikacji + kopia w folderze:") + "\n📁 " + treeLabel(tree);
+        rec.addView(settingRow("📁", L.t("Folder nagrań"), where, null));
+        android.widget.LinearLayout fb = Ui.row(this);
+        Button pick = Ui.button(this, tree == null ? L.t("Wybierz folder") : L.t("Zmień folder"), R.color.pr_accent, false);
+        pick.setOnClickListener(v -> {
+            Intent it = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            try { startActivityForResult(it, REQUEST_EXPORT_TREE); }
+            catch (Exception e) { Toast.makeText(this, L.t("Brak systemowego wyboru folderu"), Toast.LENGTH_LONG).show(); }
+        });
+        fb.addView(pick, Ui.weight(1f, 6 * d));
+        if (tree != null) {
+            Button off = Ui.button(this, L.t("Bez kopii"), R.color.pr_muted, false);
+            off.setOnClickListener(v -> { prefs().edit().remove("export_tree_uri").apply(); renderSettingsPage(); });
+            fb.addView(off, Ui.weight(1f, 0));
+        }
+        rec.addView(fb);
+        rec.addView(hint(L.t("Po wybraniu folderu każde nowe nagranie (MP3/WAV) zapisuje się też tam — widać je w Plikach telefonu i w komputerze.")));
         rec.addView(divider());
         rec.addView(toggleRow("🔊 " + L.t("Automatyczna głośność (0 dB)"), LiveAudioData.autoNormalize, on -> { LiveAudioData.autoNormalize = on; saveDawSettings(); }));
         rec.addView(hint(LiveAudioData.autoNormalize ? L.t("Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)") : L.t("Wyłączone — nagranie zostaje bez zmian")));
@@ -1135,9 +1161,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         rec.addView(gpsRow);
         c.addView(rec);
 
-        // 3a) Przypomnienia
-        c.addView(sectionHeader(L.t("PRZYPOMNIENIA")));
+        // 3a) Przypomnienia (tylko po zalogowaniu — sprawdzaja nagrania i dziennik w NS)
         android.widget.LinearLayout rem = Ui.card(this);
+        if (logged) c.addView(sectionHeader(L.t("PRZYPOMNIENIA")));
         rem.addView(toggleRow("🔔 " + L.t("Przypomnienie o 20:00"), ReminderReceiver.enabled(this), on -> {
             prefs().edit().putBoolean("reminder_on", on).apply();
             ReminderReceiver.schedule(this);
@@ -1146,7 +1172,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
         }));
         rem.addView(hint(L.t("Jeśli do 20:00 nie wgrasz nagrania do NewSpeech albo nie napiszesz dziennika, telefon Ci o tym przypomni.")));
-        c.addView(rem);
+        if (logged) c.addView(rem);
 
         // 3b) Podpowiedzi na wykresie i w statystykach
         c.addView(sectionHeader(L.t("PODPOWIEDZI")));
@@ -1160,7 +1186,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
         hints.addView(toggleRow("📈 " + L.t("Pitch przy otwieraniu nagrania — bez pytania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
-        hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
+        if (logged) hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
         c.addView(hints);
 
@@ -2048,6 +2074,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         headerStatus.setText(L.t("● NAGRYWA"));
         headerStatus.setTextColor(getResources().getColor(R.color.pr_warn));
         playButton.setButtonEnabled(false);
+        // podglad z pauzy konczymy — inaczej petla odtwarzacza dalej rysowala biala linie
+        if (currentPlayer != null) {
+            try { currentPlayer.release(); } catch (Exception e) { }
+            currentPlayer = null;
+        }
+        redrawHandler.removeCallbacks(playheadUpdateLoop);
+        pendingSeekSample = 0L;
         pitchWaveView.resetPan(); // czysci biala linie (playhead) — niepotrzebna podczas nagrywania na zywo
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
     }
@@ -2371,6 +2404,40 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // ── STRONA NAGRANIA (jak #pg-recs w PitchRec) ──
     private static final int REQUEST_IMPORT_FILE = 200;
+    private static final int REQUEST_EXPORT_TREE = 201;
+
+    // Czytelna nazwa wybranego folderu, np. "Pamięć wewnętrzna/Music/NewSpeech"
+    private String treeLabel(String treeUri) {
+        try {
+            String id = android.provider.DocumentsContract.getTreeDocumentId(android.net.Uri.parse(treeUri));
+            int k = id.indexOf(':');
+            String vol = k >= 0 ? id.substring(0, k) : id, path = k >= 0 ? id.substring(k + 1) : "";
+            String v = "primary".equalsIgnoreCase(vol) ? L.t("Pamięć wewnętrzna") : vol;
+            return path.isEmpty() ? v : v + "/" + path;
+        } catch (Exception e) { return treeUri; }
+    }
+
+    // Kopia nagrania do folderu wybranego w Ustawieniach (w tle, bez komunikatow przy sukcesie)
+    private void exportToFolder(File f) {
+        final String t = prefs().getString("export_tree_uri", null);
+        if (t == null || f == null || !f.exists()) return;
+        new Thread(() -> {
+            try {
+                android.net.Uri tree = android.net.Uri.parse(t);
+                android.net.Uri dir = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, android.provider.DocumentsContract.getTreeDocumentId(tree));
+                String mime = f.getName().toLowerCase(Locale.ROOT).endsWith(".mp3") ? "audio/mpeg" : "audio/wav";
+                android.net.Uri out = android.provider.DocumentsContract.createDocument(getContentResolver(), dir, mime, f.getName());
+                if (out == null) throw new IOException("createDocument");
+                try (java.io.InputStream in = new java.io.FileInputStream(f); java.io.OutputStream os = getContentResolver().openOutputStream(out)) {
+                    byte[] b = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(b)) > 0) os.write(b, 0, n);
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, L.t("⚠ Nie udało się zapisać kopii w wybranym folderze — wybierz folder ponownie w Ustawieniach"), Toast.LENGTH_LONG).show());
+            }
+        }, "export-rec").start();
+    }
 
     private void showRecordingsList() {
         if ("recs".equals(currentPage)) renderRecsPage(); else showPage("recs");
@@ -2566,6 +2633,18 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_EXPORT_TREE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                android.net.Uri t = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(t, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                } catch (Exception e) { }
+                prefs().edit().putString("export_tree_uri", t.toString()).apply();
+                Toast.makeText(this, "📁 " + L.t("Nowe nagrania będą zapisywane też w:") + " " + treeLabel(t.toString()), Toast.LENGTH_LONG).show();
+            }
+            if ("set".equals(currentPage)) renderSettingsPage();
+            return;
+        }
         if (requestCode == REQUEST_IMPORT_FILE && data != null && data.getData() != null) {
             try {
                 android.net.Uri sourceUri = data.getData();
