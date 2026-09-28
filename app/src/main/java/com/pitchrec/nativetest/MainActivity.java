@@ -837,6 +837,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     // Wysyla nagranie w kategorii z jego OPISU (jak w PitchRec). Bez opisu -> najpierw ekran opisu.
+    // Pliki w trakcie wysylki — blokada wielokrotnego klikniecia (kazde klikniecie = nowy rekord w NS)
+    private final java.util.Set<String> sendingNow = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
     private void sendToNs(File file) {
         if (!isLoggedIn()) { promptLogin(L.t("Aby wysłać nagranie do NewSpeech, zaloguj się.")); return; }
         RecMeta meta = RecMeta.load(this, file.getName());
@@ -844,11 +847,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             describeExisting(file, true);
             return;
         }
+        if ("sent".equals(meta.ns)) { Toast.makeText(this, L.t("☁✓ To nagranie jest już wysłane do NS"), Toast.LENGTH_SHORT).show(); return; }
+        if (!sendingNow.add(file.getName())) { Toast.makeText(this, L.t("⏳ Wysyłanie już trwa…"), Toast.LENGTH_SHORT).show(); return; }
+        if ("recs".equals(currentPage)) renderRecsPage();
         String catId = NsClient.categoryId(meta.cat);
         if (catId == null) { Toast.makeText(this, L.t("Nieznana kategoria: ") + meta.cat, Toast.LENGTH_LONG).show(); return; }
         boolean isFix = !meta.fixRecordId.isEmpty();
         setStatus(isFix ? L.t("☁ Wysyłanie poprawki…") : L.t("☁ Wysyłanie do NS…"));
         NsClient.Callback cb = r -> {
+            sendingNow.remove(file.getName());
             if (r.ok) {
                 markNs(file, "sent");
                 if (!isFix) rememberNsId(file, r.body);
@@ -890,7 +897,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         int undescribed = 0;
         for (File f : files) {
             RecMeta m = RecMeta.load(this, f.getName());
-            if ("sent".equals(m.ns)) continue;
+            if ("sent".equals(m.ns) || sendingNow.contains(f.getName())) continue;
             if (m.cat.isEmpty()) { undescribed++; continue; }
             todo.add(f);
         }
@@ -2787,7 +2794,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             btns.addView(desc, Ui.weight(1.3f, 6 * d));
         } else if (logged && !"sent".equals(meta.ns)) {
             // Wyslane nagranie nie ma juz przycisku wysylki (poprawka idzie przez KOREKTA)
-            Button send = Ui.button(this, L.t("☁ Wyślij NS"), R.color.pr_purple, false);
+            boolean busy = sendingNow.contains(file.getName());
+            Button send = Ui.button(this, busy ? L.t("⏳ Wysyłanie…") : L.t("☁ Wyślij NS"), R.color.pr_purple, false);
+            send.setEnabled(!busy);
             send.setOnClickListener(v -> sendToNs(file));
             btns.addView(send, Ui.weight(1.3f, 6 * d));
         }
