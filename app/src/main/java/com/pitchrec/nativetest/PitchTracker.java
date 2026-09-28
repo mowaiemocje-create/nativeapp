@@ -20,11 +20,13 @@ public class PitchTracker {
     private final long[] gap = new long[MAX_GAP_FRAMES + 1];
     private int gapN = 0;
     private int outliers = 0;
+    private float pendF = 0f;       // pierwsze okno nowego odcinka — czeka na potwierdzenie
+    private long pendSample = -1;
 
     public interface Sink { void point(long sample, float freq); }
 
     public synchronized void reset() {
-        smoothed = 0f; lastF = 0f; lastSample = -1; medN = 0; gapN = 0; outliers = 0;
+        smoothed = 0f; lastF = 0f; lastSample = -1; medN = 0; gapN = 0; outliers = 0; pendF = 0f; pendSample = -1;
     }
 
     // strict = wynik YIN z progiem 0,20; relaxed = wariant z globalnym minimum (lub -1)
@@ -34,6 +36,16 @@ public class PitchTracker {
         // Luzniejszy wynik przyjmujemy tylko w trakcie trwajacej wypowiedzi (nie startujemy od niego)
         if (valid && strict <= 0 && lastF <= 0) valid = false;
 
+        // START ODCINKA dopiero po 2 zgodnych oknach (±20%) — pojedynczy blad oktawy na poczatku
+        // wypowiedzi rysowal pionowa "szpilke" od gory wykresu w dol.
+        if (lastF <= 0) {
+            if (!valid) { pendF = 0f; return; }
+            if (pendF > 0 && Math.abs(f - pendF) / pendF < 0.2f) {
+                smoothed = pendF; lastF = pendF; medN = 0; med[medN++] = pendF; gapN = 0; outliers = 0;
+                out.point(pendSample, pendF);
+                pendF = 0f;
+            } else { pendF = f; pendSample = sample; return; }
+        }
         if (valid && lastF > 0) {
             float r = f / lastF;
             if (r > 1.8f && r < 2.25f) f /= 2f;          // blad oktawy w gore
@@ -42,7 +54,11 @@ public class PitchTracker {
             if (r > 1.45f || r < 1f / 1.45f) {           // pojedynczy strzal
                 outliers++;
                 if (outliers < 3) valid = false;
-                else { medN = 0; smoothed = 0f; }       // potwierdzony nowy poziom glosu
+                else {
+                    // potwierdzony nowy poziom glosu — przerwa w linii zamiast pionowej kreski
+                    out.point(sample, -1);
+                    medN = 0; smoothed = 0f; gapN = 0; outliers = 0;
+                }
             } else outliers = 0;
         }
 
@@ -79,7 +95,7 @@ public class PitchTracker {
 
     private void endRun(Sink out) {
         out.point(gap[0], -1);
-        gapN = 0; lastF = 0f; smoothed = 0f; medN = 0; outliers = 0;
+        gapN = 0; lastF = 0f; smoothed = 0f; medN = 0; outliers = 0; pendF = 0f;
     }
 
     // Koniec nagrania / pliku — domkniecie otwartej przerwy

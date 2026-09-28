@@ -18,6 +18,8 @@ public class LiveAudioData {
     private static final int ENVELOPE_CHUNK = 256;
 
     private static float[] envelope = new float[4096];
+    private static float[] rmsEnvelope = new float[4096]; // RMS tych samych okien 256 probek (do liczenia sylab)
+    private static double envelopeChunkSq = 0;
     private static int envelopeSize = 0;
     private static float envelopeChunkMax = 0f;
     private static int envelopeChunkCount = 0;
@@ -145,7 +147,7 @@ public class LiveAudioData {
                     a = fe[k];
                 }
                 s.addAll(afterFour(done.start, a, done.end));
-            } else s = countSyllables(done.start, done.end);
+            } else s = countSyllables(countStart(done.start), done.end);
             double dur = Math.max(0.2, done.end - done.start);
             done.syllables = s.size();
             done.rate = (float) (s.size() / dur * 60);
@@ -182,11 +184,27 @@ public class LiveAudioData {
     // Sylaby PO sylabie 4-fazowej: prog glosnosci liczony z CALEJ porcji (razem z 4-fazowa),
     // a nie z samej koncowki — inaczej cichy "ogon" wyciszenia 4-fazowej liczyl sie jako
     // osobna sylaba (1 sylaba pokazywala sie jako 2).
+    // Poczatek liczenia sylab porcji: wykrywanie mowy (ton krtaniowy) czasem startuje za pozno
+    // (pierwsza sylaba bez wyraznego tonu), a granica pauzy z obwiedni jest dokladna —
+    // zaczynamy od konca poprzedzajacej pauzy (nie dalej niz 1,5 s wstecz).
+    static double countStart(double portionStart) {
+        double best = portionStart;
+        synchronized (lock) {
+            double lastSyl = syllables.isEmpty() ? -1 : syllables.get(syllables.size() - 1).end;
+            for (Pause p : pauses) {
+                if (p.end <= portionStart + 0.05 && p.end >= portionStart - 1.5 && p.end < best) best = Math.max(p.end, lastSyl);
+            }
+            // pierwsza porcja nagrania (przed nia nie ma jeszcze pauzy): do 1,5 s wstecz
+            if (pauses.isEmpty() && syllables.isEmpty()) best = Math.max(0.1, portionStart - 1.5);
+        }
+        return Math.min(best, portionStart);
+    }
+
     static List<SyllableDetector.Syl> afterFour(double portionStart, double unitEnd, double end) {
         List<SyllableDetector.Syl> out = new ArrayList<>();
         if (end - unitEnd <= 0.15) return out;
         double prev = unitEnd;
-        for (SyllableDetector.Syl sy : countSyllables(portionStart, end)) {
+        for (SyllableDetector.Syl sy : (SyllableDetector.MODE == 2 ? countSyllables(unitEnd, end) : countSyllables(portionStart, end))) {
             if (sy.nucleus <= unitEnd + 0.05) continue;
             out.add(new SyllableDetector.Syl(prev, sy.nucleus, sy.end));
             prev = sy.end;
@@ -203,7 +221,7 @@ public class LiveAudioData {
             int e1 = Math.min(envelopeSize, (int) ((end + 0.1) * SAMPLE_RATE / ENVELOPE_CHUNK) + 1);
             if (e1 - e0 < 10) return new ArrayList<>();
             env = new float[e1 - e0];
-            System.arraycopy(envelope, e0, env, 0, e1 - e0);
+            System.arraycopy(SyllableDetector.MODE == 2 ? rmsEnvelope : envelope, e0, env, 0, e1 - e0);
             envStart = (long) e0 * ENVELOPE_CHUNK;
             double va = start - 0.2, vb = end + 0.2;
             int i0 = voicedN;
@@ -212,7 +230,9 @@ public class LiveAudioData {
             while (i1 < voicedN && voicedT[i1] <= vb) i1++;
             voiced = java.util.Arrays.copyOfRange(voicedT, i0, i1);
         }
-        return SyllableDetector.detect(env, envStart, SAMPLE_RATE, start, end, voiced);
+        return SyllableDetector.MODE == 2
+                ? SyllableDetector.detect2(env, envStart, SAMPLE_RATE, start, end, voiced)
+                : SyllableDetector.detect(env, envStart, SAMPLE_RATE, start, end, voiced);
     }
     public static volatile float pauseMinS = 1.0f, pauseMaxS = 2.5f; // prawidlowy zakres pauzy (Ustawienia)
     public static class Pause {
@@ -262,6 +282,8 @@ public class LiveAudioData {
         synchronized (lock) {
             pauses.clear();
             envelope = new float[4096];
+            rmsEnvelope = new float[4096];
+            envelopeChunkSq = 0;
             envelopeSize = 0;
             envelopeChunkMax = 0f;
             envelopeChunkCount = 0;
@@ -275,8 +297,13 @@ public class LiveAudioData {
             float[] bigger = new float[envelope.length * 2];
             System.arraycopy(envelope, 0, bigger, 0, envelope.length);
             envelope = bigger;
+            float[] bigger2 = new float[bigger.length];
+            System.arraycopy(rmsEnvelope, 0, bigger2, 0, rmsEnvelope.length);
+            rmsEnvelope = bigger2;
         }
         envelope[envelopeSize] = value;
+        rmsEnvelope[envelopeSize] = (float) Math.sqrt(envelopeChunkSq / ENVELOPE_CHUNK);
+        envelopeChunkSq = 0;
         envelopeSize++;
     }
 
@@ -285,6 +312,7 @@ public class LiveAudioData {
             for (int i = 0; i < length; i++) {
                 float normalized = Math.abs(buffer[i] / 32768f);
                 if (normalized > envelopeChunkMax) envelopeChunkMax = normalized;
+                envelopeChunkSq += (double) normalized * normalized;
                 envelopeChunkCount++;
                 if (envelopeChunkCount >= ENVELOPE_CHUNK) {
                     appendEnvelopeValue(envelopeChunkMax);
