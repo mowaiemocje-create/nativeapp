@@ -2762,8 +2762,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             Button desc = Ui.button(this, logged ? L.t("📝 Opisz i wyślij") : L.t("📝 Opisz"), R.color.pr_pause, true);
             desc.setOnClickListener(v -> describeExisting(file, logged));
             btns.addView(desc, Ui.weight(1.3f, 6 * d));
-        } else if (logged) {
-            Button send = Ui.button(this, "sent".equals(meta.ns) ? L.t("☁ Wyślij ponownie") : L.t("☁ Wyślij NS"), R.color.pr_purple, false);
+        } else if (logged && !"sent".equals(meta.ns)) {
+            // Wyslane nagranie nie ma juz przycisku wysylki (poprawka idzie przez KOREKTA)
+            Button send = Ui.button(this, L.t("☁ Wyślij NS"), R.color.pr_purple, false);
             send.setOnClickListener(v -> sendToNs(file));
             btns.addView(send, Ui.weight(1.3f, 6 * d));
         }
