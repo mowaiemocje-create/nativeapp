@@ -640,34 +640,31 @@ public class StatsPage {
         }
         android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
         new Thread(() -> {
-            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(5);
-            List<java.util.concurrent.Future<List<Object[]>>> jobs = new ArrayList<>();
             final String[] err = {null};
-            jobs.add(pool.submit(() -> overpass(lat, lon, err)));
-            String[] types = {"amenity=restaurant", "amenity=cafe", "amenity=pharmacy", "amenity=school", "amenity=bank", "amenity=post_office",
-                    "amenity=fuel", "amenity=library", "shop=supermarket", "shop=bakery", "shop=convenience", "leisure=park"};
-            for (String t : types) jobs.add(pool.submit(() -> nominatim(t, lat, lon, err)));
+            // 1) Overpass: proxy, a gdy nie odpowie (521/504 — przeciazony serwer map) kolejne
+            //    publiczne serwery Overpass bezposrednio. 2) Nominatim tylko awaryjnie.
+            List<Object[]> raw = overpass(lat, lon, err);
+            if (raw.isEmpty()) raw = nominatimFallback(lat, lon, err);
             List<Object[]> all = new ArrayList<>();
             Set<String> seen = new HashSet<>();
             String[] skip = {"parking", "toilets", "bench", "waste_basket", "bicycle_parking", "atm", "charging_station", "vending_machine", "recycling"};
-            for (java.util.concurrent.Future<List<Object[]>> j : jobs) {
-                try {
-                    for (Object[] p : j.get(40, java.util.concurrent.TimeUnit.SECONDS)) {
-                        String nm = ((String) p[0]).trim();
-                        if (nm.isEmpty() || !seen.add(nm.toLowerCase(Locale.ROOT))) continue;
-                        boolean sk = false;
-                        for (String s : skip) if (s.equals(p[2])) sk = true;
-                        if (sk || (Integer) p[1] > 5000) continue;
-                        all.add(p);
-                    }
-                } catch (Exception e) { if (err[0] == null) err[0] = e.getClass().getSimpleName(); }
+            for (Object[] p : raw) {
+                String nm = ((String) p[0]).trim();
+                if (nm.isEmpty() || !seen.add(nm.toLowerCase(Locale.ROOT))) continue;
+                boolean sk = false;
+                for (String s2 : skip) if (s2.equals(p[2])) sk = true;
+                if (sk || (Integer) p[1] > 5000) continue;
+                all.add(p);
             }
-            pool.shutdownNow();
             java.util.Collections.sort(all, (x, y) -> (Integer) x[1] - (Integer) y[1]);
             main.post(() -> {
                 if (!host.isCurrent()) return;
                 if (all.isEmpty()) {
-                    info.setText(err[0] == null ? L.t("Nie znaleziono miejsc w pobliżu.") : L.t("Nie udało się pobrać miejsc — sprawdź internet.") + " (" + err[0] + ")");
+                    if (err[0] == null) { info.setText(L.t("Nie znaleziono miejsc w pobliżu.")); return; }
+                    info.setText(L.t("Serwery map są teraz przeciążone — to nie wina Twojego internetu. Spróbuj za chwilę.") + " (" + err[0] + ")");
+                    Button again = Ui.button(a, "↻ " + L.t("Spróbuj ponownie"), R.color.pr_accent, false);
+                    again.setOnClickListener(v -> { card.removeView(again); info.setText("⏳ " + L.t("Szukam miejsc w pobliżu…")); fetchPlaces(card, info, lat, lon); });
+                    card.addView(again);
                     return;
                 }
                 placesCache = all; placesCacheKey = key; placesCacheAt = System.currentTimeMillis();
@@ -682,12 +679,15 @@ public class StatsPage {
         return (int) Math.round(Math.sqrt(dLat * dLat + dLon * dLon));
     }
 
-    private static String http(String method, String url, String form) throws Exception {
+    private static String http(String method, String url, String form) throws Exception { return http(method, url, form, 25000); }
+
+    private static String http(String method, String url, String form, int readMs) throws Exception {
         java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setRequestMethod(method);
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(35000);
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(readMs);
         c.setRequestProperty("Accept", "application/json");
+        c.setRequestProperty("User-Agent", "NewSpeechMp3Rec/1.0 (Android; newspeech)");
         if (form != null) {
             c.setDoOutput(true);
             c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
@@ -702,46 +702,73 @@ public class StatsPage {
         return new String(bo.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    // Serwery Overpass po kolei: najpierw nasz proxy, potem publiczne kopie (apka nie ma
+    // ograniczen CORS). Blad 521/504 = dany serwer map chwilowo lezy — probujemy nastepny.
+    private static final String[] OVERPASS = {
+            NsClient.NS_BASE + "/overpass",
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass.private.coffee/api/interpreter"};
+
     private static List<Object[]> overpass(double lat, double lon, String[] err) {
         List<Object[]> out = new ArrayList<>();
-        String a = "(around:5000," + lat + "," + lon + ")", b = "(around:3000," + lat + "," + lon + ")";
-        String q = "[out:json][timeout:20];(node[\"amenity\"]" + a + ";node[\"shop\"]" + a + ";node[\"leisure\"~\"park|garden|sports_centre\"][\"name\"]" + a
-                + ";node[\"tourism\"~\"museum|attraction\"][\"name\"]" + b + ";way[\"shop\"][\"name\"]" + b + ";way[\"amenity\"][\"name\"]" + b + ";);out center tags;";
-        try {
-            JSONArray els = new JSONObject(http("POST", NsClient.NS_BASE + "/overpass", "data=" + NsClient.enc(q))).optJSONArray("elements");
-            for (int i = 0; els != null && i < els.length(); i++) {
-                JSONObject el = els.optJSONObject(i);
-                JSONObject tags = el == null ? null : el.optJSONObject("tags");
-                if (tags == null) continue;
-                String name = tags.optString("name", tags.optString("name:pl", ""));
-                if (name.isEmpty()) continue;
-                JSONObject center = el.optJSONObject("center");
-                double la = el.has("lat") ? el.optDouble("lat", 0) : center != null ? center.optDouble("lat", 0) : 0;
-                double lo = el.has("lon") ? el.optDouble("lon", 0) : center != null ? center.optDouble("lon", 0) : 0;
-                if (la == 0) continue;
-                String type = tags.optString("amenity", tags.optString("shop", tags.optString("leisure", tags.optString("tourism", "_shop"))));
-                out.add(new Object[]{name, dist(lat, lon, la, lo), type});
+        // lzejsze zapytanie (tylko miejsca z nazwa, 3 km) — ciezkie konczylo sie przekroczeniem czasu
+        String a = "(around:3000," + lat + "," + lon + ")", b = "(around:2000," + lat + "," + lon + ")";
+        String q = "[out:json][timeout:15];(node[\"amenity\"][\"name\"]" + a + ";node[\"shop\"][\"name\"]" + a + ";node[\"leisure\"~\"park|garden|sports_centre\"][\"name\"]" + a
+                + ";node[\"tourism\"~\"museum|attraction\"][\"name\"]" + a + ";way[\"shop\"][\"name\"]" + b + ";way[\"amenity\"][\"name\"]" + b + ";way[\"leisure\"~\"park|garden\"][\"name\"]" + b + ";);out center tags 400;";
+        StringBuilder errs = new StringBuilder();
+        for (String srv : OVERPASS) {
+            try {
+                JSONArray els = new JSONObject(http("POST", srv, "data=" + NsClient.enc(q), 20000)).optJSONArray("elements");
+                for (int i = 0; els != null && i < els.length(); i++) {
+                    JSONObject el = els.optJSONObject(i);
+                    JSONObject tags = el == null ? null : el.optJSONObject("tags");
+                    if (tags == null) continue;
+                    String name = tags.optString("name", tags.optString("name:pl", ""));
+                    if (name.isEmpty()) continue;
+                    JSONObject center = el.optJSONObject("center");
+                    double la = el.has("lat") ? el.optDouble("lat", 0) : center != null ? center.optDouble("lat", 0) : 0;
+                    double lo = el.has("lon") ? el.optDouble("lon", 0) : center != null ? center.optDouble("lon", 0) : 0;
+                    if (la == 0) continue;
+                    String type = tags.optString("amenity", tags.optString("shop", tags.optString("leisure", tags.optString("tourism", "_shop"))));
+                    out.add(new Object[]{name, dist(lat, lon, la, lo), type});
+                }
+                if (els != null) return out; // ten serwer odpowiedzial (nawet pusto) — koniec
+            } catch (Exception e) {
+                if (errs.length() > 0) errs.append(", ");
+                errs.append(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             }
-        } catch (Exception e) { err[0] = "Overpass: " + e.getMessage(); }
+        }
+        err[0] = errs.toString();
         return out;
     }
 
-    private static List<Object[]> nominatim(String t, double lat, double lon, String[] err) {
+    // Awaryjnie Nominatim — wyszukiwanie OGRANICZONE do okolicy (viewbox + bounded=1; wczesniej
+    // lat/lon byly ignorowane i wracaly miejsca z calego swiata). Po kolei, 1 zapytanie/s (zasady OSM).
+    private static List<Object[]> nominatimFallback(double lat, double lon, String[] err) {
         List<Object[]> out = new ArrayList<>();
-        try {
-            String url = NsClient.NS_BASE + "/nominatim?" + t + "&lat=" + lat + "&lon=" + lon + "&format=json&limit=3&radius=5000&bounded=0&accept-language=pl&addressdetails=0";
-            JSONArray arr = new JSONArray(http("GET", url, null));
-            String type = t.substring(t.indexOf('=') + 1);
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject el = arr.optJSONObject(i);
-                if (el == null) continue;
-                String name = el.optString("name", "");
-                if (name.isEmpty()) name = el.optString("display_name", "").split(",")[0];
-                double la = Double.parseDouble(el.optString("lat", "0")), lo = Double.parseDouble(el.optString("lon", "0"));
-                if (la == 0) continue;
-                out.add(new Object[]{name, dist(lat, lon, la, lo), type});
-            }
-        } catch (Exception e) { if (err[0] == null) err[0] = "Nominatim: " + e.getMessage(); }
+        double dLat = 0.03, dLon = 0.03 / Math.max(0.2, Math.cos(Math.toRadians(lat)));
+        String vb = (lon - dLon) + "," + (lat + dLat) + "," + (lon + dLon) + "," + (lat - dLat);
+        String[][] types = {{"sklep", "supermarket"}, {"kawiarnia", "cafe"}, {"restauracja", "restaurant"}, {"apteka", "pharmacy"}, {"poczta", "post_office"}, {"park", "park"}};
+        boolean anyOk = false;
+        for (String[] t : types) {
+            try {
+                String url = "https://nominatim.openstreetmap.org/search?q=" + NsClient.enc(t[0]) + "&viewbox=" + vb + "&bounded=1&format=json&limit=8&accept-language=pl";
+                JSONArray arr = new JSONArray(http("GET", url, null, 12000));
+                anyOk = true;
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject el = arr.optJSONObject(i);
+                    if (el == null) continue;
+                    String name = el.optString("name", "");
+                    if (name.isEmpty()) name = el.optString("display_name", "").split(",")[0];
+                    double la = Double.parseDouble(el.optString("lat", "0")), lo = Double.parseDouble(el.optString("lon", "0"));
+                    if (la == 0) continue;
+                    out.add(new Object[]{name, dist(lat, lon, la, lo), t[1]});
+                }
+                Thread.sleep(1100);
+            } catch (Exception e) { if (!anyOk) { err[0] = (err[0] == null ? "" : err[0] + "; ") + "Nominatim: " + e.getMessage(); break; } }
+        }
+        if (anyOk && !out.isEmpty()) err[0] = null;
         return out;
     }
 

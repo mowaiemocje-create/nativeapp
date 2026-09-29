@@ -35,12 +35,12 @@ public class SpecialTasks {
         new Task("Spotkanie on-line – zorganizuj spotkanie online z kursantami (minimum 3 osoby).", s("U1K", "FIX", "K1", "K2"), "💻", 0xFF4C5FD5),
         new Task("Rozmowa z burmistrzem / wójtem / prezydentem – przeprowadź rozmowę z władzami lokalnymi.", s(), "🏛️", 0xFF2C3E6B),
         new Task("Wystąpienie w szkole ESBS – przygotuj i wygłoś prezentację o ESBS w szkole (około 6–7 minut).", s("FIX", "K1", "K2", "Full"), "📚", 0xFF8B5A2B),
-        new Task("Kuchnia TV – wciel się w kucharza i nagraj wideo z przygotowywania posiłku.", s("U1K", "Full"), "👨‍🍳", 0xFFD6473C),
+        new Task("Kuchnia TV – wciel się w kucharza i nagraj wideo z przygotowywania posiłku.", s("U1K", "K2"), "👨‍🍳", 0xFFD6473C),
         new Task("Rozmowa z dziennikarzem – przeprowadź rozmowę z dziennikarzem na dowolny temat.", s("K1", "K2", "Full"), "📰", 0xFF6B7280),
         new Task("City Vlog – ferie / wakacje – nagraj vlog z wyjazdu lub miejscowości wypoczynkowej.", s("U1K", "K1", "K2", "Full"), "🏖️", 0xFF22A6B3),
         new Task("Wynajem mieszkania – umów się na oględziny mieszkania, które planujesz wynająć, i przygotuj pytania do agenta.", s("K2", "Full"), "🏠", 0xFFD4A017),
         new Task("Biuro podróży – przygotuj pytania i odwiedź biuro podróży (10–15 minut).", s("U1K", "K1", "K2", "Full"), "✈️", 0xFF3AAFD9),
-        new Task("Wystąpienie w klasie – 5 min – krótkie przemówienie w klasie na dowolny temat.", s("FIX", "K1", "K2", "Full"), "🎓", 0xFF2E9E5B),
+        new Task("Wystąpienie w klasie / szkole 5 min – przemówienie na dowolny temat.", s("U1"), "🎓", 0xFF2E9E5B),
         new Task("Wystąpienie w radiu – udział w audycji radiowej.", s("FIX", "K1", "K2", "Full"), "📻", 0xFFE67E22),
         new Task("Salon samochodowy – umów się na jazdę testową w salonie i przygotuj pytania do dealera.", s("K2", "Full"), "🚗", 0xFFB03A2E),
         new Task("Wywiad z szefem / dyrektorem – przeprowadź wywiad z dyrektorem (wideo lub audio).", s("U1K", "FIX", "K1", "K2"), "💼", 0xFF4A5568),
@@ -49,7 +49,26 @@ public class SpecialTasks {
         new Task("100 kontaktów w 1 dzień – nawiązanie 100 krótkich kontaktów w sklepach i miejscach publicznych.", s(), "🤝", 0xFF65A30D),
         new Task("100 telefonów w 1 dzień – wykonanie 100 telefonów (np. do różnych instytucji lub firm).", s(), "☎️", 0xFF7C3AED),
         new Task("TV – wystąpienie telewizyjne.", s("K1", "K2", "Full"), "📺", 0xFF1E3A8A),
+        // ZS24–ZS34: nowe zadania dla K1, K2, Full
+        new Task("Sonda uliczna – zadaj 5 nieznajomym osobom na ulicy to samo pytanie na zaangażowany lub lekki temat i nagraj ich odpowiedzi na wideo.", s("K1", "K2", "Full"), "🎙️", 0xFF0EA5E9),
+        new Task("Negocjacja ceny – wynegocjuj rabat lub gratis przy zakupie usługi lub produktu (np. na targu, w sklepie ze sprzętem lub u usługodawcy).", s("K1", "K2", "Full"), "🏷️", 0xFFCA8A04),
+        new Task("Live w social media – przeprowadź 15-minutową transmisję na żywo (np. Instagram, YouTube, TikTok) połączoną z sesją pytań i odpowiedzi (Q&A).", s("K1", "K2", "Full"), "📱", 0xFFDB2777),
+        new Task("Odcinek podcastu – nagraj 15–20 minutowy autorski odcinek audio/video z gościem lub solo na wybrany temat.", s("K1", "K2", "Full"), "🎧", 0xFF7C3AED),
+        new Task("Toast / Mowa okolicznościowa – wygłoś przemówienie lub toast na wydarzeniu prywatnym bądź firmowym (urodziny, jubileusz, wigilia firmowa).", s("K1", "K2", "Full"), "🥂", 0xFFB45309),
+        new Task("Scena Open Mic – wystąp na otwartej scenie przed żywą publiką (np. wieczór impro, slam poetycki, stand-up lub jam session).", s("K1", "K2", "Full"), "🎤", 0xFFDC2626),
+        new Task("Pitch / Prezentacja pomysłu – zaprezentuj w 2–3 minuty swój pomysł na biznes, projekt lub zmianę w organizacji i odpowiedz na obiekcje słuchaczy.", s("K1", "K2", "Full"), "💡", 0xFFEAB308),
+        new Task("Przewodnik po galerii / muzeum – oprowadź osobę lub grupę po wybranej wystawie, opowiadając o eksponatach własnymi słowami.", s("K1", "K2", "Full"), "🏛️", 0xFF6D28D9),
+        new Task("Moderacja panelu – zorganizuj i poprowadź 15-minutową dyskusję z 2–3 osobami na kontrowersyjny lub angażujący temat.", s("K1", "K2", "Full"), "💬", 0xFF0F766E),
+        new Task("Wyzwanie sprzedażowe – przekonaj nieznajomą osobę w miejscu publicznym do zakupu prostego przedmiotu (np. długopisu) za symboliczną kwotę.", s("K1", "K2", "Full"), "🛍️", 0xFFEA580C),
+        new Task("Wystąpienie na targach / evencie – przejdź po stoiskach na targach branżowych, przeprowadzając krótkie, merytoryczne rozmowy z wystawcami przed kamerą/mikrofonem.", s("K1", "K2", "Full"), "📢", 0xFF2563EB),
+        // ZS35–ZS36: dluzsze wystapienia w klasie / szkole
+        new Task("Wystąpienie w klasie / szkole 8 min – przemówienie na dowolny temat.", s("FIX"), "🎓", 0xFF15803D),
+        new Task("Wystąpienie w klasie / szkole 15 min – wystąpienie / lekcja / prezentacja.", s("K1"), "🎓", 0xFF166534),
     };
+
+    // Stare nazwy (zapisane w opisach nagran przed zmiana listy) -> numer zadania
+    private static final String[][] LEGACY = {
+            {"Wystąpienie w klasie – 5 min – krótkie przemówienie w klasie na dowolny temat.", "15"}};
 
     // KOD ZADANIA w nazwie wysylanego pliku ("-ZS07" = 7. zadanie z listy) — dzieki temu z
     // rekordu w NewSpeech wiadomo, ktore zadanie wykonano, i czy trener je zaliczyl.
@@ -133,6 +152,7 @@ public class SpecialTasks {
     public static Task find(String name) {
         if (name == null || name.isEmpty()) return null;
         for (Task t : ALL) if (t.name.equals(name) || t.shortName().equals(name)) return t;
+        for (String[] l : LEGACY) if (l[0].equals(name)) return ALL[Integer.parseInt(l[1]) - 1];
         return null;
     }
 
