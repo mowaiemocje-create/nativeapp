@@ -70,6 +70,12 @@ public class ReminderReceiver extends BroadcastReceiver {
         if (Intent.ACTION_BOOT_COMPLETED.equals(act) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(act)) {
             schedule(c);
             TrainerWatch.schedule(c);
+            AvailWatch.schedule(c);
+            return;
+        }
+        if (AvailWatch.ACTION.equals(act)) {
+            final PendingResult pr = goAsync();
+            AvailWatch.check(c, () -> { try { pr.finish(); } catch (Exception e) { } });
             return;
         }
         if (TrainerWatch.ACTION.equals(act)) {

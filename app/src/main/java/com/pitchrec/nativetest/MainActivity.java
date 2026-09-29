@@ -255,6 +255,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         ReminderReceiver.schedule(this);
         TrainerWatch.schedule(this);
         TrainerWatch.check(this, null); // oceny trenera od ostatniego otwarcia
+        AvailWatch.schedule(this);
+        AvailWatch.check(this, null);   // kto teraz chetnie porozmawia
         askNotificationPermissionOnce();
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
@@ -448,6 +450,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String pg = in.getStringExtra("open_page");
         if (pg == null) return;
         in.removeExtra("open_page");
+        if ("map".equals(pg)) { showPage("daw"); if (isLoggedIn()) openMap(); return; }
         if (("diary".equals(pg) || "fix".equals(pg) || "stats".equals(pg)) && isLoggedIn()) showPage(pg); else showPage("daw");
     }
 
@@ -697,6 +700,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 prefs().edit().remove("map_name").apply();
                 loadProfileFromNs(true);
                 TrainerWatch.schedule(this);
+                AvailWatch.schedule(this);
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
                 updateNavForLogin();
                 refreshAccountSection();
@@ -1118,6 +1122,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         try {
             org.json.JSONObject b = new org.json.JSONObject();
             String name = mapName(prefs().getString("student_name", ""));
+            prefs().edit().putString("map_self_name", name).apply();
             b.put("userId", nsUserId().isEmpty() ? (nsEmail().isEmpty() ? name : nsEmail()) : nsUserId());
             b.put("name", name);
             b.put("phone", phone == null || phone.isEmpty() ? org.json.JSONObject.NULL : phone);
@@ -1281,9 +1286,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         tlp.bottomMargin = (int) (8 * d);
         c.addView(tiles, tlp);
 
-        // 3) Nagrywanie
-        c.addView(sectionHeader(L.t("NAGRYWANIE")));
-        android.widget.LinearLayout rec = Ui.card(this);
+        // 3) Nagrywanie — ZWIJANE grupy (dotkniecie naglowka rozwija/zwija)
+        android.widget.LinearLayout rec = section(c, "rec", "🎙  " + L.t("NAGRYWANIE") + "  ·  " + L.t("format i folder"));
         android.widget.LinearLayout fr = Ui.row(this);
         Button wav = Ui.button(this, "WAV", "wav".equals(selectedFormat) ? R.color.pr_accent : R.color.pr_muted, "wav".equals(selectedFormat));
         Button mp3 = Ui.button(this, "MP3", "mp3".equals(selectedFormat) ? R.color.pr_accent : R.color.pr_muted, "mp3".equals(selectedFormat));
@@ -1316,16 +1320,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         rec.addView(fb);
         rec.addView(hint(L.t("Po wybraniu folderu każde nowe nagranie (MP3/WAV) zapisuje się też tam — widać je w Plikach telefonu i w komputerze.")));
-        rec.addView(divider());
-        rec.addView(toggleRow("🔊 " + L.t("Automatyczna głośność (0 dB)"), LiveAudioData.autoNormalize, on -> { LiveAudioData.autoNormalize = on; saveDawSettings(); }));
-        rec.addView(hint(LiveAudioData.autoNormalize ? L.t("Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)") : L.t("Wyłączone — nagranie zostaje bez zmian")));
+        android.widget.LinearLayout snd = section(c, "snd", "🔊  " + L.t("DŹWIĘK") + "  ·  " + L.t("głośność i bramka szumów"));
+        snd.addView(toggleRow("🔊 " + L.t("Automatyczna głośność (0 dB)"), LiveAudioData.autoNormalize, on -> { LiveAudioData.autoNormalize = on; saveDawSettings(); }));
+        snd.addView(hint(LiveAudioData.autoNormalize ? L.t("Ciche nagrania po zapisie są podgłaśniane do 0 dB (bez zniekształceń)") : L.t("Wyłączone — nagranie zostaje bez zmian")));
         // GLOSNOSC WYNIKOWA: 0 dB albo dodatkowe wzmocnienie ×2…×10 (z miekkim limiterem)
         final int[] boosts = {1, 2, 4, 6, 8, 10};
         int bi = 0;
         for (int i = 0; i < boosts.length; i++) if (boosts[i] == LiveAudioData.outputBoost) bi = i;
         TextView boostLbl = Ui.text(this, boostLabel(LiveAudioData.outputBoost), 13f, R.color.pr_text);
         boostLbl.setPadding(0, (int) (8 * d), 0, 0);
-        rec.addView(boostLbl);
+        snd.addView(boostLbl);
         SliderView boostSlider = new SliderView(this);
         boostSlider.setLayoutParams(new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * d)));
         boostSlider.setValue(bi / 5f);
@@ -1337,26 +1341,22 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 saveDawSettings();
             }
         });
-        rec.addView(boostSlider);
+        snd.addView(boostSlider);
         android.widget.LinearLayout ticks = Ui.row(this);
         for (int i = 0; i < boosts.length; i++) {
             TextView tk = Ui.text(this, i == 0 ? "0 dB" : "×" + boosts[i], 10f, R.color.pr_muted);
             tk.setGravity(i == 0 ? android.view.Gravity.START : i == boosts.length - 1 ? android.view.Gravity.END : android.view.Gravity.CENTER);
             ticks.addView(tk, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         }
-        rec.addView(ticks);
-        rec.addView(hint(L.t("Gdy nagranie po zapisie jest za ciche — podgłośnij ×2…×10. Najgłośniejsze miejsca są łagodnie ograniczane (bez trzasków).")));
-        rec.addView(divider());
-        rec.addView(toggleRow("🎚 " + L.t("Suwaki MIC i ZOOM na ekranie nagrywania"), prefs().getBoolean("show_sliders", true), on -> { prefs().edit().putBoolean("show_sliders", on).apply(); applySliderVisibility(); }));
-        rec.addView(hint(L.t("Gdy mikrofon jest już dobrze ustawiony, możesz je schować — ekran nagrywania będzie prostszy.")));
-        rec.addView(toggleRow("🔆 " + L.t("Ekran nie gaśnie (wyłączony wygaszacz)"), keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
-        rec.addView(toggleRow("🎚 " + L.t("Bramka szumów (tłumi cichy szum tła)"), LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); renderSettingsPage(); }));
+        snd.addView(ticks);
+        snd.addView(hint(L.t("Gdy nagranie po zapisie jest za ciche — podgłośnij ×2…×10. Najgłośniejsze miejsca są łagodnie ograniczane (bez trzasków).")));
+        snd.addView(toggleRow("🎚 " + L.t("Bramka szumów (tłumi cichy szum tła)"), LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); renderSettingsPage(); }));
         if (LiveAudioData.noiseGateEnabled) {
             // SILA BRAMKI 1..5 — ile razy mowa musi byc glosniejsza od zmierzonego szumu tla
             final String[] gNames = {L.t("delikatna"), L.t("lekka"), L.t("średnia"), L.t("mocna"), L.t("bardzo mocna")};
             TextView gLbl = Ui.text(this, L.f("Siła bramki: {0}", gNames[NoiseGate.strength - 1]), 13f, R.color.pr_text);
             gLbl.setPadding(0, (int) (6 * d), 0, 0);
-            rec.addView(gLbl);
+            snd.addView(gLbl);
             SliderView gSlider = new SliderView(this);
             gSlider.setLayoutParams(new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * d)));
             gSlider.setValue((NoiseGate.strength - 1) / 4f);
@@ -1368,21 +1368,24 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     saveDawSettings();
                 }
             });
-            rec.addView(gSlider);
+            snd.addView(gSlider);
             String measured = NoiseGate.noiseRms > 0 && !NoiseGate.learning
                     ? " " + L.f("Ostatnio zmierzony szum tła: {0} dB.", String.format(Locale.US, "%.0f", NoiseGate.dbOf(NoiseGate.noiseRms))) : "";
-            rec.addView(hint(L.t("W pierwszej sekundzie nagrania bramka sama mierzy szum tła (najlepiej chwilę poczekaj, zanim zaczniesz mówić). Potem ścisza tylko to, co nie jest wyraźnie głośniejsze od szumu. Gdy ucina ciche słowa — zmniejsz siłę; gdy szum dalej słychać — zwiększ.") + measured));
+            snd.addView(hint(L.t("W pierwszej sekundzie nagrania bramka sama mierzy szum tła (najlepiej chwilę poczekaj, zanim zaczniesz mówić). Potem ścisza tylko to, co nie jest wyraźnie głośniejsze od szumu. Gdy ucina ciche słowa — zmniejsz siłę; gdy szum dalej słychać — zwiększ.") + measured));
         }
-        rec.addView(divider());
+        android.widget.LinearLayout scr = section(c, "scr", "📱  " + L.t("EKRAN NAGRYWANIA"));
+        scr.addView(toggleRow("🎚 " + L.t("Suwaki MIC i ZOOM na ekranie nagrywania"), prefs().getBoolean("show_sliders", true), on -> { prefs().edit().putBoolean("show_sliders", on).apply(); applySliderVisibility(); }));
+        scr.addView(hint(L.t("Gdy mikrofon jest już dobrze ustawiony, możesz je schować — ekran nagrywania będzie prostszy.")));
+        scr.addView(toggleRow("🔆 " + L.t("Ekran nie gaśnie (wyłączony wygaszacz)"), keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
+        final View[] gpsHolder = {null};
         boolean gpsOk = GpsHelper.hasPermission(this);
         View gpsRow = settingRow("📍", L.t("Lokalizacja GPS"), gpsOk ? L.t("zezwolono ✓") : L.t("brak zgody — dotknij, aby zezwolić"), null);
         gpsRow.setOnClickListener(v -> requestLocationPermission(this));
-        rec.addView(gpsRow);
-        c.addView(rec);
+        gpsHolder[0] = gpsRow;
 
         // 3a) Przypomnienia (tylko po zalogowaniu — sprawdzaja nagrania i dziennik w NS)
-        android.widget.LinearLayout rem = Ui.card(this);
-        if (logged) c.addView(sectionHeader(L.t("PRZYPOMNIENIA")));
+        android.widget.LinearLayout rem = logged ? section(c, "rem", "🔔  " + L.t("PRZYPOMNIENIA")) : new android.widget.LinearLayout(this);
+        rem.setOrientation(android.widget.LinearLayout.VERTICAL);
         rem.addView(toggleRow("🔔 " + L.t("Przypomnienie o 20:00"), ReminderReceiver.enabled(this), on -> {
             prefs().edit().putBoolean("reminder_on", on).apply();
             ReminderReceiver.schedule(this);
@@ -1396,11 +1399,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             TrainerWatch.schedule(this);
         }));
         rem.addView(hint(L.t("Gdy trener zaliczy nagranie, poprosi o poprawkę albo odpowie na dziennik — dostaniesz powiadomienie.")));
-        if (logged) c.addView(rem);
+        rem.addView(toggleRow("📞 " + L.t("Powiadomienia „Chętnie porozmawiam”"), AvailWatch.enabled(this), on -> {
+            prefs().edit().putBoolean("avail_notif", on).apply();
+            AvailWatch.schedule(this);
+        }));
+        rem.addView(hint(L.t("Gdy inny kursant włączy „Chętnie porozmawiam”, dostaniesz powiadomienie z jego imieniem, miastem i telefonem (bez powiadomień w nocy).")));
 
         // 3b) Podpowiedzi na wykresie i w statystykach
-        c.addView(sectionHeader(L.t("PODPOWIEDZI")));
-        android.widget.LinearLayout hints = Ui.card(this);
+        android.widget.LinearLayout hints = section(c, "hints", "💡  " + L.t("PODPOWIEDZI") + "  ·  " + L.t("pauzy, strzałki, tempo"));
         hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
         hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
         hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
@@ -1412,33 +1418,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         hints.addView(toggleRow("📈 " + L.t("Pitch przy otwieraniu nagrania — bez pytania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
         if (logged) hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
-        c.addView(hints);
 
-        // 4) Analiza pauz
-        c.addView(sectionHeader(L.t("PAUZY — ZAKRES PRAWIDŁOWY")));
-        android.widget.LinearLayout pz = Ui.card(this);
-        android.widget.LinearLayout pzRow = Ui.row(this);
-        pzRow.addView(pauseStepper("MIN", true), Ui.weight(1f, 10 * d));
-        pzRow.addView(pauseStepper("MAX", false), Ui.weight(1f, 0));
-        pz.addView(pzRow);
-        pz.addView(hint(String.format(Locale.US, L.t("Pauza między porcjami mowy %.1f–%.1f s liczy się jako prawidłowa (regulacja 1–4 s)"), LiveAudioData.pauseMinS, LiveAudioData.pauseMaxS)));
-        c.addView(pz);
+        // (Zakres pauz jest teraz w NORMY)
 
         // 5) Wyglad DAW
-        android.widget.LinearLayout dawCard = Ui.card(this);
-        android.widget.LinearLayout dawHead = Ui.row(this);
-        TextView dawTitle = Ui.text(this, "🎨  " + L.t("WYGLĄD DAW") + "  ·  " + L.t("kolory i linie"), 13f, R.color.pr_text);
-        dawTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        dawHead.addView(dawTitle, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        dawHead.addView(Ui.text(this, dawLookOpen ? "▲" : "▼", 14f, R.color.pr_accent));
-        dawHead.setPadding(0, (int) (4 * d), 0, (int) (4 * d));
-        dawHead.setOnClickListener(v -> { dawLookOpen = !dawLookOpen; renderSettingsPage(); });
-        dawCard.addView(dawHead);
-        c.addView(dawCard);
-        android.widget.LinearLayout daw = new android.widget.LinearLayout(this);
-        daw.setOrientation(android.widget.LinearLayout.VERTICAL);
-        daw.setPadding(0, (int) (10 * d), 0, 0);
-        if (dawLookOpen) dawCard.addView(daw);
+        android.widget.LinearLayout daw = section(c, "daw", "🎨  " + L.t("WYGLĄD DAW") + "  ·  " + L.t("kolory i linie"));
         TextView pitchWidthLabel = Ui.text(this, String.format(Locale.getDefault(), L.t("Grubość linii pitch: %.0f"), LiveAudioData.pitchLineWidthDp), 13f, R.color.pr_text);
         daw.addView(pitchWidthLabel);
         SliderView pitchWidthSlider = new SliderView(this);
@@ -1468,8 +1452,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         addColorRow(daw, Ui.text(this, L.t("Kolor fali"), 13f, R.color.pr_text), LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
 
         // 6) Mapa i dostepnosc do rozmowy
-        c.addView(sectionHeader(L.t("MAPA I DOSTĘPNOŚĆ")));
-        android.widget.LinearLayout mp = Ui.card(this);
+        android.widget.LinearLayout mp = section(c, "map", "📍  " + L.t("MAPA, GPS I DOSTĘPNOŚĆ"));
+        if (gpsHolder[0] != null) { mp.addView(gpsHolder[0]); mp.addView(divider()); }
         mp.addView(toggleRow("📡 " + L.t("Pokazuj mnie na mapie na żywo (Sklepy, Przechodzień)"), prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
         mp.addView(hint(L.t("Na mapie jako:") + " " + mapName(prefs().getString("student_name", ""))));
         mp.addView(divider());
@@ -1488,11 +1472,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
         mp.addView(av, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
         mp.addView(hint(avail ? L.t("Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach.") : L.t("Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).")));
-        c.addView(mp);
 
         // 7) Jezyk
-        c.addView(sectionHeader(L.t("JĘZYK")));
-        android.widget.LinearLayout lang = Ui.card(this);
+        android.widget.LinearLayout lang = section(c, "lang", "🌐  " + L.t("JĘZYK") + "  ·  " + currentLangName());
         String cur = getSavedLanguage(this);
         String[][] langs = {{"pl", "🇵🇱 Polski"}, {"en", "🇬🇧 English"}, {"cs", "🇨🇿 Čeština"}, {"sk", "🇸🇰 Slovenčina"}, {"de", "🇩🇪 Deutsch"}, {"es", "🇪🇸 Español"}, {"hu", "🇭🇺 Magyar"}};
         android.widget.LinearLayout lr = null;
@@ -1504,7 +1486,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             b.setOnClickListener(v -> { if (!code.equals(getSavedLanguage(this))) setLanguage(code); });
             lr.addView(b, Ui.weight(1f, i % 2 == 0 ? 6 * d : 0));
         }
-        c.addView(lang);
 
         // 8) O aplikacji
         TextView about = Ui.text(this, L.t("PitchRec · v") + appVersion() + L.t(" · NewSpeech"), 10f, R.color.pr_muted);
@@ -1514,7 +1495,44 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(Ui.spacer(this, 20));
     }
 
-    private boolean dawLookOpen = false;
+    // ZWIJANE sekcje Ustawien: naglowek zawsze widoczny, tresc po dotknieciu (stan zapamietany)
+    private java.util.Set<String> openSections = null;
+
+    private android.widget.LinearLayout section(android.widget.LinearLayout parent, String key, String title) {
+        if (openSections == null) openSections = new java.util.HashSet<>(prefs().getStringSet("set_open", new java.util.HashSet<>()));
+        float d = getResources().getDisplayMetrics().density;
+        boolean open = openSections.contains(key);
+        android.widget.LinearLayout card = Ui.card(this);
+        android.widget.LinearLayout head = Ui.row(this);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView t = Ui.text(this, title, 13f, R.color.pr_text);
+        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        head.addView(t, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        head.addView(Ui.text(this, open ? "▲" : "▼", 14f, R.color.pr_accent));
+        head.setPadding(0, (int) (6 * d), 0, (int) (6 * d));
+        head.setOnClickListener(v -> {
+            if (!openSections.remove(key)) openSections.add(key);
+            prefs().edit().putStringSet("set_open", new java.util.HashSet<>(openSections)).apply();
+            renderSettingsPage();
+        });
+        card.addView(head);
+        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = (int) (8 * d);
+        parent.addView(card, lp);
+        android.widget.LinearLayout body = new android.widget.LinearLayout(this);
+        body.setOrientation(android.widget.LinearLayout.VERTICAL);
+        body.setPadding(0, (int) (8 * d), 0, 0);
+        if (open) card.addView(body);
+        return body;
+    }
+
+    private String currentLangName() {
+        switch (getSavedLanguage(this)) {
+            case "en": return "English"; case "cs": return "Čeština"; case "sk": return "Slovenčina";
+            case "de": return "Deutsch"; case "es": return "Español"; case "hu": return "Magyar";
+            default: return "Polski";
+        }
+    }
 
     // ── NORMY (jak train.html w PitchRec): czasy 4 faz emisji, prog ciszy, tolerancja,
     // stosunek szczyt/cisza; kalibracja z nagrania wzorcowego trenera ──
@@ -1555,6 +1573,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!Norms.calibrated) q.addView(normStepper(L.t("Szczyt / cisza (wzorzec)"), Norms.pkRatio, 2, 50, 0.5f, "×%.1f", v -> Norms.pkRatio = v));
         q.addView(hint(Norms.shapeRef != null ? "✓ " + L.t("Zapisany kształt wzorca — porównanie podobieństwa jest włączone.") : L.t("Brak wzorca kształtu — nagraj wzorzec, aby porównywać podobieństwo.")));
         c.addView(q);
+
+        c.addView(sectionHeader(L.t("PAUZY — ZAKRES PRAWIDŁOWY")));
+        android.widget.LinearLayout pz = Ui.card(this);
+        android.widget.LinearLayout pzRow = Ui.row(this);
+        pzRow.addView(pauseStepper("MIN", true), Ui.weight(1f, 10 * d));
+        pzRow.addView(pauseStepper("MAX", false), Ui.weight(1f, 0));
+        pz.addView(pzRow);
+        pz.addView(hint(String.format(Locale.US, L.t("Pauza między porcjami mowy %.1f–%.1f s liczy się jako prawidłowa (regulacja 1–4 s)"), LiveAudioData.pauseMinS, LiveAudioData.pauseMaxS)));
+        c.addView(pz);
 
         c.addView(sectionHeader(L.t("KALIBRACJA Z NAGRANIA")));
         android.widget.LinearLayout cal = Ui.card(this);
@@ -1748,7 +1775,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 if (LiveAudioData.pauseMinS > LiveAudioData.pauseMaxS - 0.5f) LiveAudioData.pauseMinS = LiveAudioData.pauseMaxS - 0.5f;
             }
             saveDawSettings();
-            renderSettingsPage();
+            // odswiez strone NORMY, zachowujac miejsce przewiniecia
+            View sv = findViewById(R.id.setPage);
+            int y = sv != null ? sv.getScrollY() : 0;
+            renderNormsPage();
+            if (sv != null) sv.post(() -> sv.scrollTo(0, y));
         };
         minus.setOnClickListener(step);
         plus.setOnClickListener(step);
@@ -2685,6 +2716,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // ── STRONA NAGRANIA (jak #pg-recs w PitchRec) ──
     private static final int REQUEST_IMPORT_FILE = 200;
     private static final int REQUEST_EXPORT_TREE = 201;
+    private static final int REQUEST_SAVE_FILE = 202;
+    private File pendingSaveFile = null;
 
     // Czytelna nazwa wybranego folderu, np. "Pamięć wewnętrzna/Music/NewSpeech"
     private String treeLabel(String treeUri) {
@@ -2752,8 +2785,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         android.widget.LinearLayout actions = Ui.row(this);
         Button dlAll = Ui.button(this, L.t("⬇ Pobierz wszystkie"), R.color.pr_accent, false);
-        dlAll.setOnClickListener(v -> shareAllRecordings(finalFiles));
+        dlAll.setOnClickListener(v -> downloadAllRecordings(finalFiles));
+        Button shAll = Ui.button(this, "📤", R.color.pr_accent, false);
+        shAll.setOnClickListener(v -> shareAllRecordings(finalFiles));
         actions.addView(dlAll, Ui.weight(1f, 8 * d));
+        actions.addView(shAll, Ui.weight(0.35f, 8 * d));
         Button imp = Ui.button(this, L.t("📁 Wgraj plik"), R.color.pr_warn, false);
         imp.setOnClickListener(v -> importExternalFile());
         actions.addView(imp, Ui.weight(1f, 0));
@@ -2761,7 +2797,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(Ui.spacer(this, 14));
 
         // Filtry wg statusu (pewne dane: wysylka z telefonu + ocena w NS)
-        if (finalFiles.length > 0) {
+        if (!isLoggedIn()) recsFilter = "all";
+        if (finalFiles.length > 0 && isLoggedIn()) { // bez logowania filtry (do poprawy / czekaja / niewyslane) nic nie znacza
             if (isLoggedIn()) { NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); })); scheduleRecsPoll(); }
             android.widget.LinearLayout fl = Ui.row(this);
             String[][] fs = {{"all", L.t("Wszystkie")}, {"bad", "↺ " + L.t("Do poprawy")}, {"wait", "⏳ " + L.t("Czekają")}, {"unsent", "☁ " + L.t("Niewysłane")}};
@@ -2921,8 +2958,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             playButton.setButtonEnabled(true);
         });
         btns.addView(daw, Ui.weight(1f, 6 * d));
-        Button dl = Ui.button(this, "⬇", R.color.pr_accent, false);
-        dl.setOnClickListener(v -> shareRecording(file));
+        Button sh = Ui.button(this, "📤", R.color.pr_accent, false); // udostepnij (WhatsApp, mail…)
+        sh.setOnClickListener(v -> shareRecording(file));
+        btns.addView(sh, Ui.weight(0.5f, 6 * d));
+        Button dl = Ui.button(this, "⬇", R.color.pr_accent, false);   // pobierz do telefonu
+        dl.setOnClickListener(v -> downloadRecording(file));
         btns.addView(dl, Ui.weight(0.5f, 6 * d));
         Button del = Ui.button(this, L.t("✕ Usuń"), R.color.pr_warn, false);
         del.setOnClickListener(v -> new AlertDialog.Builder(this)
@@ -2998,6 +3038,20 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_SAVE_FILE) {
+            File src = pendingSaveFile;
+            pendingSaveFile = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && src != null) {
+                try (java.io.InputStream in = new java.io.FileInputStream(src); java.io.OutputStream os = getContentResolver().openOutputStream(data.getData())) {
+                    byte[] b = new byte[1 << 16]; int n;
+                    while ((n = in.read(b)) > 0) os.write(b, 0, n);
+                    Toast.makeText(this, "⬇ " + L.t("Zapisano nagranie"), Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, L.t("Błąd zapisu: ") + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if (requestCode == REQUEST_EXPORT_TREE) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 android.net.Uri t = data.getData();
@@ -3064,6 +3118,51 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         } catch (Exception e) {
             Toast.makeText(this, L.t("Błąd: ") + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ⬇ POBIERZ: kopia nagrania do "Pobrane/NewSpeech" (Android 10+ bez zadnych zgod);
+    // na starszych Androidach systemowe okno "Zapisz jako".
+    private boolean saveToDownloads(File f) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT < 29) return false;
+        android.content.ContentValues cv = new android.content.ContentValues();
+        cv.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, f.getName());
+        cv.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, f.getName().toLowerCase(Locale.ROOT).endsWith(".mp3") ? "audio/mpeg" : "audio/wav");
+        cv.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/NewSpeech");
+        android.net.Uri out = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+        if (out == null) throw new IOException("MediaStore");
+        try (java.io.InputStream in = new java.io.FileInputStream(f); java.io.OutputStream os = getContentResolver().openOutputStream(out)) {
+            byte[] b = new byte[1 << 16]; int n;
+            while ((n = in.read(b)) > 0) os.write(b, 0, n);
+        }
+        return true;
+    }
+
+    private void downloadRecording(File file) {
+        try {
+            if (saveToDownloads(file)) {
+                Toast.makeText(this, "⬇ " + L.t("Zapisano w Pobrane/NewSpeech"), Toast.LENGTH_SHORT).show();
+                return;
+            }
+            pendingSaveFile = file;
+            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType(file.getName().toLowerCase(Locale.ROOT).endsWith(".mp3") ? "audio/mpeg" : "audio/wav");
+            i.putExtra(Intent.EXTRA_TITLE, file.getName());
+            startActivityForResult(i, REQUEST_SAVE_FILE);
+        } catch (Exception e) {
+            Toast.makeText(this, L.t("Błąd zapisu: ") + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void downloadAllRecordings(File[] files) {
+        if (files.length == 0) { Toast.makeText(this, L.t("Brak nagrań"), Toast.LENGTH_SHORT).show(); return; }
+        if (android.os.Build.VERSION.SDK_INT < 29) { shareAllRecordings(files); return; }
+        new Thread(() -> {
+            int ok = 0; String err = null;
+            for (File f : files) { try { if (saveToDownloads(f)) ok++; } catch (Exception e) { err = e.getMessage(); } }
+            final int fok = ok; final String fe = err;
+            runOnUiThread(() -> Toast.makeText(this, fe == null ? "⬇ " + L.f("Zapisano {0} nagrań w Pobrane/NewSpeech", fok) : L.t("Błąd zapisu: ") + fe, Toast.LENGTH_LONG).show());
+        }, "download-all").start();
     }
 
     private void shareRecording(File file) {
