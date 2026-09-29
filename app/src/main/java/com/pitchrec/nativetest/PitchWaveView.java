@@ -173,12 +173,11 @@ public class PitchWaveView extends View {
         // playhead po prostu "wychodzil" poza widoczny zakres podczas dluzszego
         // odtwarzania, zamiast plynnie przewijac sie razem z odtwarzaniem.
         if (!isLiveMode && lastVisibleSampleRange > 0) {
-            long visibleEnd = lastVisibleStartSample + (long) lastVisibleSampleRange;
-            if (sample > visibleEnd - lastVisibleSampleRange * 0.1f) {
-                // Playhead blisko prawej krawedzi — przesuwamy okno tak, zeby playhead
-                // byl blisko lewej krawedzi nowego okna (efekt plynnego przewijania).
-                panOffsetSample = Math.max(0, sample - (long) (lastVisibleSampleRange * 0.1f));
-            }
+            // Jak podczas nagrywania: suwak dochodzi do SRODKA ekranu, a potem wykres, siatka
+            // i sekundy przesuwaja sie plynnie pod nim (wczesniej okno skakalo co cala strone).
+            long half = (long) (lastVisibleSampleRange / 2f);
+            if (sample > panOffsetSample + half) panOffsetSample = sample - half;
+            else if (sample < panOffsetSample) panOffsetSample = Math.max(0, sample - half);
         }
         invalidate();
     }

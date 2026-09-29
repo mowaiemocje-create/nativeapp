@@ -55,10 +55,9 @@ public class LiveAudioData {
     public static volatile int dawBackgroundColor = 0xFF050510; // ARGB, tlo wykresu DAW
     public static volatile int waveColor = 0xFFFFB23C; // ARGB, kolor fali (obwiedni amplitudy)
 
-    // Bramka szumów — jeśli włączona, próbki o RMS poniżej progu są wyciszane (ustawiane
-    // na zero) przed zapisem/analizą. Domyślnie wyłączona.
+    // Bramka szumów (NoiseGate) — sama rozpoznaje szum tła w pierwszych 1,5 s; siła 1..5
+    // w NoiseGate.strength. Domyślnie wyłączona.
     public static volatile boolean noiseGateEnabled = false;
-    public static volatile float noiseGateThreshold = 0.02f; // RMS, 0.0-1.0
 
     // ── Wykrywanie glosu i pauz (VAD, jak w PitchRec PWA v288) ──
     public static final VadDetector vad = new VadDetector();

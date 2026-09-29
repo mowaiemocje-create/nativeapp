@@ -112,6 +112,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         AudioFileLoader.cacheDir = new File(getFilesDir(), ".dawcache");
         new Thread(() -> { // sprzatanie pamieci podrecznej DAW: najwyzej 300 najnowszych
             File[] cf = AudioFileLoader.cacheDir.listFiles();
+            // jednorazowo: stare wpisy (klucz z data pliku) — moglyby pokazac wykres innego nagrania
+            android.content.SharedPreferences cp = getSharedPreferences("app_settings", MODE_PRIVATE);
+            if (cf != null && !cp.getBoolean("dawcache_v2", false)) {
+                for (File x : cf) x.delete();
+                cp.edit().putBoolean("dawcache_v2", true).apply();
+                cf = AudioFileLoader.cacheDir.listFiles();
+            }
             if (cf != null && cf.length > 300) {
                 java.util.Arrays.sort(cf, (x, y) -> Long.compare(y.lastModified(), x.lastModified()));
                 for (int i = 300; i < cf.length; i++) cf[i].delete();
@@ -232,7 +239,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             // playheadUpdateLoop nadpisywala dotkniecie).
             if (currentPlayer != null) {
                 try {
-                    currentPlayer.seekTo((int) ms);
+                    seekExact(currentPlayer, (int) ms);
+                    anchorPosMs = ms; anchorNanos = System.nanoTime(); lastReportedMs = -1;
                     timeText.setText(formatMs(ms) + " / " + formatMs(lastRecordingTotalDurationMs));
                 } catch (IllegalStateException e) { /* odtwarzacz w nietypowym stanie */ }
             }
@@ -994,6 +1002,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         final boolean isFix = fix != null;
         DescribeSheet.show(this, init, true, isFix ? L.t("ZAPISZ POPRAWKĘ") : L.t("ZAPISZ NAGRANIE"), banner, meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
+            if (file.getAbsolutePath().equals(loadedFilePath)) loadedFilePath = renamed.getAbsolutePath();
             afterDescribed(meta, file.lastModified());
             if (file.getAbsolutePath().equals(lastSavedFilePath)) lastSavedFilePath = renamed.getAbsolutePath();
             exportToFolder(renamed);
@@ -1017,6 +1026,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         RecMeta existing = RecMeta.load(this, file.getName());
         DescribeSheet.show(this, existing, false, L.t("OPISZ NAGRANIE"), meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
+            if (file.getAbsolutePath().equals(loadedFilePath)) loadedFilePath = renamed.getAbsolutePath();
             afterDescribed(meta, file.lastModified());
             if ("recs".equals(currentPage)) renderRecsPage();
             if (sendAfter && isLoggedIn()) sendToNs(renamed);
@@ -1187,6 +1197,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.autoNormalize = p.getBoolean("auto_normalize", true);
         LiveAudioData.outputBoost = p.getInt("out_boost", 1);
         LiveAudioData.noiseGateEnabled = p.getBoolean("noise_gate", LiveAudioData.noiseGateEnabled);
+        NoiseGate.strength = Math.max(1, Math.min(5, p.getInt("gate_strength", 2)));
         keepScreenOnEnabled = p.getBoolean("keep_screen_on", true); // domyslnie ekran NIE gasnie
         selectedFormat = p.getString("format", "mp3"); // domyslnie MP3
         LiveAudioData.pauseMinS = p.getFloat("pause_min", 1.0f);
@@ -1220,6 +1231,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .putBoolean("auto_normalize", LiveAudioData.autoNormalize)
                 .putInt("out_boost", LiveAudioData.outputBoost)
                 .putBoolean("noise_gate", LiveAudioData.noiseGateEnabled)
+                .putInt("gate_strength", NoiseGate.strength)
                 .putBoolean("keep_screen_on", keepScreenOnEnabled)
                 .putString("format", selectedFormat)
                 .putFloat("pause_min", LiveAudioData.pauseMinS)
@@ -1338,7 +1350,29 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         rec.addView(toggleRow("🎚 " + L.t("Suwaki MIC i ZOOM na ekranie nagrywania"), prefs().getBoolean("show_sliders", true), on -> { prefs().edit().putBoolean("show_sliders", on).apply(); applySliderVisibility(); }));
         rec.addView(hint(L.t("Gdy mikrofon jest już dobrze ustawiony, możesz je schować — ekran nagrywania będzie prostszy.")));
         rec.addView(toggleRow("🔆 " + L.t("Ekran nie gaśnie (wyłączony wygaszacz)"), keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
-        rec.addView(toggleRow("🎚 " + L.t("Bramka szumów (tłumi cichy szum tła)"), LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); }));
+        rec.addView(toggleRow("🎚 " + L.t("Bramka szumów (tłumi cichy szum tła)"), LiveAudioData.noiseGateEnabled, on -> { LiveAudioData.noiseGateEnabled = on; saveDawSettings(); renderSettingsPage(); }));
+        if (LiveAudioData.noiseGateEnabled) {
+            // SILA BRAMKI 1..5 — ile razy mowa musi byc glosniejsza od zmierzonego szumu tla
+            final String[] gNames = {L.t("delikatna"), L.t("lekka"), L.t("średnia"), L.t("mocna"), L.t("bardzo mocna")};
+            TextView gLbl = Ui.text(this, L.f("Siła bramki: {0}", gNames[NoiseGate.strength - 1]), 13f, R.color.pr_text);
+            gLbl.setPadding(0, (int) (6 * d), 0, 0);
+            rec.addView(gLbl);
+            SliderView gSlider = new SliderView(this);
+            gSlider.setLayoutParams(new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (36 * d)));
+            gSlider.setValue((NoiseGate.strength - 1) / 4f);
+            gSlider.setOnValueChangeListener(v -> {
+                int k = 1 + Math.max(0, Math.min(4, Math.round(v * 4)));
+                if (k != NoiseGate.strength) {
+                    NoiseGate.strength = k;
+                    gLbl.setText(L.f("Siła bramki: {0}", gNames[k - 1]));
+                    saveDawSettings();
+                }
+            });
+            rec.addView(gSlider);
+            String measured = NoiseGate.noiseRms > 0 && !NoiseGate.learning
+                    ? " " + L.f("Ostatnio zmierzony szum tła: {0} dB.", String.format(Locale.US, "%.0f", NoiseGate.dbOf(NoiseGate.noiseRms))) : "";
+            rec.addView(hint(L.t("Przez pierwsze 1,5 s nagrania bramka sama mierzy szum tła (najlepiej chwilę poczekaj, zanim zaczniesz mówić). Potem ścisza tylko to, co nie jest wyraźnie głośniejsze od szumu. Gdy ucina ciche słowa — zmniejsz siłę; gdy szum dalej słychać — zwiększ.") + measured));
+        }
         rec.addView(divider());
         boolean gpsOk = GpsHelper.hasPermission(this);
         View gpsRow = settingRow("📍", L.t("Lokalizacja GPS"), gpsOk ? L.t("zezwolono ✓") : L.t("brak zgody — dotknij, aby zezwolić"), null);
@@ -2277,6 +2311,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void resetRecording() {
         if (isRecording) stopRecordingFlow();
+        releasePlayer();
+        loadedFilePath = null;
         LiveAudioData.reset();
         pitchWaveView.invalidate();
         timeText.setText("00:00:00");
@@ -2477,6 +2513,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void loadAndDisplayFile(File file) {
         final int gen = ++loadGen;
+        // STARY odtwarzacz (poprzednie nagranie) musi zniknac — inaczej PLAY wznawial go
+        // i grala poprzednia pamiec, choc na wykresie byl juz nowy plik.
+        releasePlayer();
+        pendingSeekSample = 0L;
         loadedFilePath = file.getAbsolutePath();
         pitchWaveView.setLiveMode(false);
         pitchWaveView.resetPan();
@@ -2549,9 +2589,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
             MediaPlayer player = new MediaPlayer();
             player.setDataSource(path);
+            playingPath = path;
             player.setOnCompletionListener(mp -> {
                 mp.release();
                 currentPlayer = null;
+                playLoopOn = false;
                 playButton.setButtonText(getString(R.string.btn_play));
             });
             player.prepare();
@@ -2566,7 +2608,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     playButton.setButtonText(getString(R.string.btn_pause_play));
                     startPlayheadUpdateLoop();
                 });
-                player.seekTo(startMs);
+                seekExact(player, startMs);
             } else {
                 player.start();
                 statusText.setText(getString(R.string.status_playing));
@@ -2578,24 +2620,71 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
     }
 
-    // Przesuwa suwak (biala linia) w takt aktualnej pozycji odtwarzacza.
+    private String playingPath = null;
+
+    // Zwalnia odtwarzacz (np. przy wczytaniu innego nagrania) i zatrzymuje suwak
+    private void releasePlayer() {
+        if (currentPlayer != null) {
+            try { currentPlayer.release(); } catch (Exception e) { }
+            currentPlayer = null;
+        }
+        playingPath = null;
+        playLoopOn = false;
+        if (playButton != null) playButton.setButtonText(getString(R.string.btn_play));
+    }
+
+    // Dokladne przewijanie: SEEK_CLOSEST (Android 8+) — zwykle seekTo w MP3 na czesci telefonow
+    // skacze do najblizszej "klatki kluczowej" i dzwiek nie zgadzal sie z miejscem na wykresie.
+    private static void seekExact(MediaPlayer p, int ms) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) p.seekTo((long) ms, MediaPlayer.SEEK_CLOSEST);
+        else p.seekTo(ms);
+    }
+
+    // PLYNNY suwak: odswiezanie z kazda klatka ekranu (jak podczas nagrywania), a pozycja
+    // przewidywana z zegara — odtwarzacz na wielu telefonach podaje pozycje skokami co
+    // 100-200 ms, przez co siatka i sekundy "skakaly". Pozycje z odtwarzacza sluza tylko do korekty.
+    private boolean playLoopOn = false;
+    private long anchorPosMs = 0L, anchorNanos = 0L;
+    private int lastReportedMs = -1;
+
     private final Runnable playheadUpdateLoop = new Runnable() {
         @Override
         public void run() {
-            if (currentPlayer != null) {
-                try {
-                    int posMs = currentPlayer.getCurrentPosition();
-                    long sample = (long) posMs * LiveAudioData.SAMPLE_RATE / 1000L;
-                    pitchWaveView.setPlayheadSample(sample);
-                    timeText.setText(formatMs(posMs) + " / " + formatMs(lastRecordingTotalDurationMs));
-                } catch (IllegalStateException e) { /* odtwarzacz mogl sie juz zwolnic */ }
-                redrawHandler.postDelayed(this, 50);
-            }
+            MediaPlayer mp = currentPlayer;
+            if (mp == null || !playLoopOn) { playLoopOn = false; return; }
+            try {
+                boolean playing = mp.isPlaying();
+                int rep = mp.getCurrentPosition();
+                long now = System.nanoTime();
+                long pos;
+                if (!playing) {
+                    pos = rep; anchorPosMs = rep; anchorNanos = now; lastReportedMs = rep;
+                } else {
+                    long predicted = anchorPosMs + (now - anchorNanos) / 1_000_000L;
+                    if (rep != lastReportedMs) {
+                        lastReportedMs = rep;
+                        long drift = rep - predicted;
+                        if (Math.abs(drift) > 120) { anchorPosMs = rep; anchorNanos = now; predicted = rep; }
+                        else { anchorPosMs += drift / 8; predicted += drift / 8; } // lagodna korekta
+                    }
+                    pos = predicted;
+                }
+                if (lastRecordingTotalDurationMs > 0) pos = Math.min(pos, lastRecordingTotalDurationMs);
+                pitchWaveView.setPlayheadSample(pos * LiveAudioData.SAMPLE_RATE / 1000L);
+                timeText.setText(formatMs(pos) + " / " + formatMs(lastRecordingTotalDurationMs));
+            } catch (IllegalStateException e) { /* odtwarzacz mogl sie juz zwolnic */ }
+            pitchWaveView.postOnAnimation(this);
         }
     };
 
     private void startPlayheadUpdateLoop() {
-        redrawHandler.post(playheadUpdateLoop);
+        MediaPlayer mp = currentPlayer;
+        try { anchorPosMs = mp != null ? mp.getCurrentPosition() : 0; } catch (Exception e) { anchorPosMs = 0; }
+        anchorNanos = System.nanoTime();
+        lastReportedMs = (int) anchorPosMs;
+        if (playLoopOn) return;
+        playLoopOn = true;
+        pitchWaveView.postOnAnimation(playheadUpdateLoop);
     }
 
     // ── STRONA NAGRANIA (jak #pg-recs w PitchRec) ──

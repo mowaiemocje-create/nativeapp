@@ -13,14 +13,34 @@ public class AudioFileLoader {
 
     private static final int YIN_WINDOW = 2048;
 
-    // ── PAMIEC PODRECZNA (fala + pitch) w <pliki aplikacji>/.dawcache — klucz: rozmiar i data pliku
-    //    (zmiana nazwy przy opisie nagrania ich nie zmienia). Wczytanie z niej trwa ulamek sekundy.
+    // ── PAMIEC PODRECZNA (fala + pitch) w <pliki aplikacji>/.dawcache — klucz: rozmiar pliku +
+    //    suma kontrolna TRESCI (poczatek i koniec pliku). Wczesniej kluczem byla data zmiany, a na
+    //    czesci telefonow dwa rozne pliki (np. wgrane/skopiowane) mialy ten sam rozmiar i date —
+    //    wtedy DAW pokazywal wykres z innego nagrania. Zmiana nazwy klucza nie zmienia.
     public static volatile File cacheDir = null;
 
     private static File cacheFor(File f) {
         if (cacheDir == null) return null;
         if (!cacheDir.exists()) cacheDir.mkdirs();
-        return new File(cacheDir, f.length() + "_" + f.lastModified() + ".dawc");
+        return new File(cacheDir, f.length() + "_" + contentKey(f) + ".dawc");
+    }
+
+    private static String contentKey(File f) {
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        try (java.io.RandomAccessFile r = new java.io.RandomAccessFile(f, "r")) {
+            long len = r.length();
+            byte[] b = new byte[(int) Math.min(65536, len)];
+            r.readFully(b);
+            crc.update(b);
+            if (len > 65536) {
+                long from = Math.max(65536, len - 65536);
+                byte[] e = new byte[(int) (len - from)];
+                r.seek(from);
+                r.readFully(e);
+                crc.update(e);
+            }
+        } catch (Exception ex) { return "x" + f.lastModified(); }
+        return Long.toHexString(crc.getValue());
     }
 
     public static void saveCache(File f, LiveAudioData.CacheData c) {

@@ -202,6 +202,7 @@ public class BackgroundRecorderService extends Service {
                     long samplePos = 0;
                     float lastSmoothedFreq = 0f; // do wygladzania (fSm), jak w oryginalnym JS
                     float currentAppliedGain = LiveAudioData.gainMultiplier; // do plynnego rampowania gain
+                    com.pitchrec.nativetest.NoiseGate gate = new com.pitchrec.nativetest.NoiseGate(LiveAudioData.SAMPLE_RATE);
 
                     while (recording) {
                         if (paused) {
@@ -223,20 +224,9 @@ public class BackgroundRecorderService extends Service {
                                 buffer[i] = (short) amplified;
                             }
 
-                            // Bramka szumów — jesli wlaczona, wycisz caly bufor gdy jego
-                            // RMS jest ponizej ustawionego progu (tlumi szum tla w cichych
-                            // momentach).
-                            if (LiveAudioData.noiseGateEnabled) {
-                                float sumSq = 0;
-                                for (int i = 0; i < read; i++) {
-                                    float norm = buffer[i] / 32768f;
-                                    sumSq += norm * norm;
-                                }
-                                float bufRms = (float) Math.sqrt(sumSq / read);
-                                if (bufRms < LiveAudioData.noiseGateThreshold) {
-                                    for (int i = 0; i < read; i++) buffer[i] = 0;
-                                }
-                            }
+                            // Bramka szumow — sama mierzy szum tla w pierwszych 1,5 s i scisza
+                            // (nie zeruje) tylko to, co nie jest wyraznie glosniejsze od szumu.
+                            if (LiveAudioData.noiseGateEnabled) gate.process(buffer, read);
 
                             // Glosnosc wynikowa ×N — od razu, z miekkim limiterem (bez trzaskow)
                             if (liveBoost > 1) {
