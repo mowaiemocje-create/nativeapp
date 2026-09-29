@@ -1056,15 +1056,41 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!m.hasGps() || m.cat.isEmpty()) return;
         String name = mapName(m.name);
         String uid = nsUserId().isEmpty() ? name : nsUserId();
+        final boolean live = prefs().getBoolean("map_share", true) && isLiveCategory(m.cat);
+        // miasto z miejsca nagrania (GPS -> Geocoder), awaryjnie z profilu NS — w tle
+        new Thread(() -> {
+            String city = cityAt(m.lat, m.lon);
+            if (city.isEmpty()) city = prefs().getString("ns_city", "");
+            try {
+                org.json.JSONObject h = new org.json.JSONObject();
+                h.put("lat", m.lat); h.put("lon", m.lon); h.put("cat", m.cat); h.put("name", name);
+                h.put("userId", uid); h.put("city", city); h.put("ts", timeMs); h.put("sys", m.sys);
+                byte[] body = h.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                runOnUiThread(() -> {
+                    NsClient.request("POST", "/map/hist", null, null, "application/json", body, r -> { });
+                    // NA ZYWO na mapie (ok. 20 min): tylko miejsca publiczne — imie, miasto, system, kategoria
+                    if (live) NsClient.request("POST", "/map/ping", null, null, "application/json", body, r -> { });
+                });
+            } catch (Exception e) { /* nieblokujace */ }
+        }, "map-ping").start();
+    }
+
+    // Kategorie pokazywane "na zywo" na mapie (miejsca publiczne)
+    static boolean isLiveCategory(String cat) {
+        return "Sklepy".equals(cat) || "Przechodzień".equals(cat) || "Special".equals(cat) || "Miasto - inne".equals(cat);
+    }
+
+    private String cityAt(double lat, double lon) {
         try {
-            org.json.JSONObject h = new org.json.JSONObject();
-            h.put("lat", m.lat); h.put("lon", m.lon); h.put("cat", m.cat); h.put("name", name);
-            h.put("userId", uid); h.put("city", ""); h.put("ts", timeMs); h.put("sys", m.sys);
-            NsClient.request("POST", "/map/hist", null, null, "application/json", h.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> { });
-            if (prefs().getBoolean("map_share", true) && ("Sklepy".equals(m.cat) || "Przechodzień".equals(m.cat))) {
-                NsClient.request("POST", "/map/ping", null, null, "application/json", h.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> { });
+            android.location.Geocoder g = new android.location.Geocoder(this, new Locale("pl", "PL"));
+            java.util.List<android.location.Address> r = g.getFromLocation(lat, lon, 1);
+            if (r != null && !r.isEmpty()) {
+                android.location.Address ad = r.get(0);
+                String c = ad.getLocality() != null ? ad.getLocality() : ad.getSubAdminArea();
+                return c == null ? "" : c;
             }
-        } catch (Exception e) { /* nieblokujace */ }
+        } catch (Exception e) { }
+        return "";
     }
 
     private static void formAdd(StringBuilder f, String k, String v) {
@@ -1454,7 +1480,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // 6) Mapa i dostepnosc do rozmowy
         android.widget.LinearLayout mp = section(c, "map", "📍  " + L.t("MAPA, GPS I DOSTĘPNOŚĆ"));
         if (gpsHolder[0] != null) { mp.addView(gpsHolder[0]); mp.addView(divider()); }
-        mp.addView(toggleRow("📡 " + L.t("Pokazuj mnie na mapie na żywo (Sklepy, Przechodzień)"), prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
+        mp.addView(toggleRow("📡 " + L.t("Pokazuj mnie na mapie na żywo"), prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
+        mp.addView(hint(L.t("Po zapisaniu nagrania w kategorii Sklepy, Przechodzień, Special albo Miasto – inne inni kursanci widzą Cię na mapie przez ok. 20 min: imię, miasto, system mowy i kategorię.")));
         mp.addView(hint(L.t("Na mapie jako:") + " " + mapName(prefs().getString("student_name", ""))));
         mp.addView(divider());
         android.widget.EditText phone = new android.widget.EditText(this);
