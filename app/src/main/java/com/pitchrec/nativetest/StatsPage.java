@@ -710,6 +710,21 @@ public class StatsPage {
             "https://overpass.kumi.systems/api/interpreter",
             "https://overpass.private.coffee/api/interpreter"};
 
+    // Tylko miejsca, dla ktorych mamy SENSOWNA podpowiedz: znane typy (kawiarnia, apteka, bank…)
+    // albo prawdziwy sklep (shop=*). Inne obiekty z nazwa — przystanki "X skrzyzowanie", wiaty,
+    // fontanny, laweczki — dostawaly ogolna rade "dowiedz sie co maja w ofercie", bez sensu.
+    private static final java.util.regex.Pattern BAD_NAME = java.util.regex.Pattern.compile(
+            "(?iu)skrzy[żz]owanie|przystan|rondo|p[ęe]tla|parking|zajezdni|wiata|w[ęe]ze[łl] |dworzec autobus|stacja [łl]adowania|toalet|\\bn/ż|\\bnż$");
+
+    private static String placeType(JSONObject tags) {
+        String am = tags.optString("amenity", ""), sh = tags.optString("shop", ""), le = tags.optString("leisure", ""), to = tags.optString("tourism", "");
+        if (!am.isEmpty()) return Places.MAP.containsKey(am) && !am.startsWith("_") ? am : (!sh.isEmpty() ? "_shop" : null);
+        if (!sh.isEmpty()) return Places.MAP.containsKey(sh) && !sh.startsWith("_") ? sh : "_shop";
+        if (!le.isEmpty()) { String t = "garden".equals(le) ? "park" : le; return Places.MAP.containsKey(t) ? t : null; }
+        if (!to.isEmpty()) return Places.MAP.containsKey(to) ? to : null;
+        return null;
+    }
+
     private static List<Object[]> overpass(double lat, double lon, String[] err) {
         List<Object[]> out = new ArrayList<>();
         // lzejsze zapytanie (tylko miejsca z nazwa, 3 km) — ciezkie konczylo sie przekroczeniem czasu
@@ -730,7 +745,8 @@ public class StatsPage {
                     double la = el.has("lat") ? el.optDouble("lat", 0) : center != null ? center.optDouble("lat", 0) : 0;
                     double lo = el.has("lon") ? el.optDouble("lon", 0) : center != null ? center.optDouble("lon", 0) : 0;
                     if (la == 0) continue;
-                    String type = tags.optString("amenity", tags.optString("shop", tags.optString("leisure", tags.optString("tourism", "_shop"))));
+                    String type = placeType(tags);
+                    if (type == null || BAD_NAME.matcher(name).find()) continue; // przystanki, skrzyzowania itp.
                     out.add(new Object[]{name, dist(lat, lon, la, lo), type});
                 }
                 if (els != null) return out; // ten serwer odpowiedzial (nawet pusto) — koniec
@@ -762,7 +778,7 @@ public class StatsPage {
                     String name = el.optString("name", "");
                     if (name.isEmpty()) name = el.optString("display_name", "").split(",")[0];
                     double la = Double.parseDouble(el.optString("lat", "0")), lo = Double.parseDouble(el.optString("lon", "0"));
-                    if (la == 0) continue;
+                    if (la == 0 || BAD_NAME.matcher(name).find()) continue;
                     out.add(new Object[]{name, dist(lat, lon, la, lo), t[1]});
                 }
                 Thread.sleep(1100);

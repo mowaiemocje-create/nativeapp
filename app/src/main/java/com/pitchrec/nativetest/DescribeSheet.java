@@ -119,6 +119,9 @@ public class DescribeSheet {
             if (!"Special".equals(selCat[0])) return;
             specialBox.addView(Ui.spacer(a, 8));
             specialBox.addView(Ui.label(a, "🎬 " + L.t("ZADANIE SPECJALNE — które wykonujesz?")));
+            TextView hintSp = Ui.text(a, L.t("Dotknij zadania, żeby zobaczyć jego opis."), 11f, R.color.pr_muted);
+            hintSp.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
+            specialBox.addView(hintSp);
             String mySys = prefs.getString("last_sys", "");
             // zadania zaliczone przez trenera znikaja z listy (sa juz na stale w Statystykach)
             List<SpecialTasks.Task> order = new ArrayList<>();
@@ -146,11 +149,26 @@ public class DescribeSheet {
                 String sub = "pending".equals(stt) ? "  ⏳ " + L.t("czeka na ocenę")
                         : "rejected".equals(stt) ? "  ↺ " + L.t("do poprawy")
                         : (tk.forSystem(mySys) ? "" : "  · " + android.text.TextUtils.join("/", tk.systems));
+                LinearLayout txBox = new LinearLayout(a);
+                txBox.setOrientation(LinearLayout.VERTICAL);
+                txBox.setPadding((int) Ui.dp(a, 10), 0, 0, 0);
                 TextView tx = Ui.text(a, tk.shortName() + sub, 12f, R.color.pr_text);
                 if (on) tx.setTypeface(Typeface.DEFAULT_BOLD);
                 tx.setAlpha(tk.forSystem(mySys) || on ? 1f : 0.55f);
-                tx.setPadding((int) Ui.dp(a, 10), 0, 0, 0);
-                row.addView(tx, Ui.weight(1f, 0));
+                txBox.addView(tx);
+                // Po dotknieciu: pelny opis zadania (co dokladnie nagrac) + dla jakich systemow
+                if (on) {
+                    String desc = tk.description();
+                    if (!desc.isEmpty()) {
+                        TextView ds = Ui.text(a, desc, 12f, R.color.pr_text);
+                        ds.setPadding(0, (int) Ui.dp(a, 4), 0, 0);
+                        txBox.addView(ds);
+                    }
+                    TextView sy = Ui.text(a, tk.systems.length == 0 ? L.t("Dla każdego systemu") : L.t("Systemy: ") + android.text.TextUtils.join(", ", tk.systems), 10f, R.color.pr_muted);
+                    sy.setPadding(0, (int) Ui.dp(a, 3), 0, 0);
+                    txBox.addView(sy);
+                }
+                row.addView(txBox, Ui.weight(1f, 0));
                 row.setOnClickListener(v -> { selSpecial[0] = tk.name.equals(selSpecial[0]) ? "" : tk.name; buildSpecial[0].run(); });
                 LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 rlp.bottomMargin = (int) Ui.dp(a, 5);

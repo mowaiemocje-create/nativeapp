@@ -16,6 +16,12 @@ public class SpecialTasks {
         public final int color;
         Task(String n, String[] s, String i, int c) { name = n; systems = s; icon = i; color = c; }
         public String shortName() { int k = name.indexOf(" – "); return k > 0 ? name.substring(0, k) : name; }
+        // Opis zadania (to, co po tytule) — pokazywany po wybraniu zadania przy opisie nagrania
+        public String description() {
+            int k = name.indexOf(" – ");
+            String d = k > 0 ? name.substring(k + 3).trim() : "";
+            return d.isEmpty() ? "" : Character.toUpperCase(d.charAt(0)) + d.substring(1);
+        }
         public boolean forSystem(String sys) {
             if (systems.length == 0 || sys == null || sys.isEmpty()) return true;
             for (String s : systems) if (s.equalsIgnoreCase(sys)) return true;
