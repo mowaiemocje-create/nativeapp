@@ -6,7 +6,7 @@ package com.pitchrec.nativetest;
 // poczatki/konce slow i rwala mowe (za czula), a prog nie zalezal od otoczenia.
 //
 // Teraz:
-//  1. Przez pierwsze 1,5 s nagrania bramka NIC nie wycisza, tylko mierzy szum tla (20. centyl
+//  1. Przez pierwsze ~0,75 s nagrania bramka NIC nie wycisza, tylko mierzy szum tla (20. centyl
 //     glosnosci okienek 10 ms — dziala, nawet gdy ktos od razu zaczyna mowic).
 //  2. Potem otwiera sie, gdy dzwiek jest X razy glosniejszy od szumu (X = sila bramki 1..5),
 //     a zamyka dopiero po 250 ms ciszy (nie ucina koncowek slow). Histereza: zamyka ponizej 70% progu.
@@ -23,14 +23,16 @@ public final class NoiseGate {
     public static volatile boolean learning = true;
 
     private static final float FLOOR = 0.063f;        // -24 dB
-    private static final int LEARN_FRAMES = 150;      // 1,5 s okienek 10 ms
+    private static final int LEARN_FRAMES = 60;       // 0,6 s "prawdziwych" okienek 10 ms
+    private static final int SKIP_FRAMES = 15;        // pierwsze 150 ms pomijamy (mikrofon sie "budzi")
     private static final int HOLD_FRAMES = 25;        // 250 ms
 
     private final int frameLen;
     private final float attackC, releaseC;
     private final float[] learn = new float[LEARN_FRAMES];
     private int learnN = 0;
-    private final float[] ring = new float[300];      // ostatnie 3 s (do wykrycia glosniejszego otoczenia)
+    private final float[] ring = new float[80];       // ostatnie 0,8 s (do wykrycia glosniejszego otoczenia)
+    private int skipped = 0;
     private int ringN = 0, ringPos = 0, sinceCheck = 0;
     private boolean open = true;
     private int hold = 0;
@@ -66,8 +68,11 @@ public final class NoiseGate {
 
     private void decide(float rms) {
         if (learning) {
-            learn[learnN++] = rms;
             open = true;
+            // start mikrofonu: pierwsze okienka bywaja cyfrowa cisza/rozbiegiem — zanizalyby szum
+            // (wtedy bramka nic nie tlumila i dopiero po ~10 s "doganiala" prawdziwy szum)
+            if (skipped < SKIP_FRAMES || rms < 3e-5f) { skipped++; if (skipped < 200) return; }
+            learn[learnN++] = rms;
             if (learnN >= LEARN_FRAMES) {
                 float[] c = learn.clone();
                 java.util.Arrays.sort(c);
@@ -88,11 +93,12 @@ public final class NoiseGate {
         if (!open && rms < thrOpen) noise += (rms - noise) * (rms < noise ? 0.10f : 0.02f);
         // otoczenie stalo sie glosniejsze na dluzej (minimum z 3 s duzo ponad szumem) — podnies szum
         ring[ringPos] = rms; ringPos = (ringPos + 1) % ring.length; if (ringN < ring.length) ringN++;
-        if (++sinceCheck >= 50 && ringN == ring.length) {
+        if (++sinceCheck >= 10 && ringN == ring.length) {
             sinceCheck = 0;
             float mn = Float.MAX_VALUE;
             for (float v : ring) if (v < mn) mn = v;
-            if (mn > noise * 1.6f) noise = noise * 0.7f + mn * 0.3f;
+            // szum wyraznie wzrosl (np. mikrofon sam podkrecil czulosc) — od razu do nowego poziomu
+            if (mn > noise * 1.5f) noise = mn * 0.9f;
         }
         noiseRms = Math.max(1e-4f, noise);
     }

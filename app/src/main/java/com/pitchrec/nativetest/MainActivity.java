@@ -1371,7 +1371,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             rec.addView(gSlider);
             String measured = NoiseGate.noiseRms > 0 && !NoiseGate.learning
                     ? " " + L.f("Ostatnio zmierzony szum tła: {0} dB.", String.format(Locale.US, "%.0f", NoiseGate.dbOf(NoiseGate.noiseRms))) : "";
-            rec.addView(hint(L.t("Przez pierwsze 1,5 s nagrania bramka sama mierzy szum tła (najlepiej chwilę poczekaj, zanim zaczniesz mówić). Potem ścisza tylko to, co nie jest wyraźnie głośniejsze od szumu. Gdy ucina ciche słowa — zmniejsz siłę; gdy szum dalej słychać — zwiększ.") + measured));
+            rec.addView(hint(L.t("W pierwszej sekundzie nagrania bramka sama mierzy szum tła (najlepiej chwilę poczekaj, zanim zaczniesz mówić). Potem ścisza tylko to, co nie jest wyraźnie głośniejsze od szumu. Gdy ucina ciche słowa — zmniejsz siłę; gdy szum dalej słychać — zwiększ.") + measured));
         }
         rec.addView(divider());
         boolean gpsOk = GpsHelper.hasPermission(this);
