@@ -2220,10 +2220,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // Zatrzymujemy jakiekolwiek trwajace odtwarzanie — bez tego, stara petla
         // aktualizujaca pozycje odtwarzacza mogla nadpisywac wyswietlacz czasu nowego
         // nagrania (walka o ten sam TextView).
-        if (currentPlayer != null) {
-            try { currentPlayer.release(); } catch (Exception e) { /* ignorowane */ }
-            currentPlayer = null;
-        }
+        releasePlayer(); // konczy tez petle bialej linii
+        pendingSeekSample = 0L;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
         } else {
@@ -2255,6 +2253,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void stopRecordingFlow() {
+        releasePlayer(); // podglad z pauzy nie moze grac dalej po STOP
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_STOP);
         startService(intent);
@@ -2299,11 +2298,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         headerStatus.setTextColor(getResources().getColor(R.color.pr_warn));
         playButton.setButtonEnabled(false);
         // podglad z pauzy konczymy — inaczej petla odtwarzacza dalej rysowala biala linie
-        if (currentPlayer != null) {
-            try { currentPlayer.release(); } catch (Exception e) { }
-            currentPlayer = null;
-        }
-        redrawHandler.removeCallbacks(playheadUpdateLoop);
+        releasePlayer();
         pendingSeekSample = 0L;
         pitchWaveView.resetPan(); // czysci biala linie (playhead) — niepotrzebna podczas nagrywania na zywo
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
@@ -2651,7 +2646,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         @Override
         public void run() {
             MediaPlayer mp = currentPlayer;
-            if (mp == null || !playLoopOn) { playLoopOn = false; return; }
+            if (mp == null || !playLoopOn || (isRecording && !isPaused)) { playLoopOn = false; return; }
             try {
                 boolean playing = mp.isPlaying();
                 int rep = mp.getCurrentPosition();

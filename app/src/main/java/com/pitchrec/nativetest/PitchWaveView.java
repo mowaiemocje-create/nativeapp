@@ -126,6 +126,7 @@ public class PitchWaveView extends View {
 
     public void setLiveMode(boolean live) {
         isLiveMode = live;
+        if (live) { playheadSample = -1L; lastFollowSample = -1L; }
         forceNextRebuild = true; // wymuszamy natychmiastowa przebudowe (nie throttled) —
                                   // bez tego, lastVisibleSeconds/Start/Range mogly zostac
                                   // NIEAKTUALNE (z trybu live), psujac liczenie pozycji
@@ -161,6 +162,7 @@ public class PitchWaveView extends View {
     private long lastFollowSample = -1L;
 
     public void setPlayheadSample(long sample) {
+        if (isLiveMode) return; // podczas nagrywania nie ma odtwarzania
         // Podazanie za odtwarzaniem TYLKO gdy linia sie przesuwa (trwa odtwarzanie) i palec
         // nie przewijal przed chwila — wczesniej petla odtwarzacza (dzialajaca tez w pauzie)
         // co 50 ms "sciagala" widok z powrotem i nie dalo sie przewinac do poczatku.
@@ -346,7 +348,9 @@ public class PitchWaveView extends View {
         drawLiveRulerAndGrid(canvas, w, fullH);
         drawLiveHints(canvas, w, dp(RULER_HEIGHT_DP));
 
-        if (playheadSample >= 0 && lastVisibleSampleRange > 0) {
+        // Biala linia odtwarzania NIGDY podczas nagrywania na zywo (zostawala stara pozycja
+        // z poprzedniego odsluchu/dotkniecia i przesuwala sie po ekranie razem z wykresem)
+        if (!isLiveMode && playheadSample >= 0 && lastVisibleSampleRange > 0) {
             float rulerHeight = dp(RULER_HEIGHT_DP);
             float px = ((playheadSample - lastVisibleStartSample) / lastVisibleSampleRange) * w;
             if (px >= 0 && px <= w) {
