@@ -324,7 +324,8 @@ public class LiveAudioData {
         int e0;
         synchronized (lock) {
             e0 = Math.max(0, (int) ((pp[0] - 1.0) * SAMPLE_RATE / ENVELOPE_CHUNK));
-            int e1 = Math.min(envelopeSize, (int) (pp[1] * SAMPLE_RATE / ENVELOPE_CHUNK) + 1);
+            // + do 1 s po pauzie (glosnosc nastepnej mowy — prog dzwieku wzgledem mowy)
+            int e1 = Math.min(envelopeSize, (int) ((pp[1] + 1.0) * SAMPLE_RATE / ENVELOPE_CHUNK) + 1);
             if (e1 - e0 < 8) return speech;
             env = new float[e1 - e0];
             System.arraycopy(envelope, e0, env, 0, e1 - e0);
