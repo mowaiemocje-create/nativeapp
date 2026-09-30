@@ -75,7 +75,7 @@ public class ReminderReceiver extends BroadcastReceiver {
         }
         if (AvailWatch.ACTION.equals(act)) {
             final PendingResult pr = goAsync();
-            AvailWatch.check(c, () -> { try { pr.finish(); } catch (Exception e) { } });
+            AvailWatch.check(c, () -> CallDays.check(c, () -> { try { pr.finish(); } catch (Exception e) { } }));
             return;
         }
         if (TrainerWatch.ACTION.equals(act)) {

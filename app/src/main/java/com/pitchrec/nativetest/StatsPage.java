@@ -66,6 +66,12 @@ public class StatsPage {
         LinearLayout harm = Ui.card(a);
         root.addView(harm);
         loadHarmonogram(harm);
+        LinearLayout calls = Ui.card(a);
+        calls.setVisibility(View.GONE);
+        root.addView(calls);
+        fillCalls(calls);
+        CallDays.refresh(a, () -> { if (host.isCurrent()) fillCalls(calls); });
+        ContactList.refresh(a, false, () -> { if (host.isCurrent()) fillCalls(calls); });
         LinearLayout where = Ui.card(a);
         where.setVisibility(View.GONE);
         root.addView(where);
@@ -325,6 +331,66 @@ public class StatsPage {
     }
 
     // ═════════════ HARMONOGRAM ═════════════
+    // ═════════════ TELEFONY: dni telefonu do trenera + lista kursantów na ten okres ═════════════
+    private void fillCalls(LinearLayout card) {
+        card.removeAllViews();
+        List<CallDays.Day> ds = CallDays.days(a);
+        List<ContactList.Member> ms = ContactList.members(a);
+        if (ds.isEmpty() && ms.isEmpty()) { card.setVisibility(View.GONE); return; }
+        card.setVisibility(View.VISIBLE);
+        card.addView(Ui.label(a, "📞 " + L.t("TELEFONY W HARMONOGRAMIE")));
+        String today = CallDays.today();
+        if (!ds.isEmpty()) {
+            TextView h = Ui.text(a, L.t("Zadzwoń do trenera:"), 13f, R.color.pr_text);
+            h.setTypeface(Typeface.DEFAULT_BOLD);
+            h.setPadding(0, (int) (4 * d), 0, (int) (2 * d));
+            card.addView(h);
+            java.text.SimpleDateFormat in = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+            java.text.SimpleDateFormat wd = new java.text.SimpleDateFormat("EEE", new java.util.Locale(L.lang()));
+            for (CallDays.Day dd : ds) {
+                boolean past = dd.day.compareTo(today) < 0, isToday = dd.day.equals(today);
+                LinearLayout row = Ui.row(a);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.setPadding((int) (8 * d), (int) (6 * d), (int) (8 * d), (int) (6 * d));
+                if (isToday) row.setBackground(Ui.rounded(0x3300E676, 0xFF00E676, d, 8 * d));
+                String w = "";
+                try { w = wd.format(in.parse(dd.day)) + " "; } catch (Exception e) { }
+                LinearLayout tb = new LinearLayout(a);
+                tb.setOrientation(LinearLayout.VERTICAL);
+                TextView t1 = Ui.text(a, (past ? "✓ " : isToday ? "👉 " : "📅 ") + w + dd.label() + (isToday ? "  · " + L.t("dziś") : ""), 14f, past ? R.color.pr_muted : R.color.pr_text);
+                t1.setTypeface(Typeface.DEFAULT_BOLD);
+                if (isToday) t1.setTextColor(0xFF00E676);
+                tb.addView(t1);
+                String sub = (dd.trainer.isEmpty() ? "" : dd.trainer) + (dd.note.isEmpty() ? "" : (dd.trainer.isEmpty() ? "" : " · ") + dd.note);
+                if (!sub.isEmpty()) tb.addView(Ui.text(a, sub, 11f, R.color.pr_muted));
+                row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                if (!past && !dd.phone.isEmpty()) {
+                    android.widget.Button call = Ui.button(a, "☎", R.color.pr_accent, true);
+                    call.setOnClickListener(v -> ContactList.dial(a, dd.phone));
+                    row.addView(call, new LinearLayout.LayoutParams((int) (56 * d), LinearLayout.LayoutParams.WRAP_CONTENT));
+                }
+                card.addView(row);
+            }
+        }
+        if (!ms.isEmpty()) {
+            java.util.Set<String> called = ContactList.calledInPeriod(a);
+            int goal = ContactList.goal(a), done = 0;
+            for (ContactList.Member cm : ms) if (called.contains(ContactList.shortName(cm.name))) done++;
+            String to = ContactList.periodTo(a);
+            TextView p = Ui.text(a, (done >= goal ? "🎉 " : "👥 ") + L.f("Rozmowy z kursantami z listy: {0}/{1}", Math.min(done, goal), goal)
+                    + (to.length() >= 10 ? "  ·  " + L.f("do {0}", to.substring(8, 10) + "." + to.substring(5, 7)) : ""), 13f, R.color.pr_text);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            if (done >= goal) p.setTextColor(0xFF00E676);
+            p.setPadding(0, (int) (10 * d), 0, (int) (2 * d));
+            card.addView(p);
+            android.widget.ProgressBar pb = new android.widget.ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
+            pb.setMax(goal);
+            pb.setProgress(Math.min(done, goal));
+            card.addView(pb);
+            card.addView(Ui.text(a, L.t("Wybierz kategorię „Phone do Kursanta/Trenera” przy opisie nagrania — zobaczysz listę z numerami."), 11f, R.color.pr_muted));
+        }
+    }
+
     private void loadHarmonogram(LinearLayout card) {
         card.addView(Ui.label(a, "📅 " + L.t("HARMONOGRAM")));
         TextView loading = Ui.text(a, "⏳ " + L.t("Wczytywanie harmonogramu…"), 12f, R.color.pr_muted);

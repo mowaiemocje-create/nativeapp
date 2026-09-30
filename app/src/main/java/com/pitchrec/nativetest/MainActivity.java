@@ -272,6 +272,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         AvailWatch.schedule(this);
         AvailWatch.check(this, null);   // kto teraz chetnie porozmawia
         ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
+        CallDays.check(this, null);             // dni telefonu do trenera (powiadomienia)
         askNotificationPermissionOnce();
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
@@ -727,7 +728,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void doLogout() {
-        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").putBoolean("ns_session_expired", false).apply();
+        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").putBoolean("ns_session_expired", false).apply();
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
         updateNavForLogin();
@@ -1445,6 +1446,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             AvailWatch.schedule(this);
         }));
         rem.addView(hint(L.t("Gdy inny kursant włączy „Chętnie porozmawiam”, dostaniesz powiadomienie z jego imieniem, miastem i telefonem (bez powiadomień w nocy).")));
+        rem.addView(toggleRow("📅 " + L.t("Dni telefonu do trenera"), prefs().getBoolean("call_days_notif", true), on -> {
+            prefs().edit().putBoolean("call_days_notif", on).apply();
+            AvailWatch.schedule(this);
+        }));
+        rem.addView(hint(L.t("Gdy trener wyznaczy dni, w które masz do niego zadzwonić, dostaniesz powiadomienie; w dniu telefonu — przypomnienie (godzinę wcześniej).")));
 
         // 3b) Podpowiedzi na wykresie i w statystykach
         android.widget.LinearLayout hints = section(c, "hints", "💡  " + L.t("PODPOWIEDZI") + "  ·  " + L.t("pauzy, strzałki, tempo"));

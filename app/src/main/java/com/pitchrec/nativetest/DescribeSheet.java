@@ -194,29 +194,50 @@ public class DescribeSheet {
                         : L.t("Na Twojej liście nie ma jeszcze numerów."), 12f, R.color.pr_muted));
                 return;
             }
+            java.util.Set<String> called = ContactList.calledInPeriod(a);
+            int goal = ContactList.goal(a), done = 0;
+            for (ContactList.Member cm : ms) if (called.contains(ContactList.shortName(cm.name))) done++;
+            String to = ContactList.periodTo(a);
+            TextView prog = Ui.text(a, (done >= goal ? "🎉 " : "📞 ") + L.f("W tym okresie: {0}/{1} kursantów", Math.min(done, goal), goal)
+                    + (to.length() >= 10 ? "  ·  " + L.f("do {0}", to.substring(8, 10) + "." + to.substring(5, 7)) : ""), 13f, R.color.pr_text);
+            prog.setTypeface(Typeface.DEFAULT_BOLD);
+            prog.setTextColor(done >= goal ? 0xFF00E676 : Ui.col(a, R.color.pr_text));
+            contactBox.addView(prog);
             TextView lh = Ui.text(a, "📋 " + ln + "  ·  " + L.t("Dotknij osoby, z którą rozmawiasz; ☎ — zadzwoń."), 11f, R.color.pr_muted);
-            lh.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
+            lh.setPadding(0, (int) Ui.dp(a, 2), 0, (int) Ui.dp(a, 6));
             contactBox.addView(lh);
-            for (ContactList.Member cm : ms) {
-                boolean on = cm.name.equals(selContact[0]);
+            // najpierw osoby, do ktorych jeszcze nie dzwoniles
+            List<ContactList.Member> sorted = new ArrayList<>(ms);
+            java.util.Collections.sort(sorted, (x, y) -> Boolean.compare(called.contains(ContactList.shortName(x.name)), called.contains(ContactList.shortName(y.name))));
+            for (ContactList.Member cm : sorted) {
+                String sn = ContactList.shortName(cm.name);
+                boolean on = sn.equals(selContact[0]);
+                boolean was = called.contains(sn);
                 LinearLayout row = Ui.row(a);
                 row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-                int pd = (int) Ui.dp(a, 8);
+                int pd = (int) Ui.dp(a, 10);
                 row.setPadding(pd, pd, pd, pd);
-                row.setBackground(Ui.rounded(on ? 0x3300C853 : 0x00000000, on ? 0xFF00C853 : 0x33FFFFFF, Ui.dp(a, on ? 2 : 1), Ui.dp(a, 8)));
+                // ciemne tlo — zielone imie i bialy numer zawsze czytelne
+                row.setBackground(Ui.rounded(on ? 0xFF1B3A2A : 0xFF1E2430, on ? 0xFF00E676 : 0x44FFFFFF, Ui.dp(a, on ? 2 : 1), Ui.dp(a, 10)));
                 LinearLayout tb = new LinearLayout(a);
                 tb.setOrientation(LinearLayout.VERTICAL);
-                TextView nm = Ui.text(a, (on ? "✓ " : "") + cm.name, 13f, R.color.pr_text);
+                TextView nm = Ui.text(a, (on ? "✓ " : "") + sn + (was ? "   ✔ " + L.t("rozmowa była") : ""), 16f, R.color.pr_text);
+                nm.setTextColor(0xFF00E676);
                 nm.setTypeface(Typeface.DEFAULT_BOLD);
                 tb.addView(nm);
-                tb.addView(Ui.text(a, cm.phone + (cm.note.isEmpty() ? "" : "  ·  " + cm.note), 11f, R.color.pr_muted));
+                TextView phv = Ui.text(a, cm.phone, 15f, R.color.pr_text);
+                phv.setTextColor(0xFFFFFFFF);
+                phv.setTypeface(Typeface.DEFAULT_BOLD);
+                tb.addView(phv);
+                if (!cm.note.isEmpty()) { TextView nt = Ui.text(a, cm.note, 11f, R.color.pr_text); nt.setTextColor(0xFFB0B8C4); tb.addView(nt); }
+                row.setAlpha(was && !on ? 0.7f : 1f);
                 row.addView(tb, Ui.weight(1f, 0));
                 android.widget.Button call = Ui.button(a, "☎", R.color.pr_accent, true);
                 call.setOnClickListener(v -> ContactList.dial(a, cm.phone));
-                row.addView(call, new LinearLayout.LayoutParams((int) Ui.dp(a, 56), LinearLayout.LayoutParams.WRAP_CONTENT));
-                row.setOnClickListener(v -> { selContact[0] = cm.name.equals(selContact[0]) ? "" : cm.name; buildContacts[0].run(); });
+                row.addView(call, new LinearLayout.LayoutParams((int) Ui.dp(a, 60), LinearLayout.LayoutParams.WRAP_CONTENT));
+                row.setOnClickListener(v -> { selContact[0] = sn.equals(selContact[0]) ? "" : sn; buildContacts[0].run(); });
                 LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-                rlp.bottomMargin = (int) Ui.dp(a, 5);
+                rlp.bottomMargin = (int) Ui.dp(a, 6);
                 contactBox.addView(row, rlp);
             }
         };

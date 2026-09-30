@@ -49,6 +49,40 @@ public final class ContactList {
         return out;
     }
 
+    // "Anna Kowalska" -> "Anna K." (imie + pierwsza litera nazwiska — zeby odroznic osoby)
+    public static String shortName(String full) {
+        if (full == null) return "";
+        String[] p = full.trim().split("\\s+");
+        if (p.length < 2) return full.trim();
+        String last = p[p.length - 1].replace(".", "");
+        return last.isEmpty() ? p[0] : p[0] + " " + last.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + ".";
+    }
+
+    // Ile roznych osob z listy trzeba obdzwonic w tym okresie (z backendu, domyslnie 6)
+    public static int goal(Context c) { JSONObject l = cached(c); return l == null ? 6 : Math.max(1, l.optInt("goal", 6)); }
+    public static String periodTo(Context c) { JSONObject l = cached(c); String v = l == null ? "" : l.optString("visit_date", ""); return "null".equals(v) ? "" : v; }
+    public static String periodFrom(Context c) { JSONObject l = cached(c); String v = l == null ? "" : l.optString("period_from", ""); return "null".equals(v) ? "" : v; }
+
+    // Osoby z listy, z ktorymi jest juz nagranie "Phone do Kursanta" w tym okresie (notatka "📞 Imię …")
+    public static java.util.Set<String> calledInPeriod(Context c) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+        String from = periodFrom(c), to = periodTo(c);
+        java.io.File[] files = c.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files == null) return out;
+        for (java.io.File file : files) {
+            String day = f.format(new java.util.Date(file.lastModified()));
+            if (!from.isEmpty() && day.compareTo(from) <= 0) continue;   // od dnia po poprzednim harmonogramie
+            if (!to.isEmpty() && day.compareTo(to) > 0) continue;
+            RecMeta m = RecMeta.load(c, file.getName());
+            if (!CATEGORY.equals(m.cat) || m.note == null || !m.note.startsWith("📞 ")) continue;
+            String rest = m.note.substring(3);
+            int k = rest.indexOf(" — ");
+            out.add((k >= 0 ? rest.substring(0, k) : rest).trim());
+        }
+        return out;
+    }
+
     public static boolean loaded(Context c) { return prefs(c).getLong("contact_list_at", 0L) > 0; }
 
     private static JSONObject cached(Context c) {
