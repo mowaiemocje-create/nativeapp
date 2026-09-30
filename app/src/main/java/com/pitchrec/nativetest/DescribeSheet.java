@@ -175,9 +175,60 @@ public class DescribeSheet {
                 specialBox.addView(row, rlp);
             }
         };
+        // TELEFON DO KURSANTA — lista od trenera (dopieta do harmonogramu): do kogo dzwonisz
+        final String[] selContact = {""};
+        LinearLayout contactBox = new LinearLayout(a);
+        contactBox.setOrientation(LinearLayout.VERTICAL);
+        body.addView(contactBox);
+        final Runnable[] buildContacts = new Runnable[1];
+        buildContacts[0] = () -> {
+            contactBox.removeAllViews();
+            if (!ContactList.CATEGORY.equals(selCat[0])) return;
+            contactBox.addView(Ui.spacer(a, 8));
+            contactBox.addView(Ui.label(a, "📞 " + L.t("TWOJA LISTA OD TRENERA — do kogo dzwonisz?")));
+            List<ContactList.Member> ms = ContactList.members(a);
+            String ln = ContactList.listName(a);
+            if (ms.isEmpty()) {
+                contactBox.addView(Ui.text(a, !ContactList.loaded(a) ? (ContactList.lastFailed ? L.t("Nie udało się wczytać listy — sprawdź internet.") : "⏳ " + L.t("Wczytywanie…"))
+                        : ln.isEmpty() ? L.t("Trener nie przydzielił Ci jeszcze listy kursantów do rozmów telefonicznych.")
+                        : L.t("Na Twojej liście nie ma jeszcze numerów."), 12f, R.color.pr_muted));
+                return;
+            }
+            TextView lh = Ui.text(a, "📋 " + ln + "  ·  " + L.t("Dotknij osoby, z którą rozmawiasz; ☎ — zadzwoń."), 11f, R.color.pr_muted);
+            lh.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
+            contactBox.addView(lh);
+            for (ContactList.Member cm : ms) {
+                boolean on = cm.name.equals(selContact[0]);
+                LinearLayout row = Ui.row(a);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                int pd = (int) Ui.dp(a, 8);
+                row.setPadding(pd, pd, pd, pd);
+                row.setBackground(Ui.rounded(on ? 0x3300C853 : 0x00000000, on ? 0xFF00C853 : 0x33FFFFFF, Ui.dp(a, on ? 2 : 1), Ui.dp(a, 8)));
+                LinearLayout tb = new LinearLayout(a);
+                tb.setOrientation(LinearLayout.VERTICAL);
+                TextView nm = Ui.text(a, (on ? "✓ " : "") + cm.name, 13f, R.color.pr_text);
+                nm.setTypeface(Typeface.DEFAULT_BOLD);
+                tb.addView(nm);
+                tb.addView(Ui.text(a, cm.phone + (cm.note.isEmpty() ? "" : "  ·  " + cm.note), 11f, R.color.pr_muted));
+                row.addView(tb, Ui.weight(1f, 0));
+                android.widget.Button call = Ui.button(a, "☎", R.color.pr_accent, true);
+                call.setOnClickListener(v -> ContactList.dial(a, cm.phone));
+                row.addView(call, new LinearLayout.LayoutParams((int) Ui.dp(a, 56), LinearLayout.LayoutParams.WRAP_CONTENT));
+                row.setOnClickListener(v -> { selContact[0] = cm.name.equals(selContact[0]) ? "" : cm.name; buildContacts[0].run(); });
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                rlp.bottomMargin = (int) Ui.dp(a, 5);
+                contactBox.addView(row, rlp);
+            }
+        };
         final boolean[] nsAsked = {false};
+        final boolean[] clAsked = {false};
         Runnable onCat = () -> {
             buildSpecial[0].run();
+            buildContacts[0].run();
+            if (ContactList.CATEGORY.equals(selCat[0]) && !clAsked[0]) {
+                clAsked[0] = true;
+                ContactList.refresh(a, true, () -> buildContacts[0].run());
+            }
             if ("Special".equals(selCat[0]) && !nsAsked[0]) {
                 nsAsked[0] = true;
                 SpecialTasks.refreshFromNs(a, () -> buildSpecial[0].run()); // swiezy stan z NewSpeech
@@ -320,6 +371,8 @@ public class DescribeSheet {
             m.special = "Special".equals(selCat[0]) ? selSpecial[0] : "";
             SpecialTasks.Task st = SpecialTasks.find(m.special);
             if (st != null && !m.note.contains(st.shortName())) m.note = "🎬 " + st.shortName() + (m.note.isEmpty() ? "" : " — " + m.note);
+            if (ContactList.CATEGORY.equals(selCat[0]) && !selContact[0].isEmpty() && !m.note.contains(selContact[0]))
+                m.note = "📞 " + selContact[0] + (m.note.isEmpty() ? "" : " — " + m.note);
             if (gps[0] != null) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); }
             prefs.edit().putString("student_name", name).putString("last_sys", selSys[0]).apply();
             dismiss.run();

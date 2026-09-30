@@ -271,6 +271,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         TrainerWatch.check(this, null); // oceny trenera od ostatniego otwarcia
         AvailWatch.schedule(this);
         AvailWatch.check(this, null);   // kto teraz chetnie porozmawia
+        ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
         askNotificationPermissionOnce();
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
@@ -726,7 +727,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void doLogout() {
-        prefs().edit().remove("ns_token").remove("ns_user_id").putBoolean("ns_session_expired", false).apply();
+        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").putBoolean("ns_session_expired", false).apply();
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
         updateNavForLogin();
