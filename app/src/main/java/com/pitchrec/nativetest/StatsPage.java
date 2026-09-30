@@ -387,7 +387,48 @@ public class StatsPage {
             pb.setMax(goal);
             pb.setProgress(Math.min(done, goal));
             card.addView(pb);
-            card.addView(Ui.text(a, L.t("Wybierz kategorię „Phone do Kursanta/Trenera” przy opisie nagrania — zobaczysz listę z numerami."), 11f, R.color.pr_muted));
+            // LISTA KURSANTOW DO ZADZWONIENIA — zwijana, z przyciskiem ☎ (bez czekania na nagranie)
+            android.content.SharedPreferences sp = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+            boolean open = sp.getBoolean("calls_list_open", true);
+            String ln = ContactList.listName(a);
+            TextView head = Ui.text(a, (open ? "▾ " : "▸ ") + "📋 " + L.f("Do kogo dzwonić ({0})", ms.size()) + (ln.isEmpty() ? "" : " · " + ln), 13f, R.color.pr_text);
+            head.setTypeface(Typeface.DEFAULT_BOLD);
+            head.setPadding(0, (int) (10 * d), 0, (int) (6 * d));
+            head.setOnClickListener(v -> { sp.edit().putBoolean("calls_list_open", !open).apply(); fillCalls(card); });
+            card.addView(head);
+            if (open) {
+                List<ContactList.Member> sorted = new ArrayList<>(ms);
+                java.util.Collections.sort(sorted, (x, y) -> Boolean.compare(called.contains(ContactList.shortName(x.name)), called.contains(ContactList.shortName(y.name))));
+                for (ContactList.Member cm : sorted) {
+                    String sn = ContactList.shortName(cm.name);
+                    boolean was = called.contains(sn);
+                    LinearLayout row = Ui.row(a);
+                    row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                    int pd = (int) (10 * d);
+                    row.setPadding(pd, pd, pd, pd);
+                    row.setBackground(Ui.rounded(0xFF1E2430, 0x44FFFFFF, d, 10 * d));
+                    row.setAlpha(was ? 0.7f : 1f);
+                    LinearLayout tb = new LinearLayout(a);
+                    tb.setOrientation(LinearLayout.VERTICAL);
+                    TextView nm = Ui.text(a, sn + (was ? "   ✔ " + L.t("rozmowa była") : ""), 16f, R.color.pr_text);
+                    nm.setTextColor(0xFF00E676);
+                    nm.setTypeface(Typeface.DEFAULT_BOLD);
+                    tb.addView(nm);
+                    TextView ph = Ui.text(a, cm.phone, 15f, R.color.pr_text);
+                    ph.setTextColor(0xFFFFFFFF);
+                    ph.setTypeface(Typeface.DEFAULT_BOLD);
+                    tb.addView(ph);
+                    if (!cm.note.isEmpty()) { TextView nt = Ui.text(a, cm.note, 11f, R.color.pr_text); nt.setTextColor(0xFFB0B8C4); tb.addView(nt); }
+                    row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                    android.widget.Button call = Ui.button(a, "☎", R.color.pr_accent, true);
+                    call.setOnClickListener(v -> ContactList.dial(a, cm.phone));
+                    row.addView(call, new LinearLayout.LayoutParams((int) (60 * d), LinearLayout.LayoutParams.WRAP_CONTENT));
+                    LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    rlp.bottomMargin = (int) (6 * d);
+                    card.addView(row, rlp);
+                }
+            }
+            card.addView(Ui.text(a, L.t("Po rozmowie nagraj ją w kategorii „Phone do Kursanta/Trenera” i wybierz osobę — licznik sam się uzupełni."), 11f, R.color.pr_muted));
         }
     }
 
