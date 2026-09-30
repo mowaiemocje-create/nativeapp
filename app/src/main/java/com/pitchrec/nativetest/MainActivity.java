@@ -108,6 +108,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         L.init(this);
+        RateNames.init(this);
         NsClient.initForms(this);
         AudioFileLoader.cacheDir = new File(getFilesDir(), ".dawcache");
         new Thread(() -> { // sprzatanie pamieci podrecznej DAW: najwyzej 300 najnowszych
@@ -3100,13 +3101,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     // ── OCENA TRENERA dla nagrania (z NS: kryteria i ich ocena w %, komentarz) ──
-    private static String nameOf(org.json.JSONObject o) {
+    private String nameOf(org.json.JSONObject o) {
         if (o == null) return "";
+        RateNames.learn(this, o);
         String l = L.lang();
-        String v = "cs".equals(l) || "sk".equals(l) ? o.optString("name_cz", "") : "pl".equals(l) ? o.optString("name_pl", "") : o.optString("name_en", "");
-        if (v.isEmpty() || "null".equals(v)) v = o.optString("name_pl", "");
-        if (v.isEmpty() || "null".equals(v)) v = o.optString("name", "");
-        return "null".equals(v) ? "" : v;
+        String v = "cs".equals(l) || "sk".equals(l) ? o.optString("name_cz", "") : "pl".equals(l) ? o.optString("name_pl", "") : "en".equals(l) ? o.optString("name_en", "") : "";
+        if (!v.isEmpty() && !"null".equals(v)) return v;
+        String pl = o.optString("name_pl", "");
+        if (pl.isEmpty() || "null".equals(pl)) pl = o.optString("name", "");
+        return RateNames.tr("null".equals(pl) ? "" : pl);
     }
 
     // Karta nagrania -> pelny podglad: wszystkie dane nagrania + cala ocena trenera
@@ -3150,7 +3153,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             l1.setPadding(0, (int) (12 * d), 0, (int) (2 * d));
             box.addView(l1);
             infoRow(box, L.t("Kategoria"), cat.isEmpty() ? "—" : L.cat(cat));
-            if (!meta.special.isEmpty()) infoRow(box, L.t("Zadanie specjalne"), SpecialTasks.find(meta.special) != null ? SpecialTasks.find(meta.special).shortName() : meta.special);
+            if (!meta.special.isEmpty()) infoRow(box, L.t("Zadanie specjalne"), SpecialTasks.find(meta.special) != null ? SpecialTasks.find(meta.special).shortNameL() : meta.special);
             if (!meta.sys.isEmpty()) infoRow(box, L.t("System mowy"), meta.sys);
             if (meta.emotion > 0 && meta.emotion < RecMeta.EMOTION_LABELS.length) infoRow(box, L.t("Samopoczucie"), L.t(RecMeta.EMOTION_LABELS[meta.emotion]));
             String rd = rec.optString("record_date", rec.optString("date", ""));

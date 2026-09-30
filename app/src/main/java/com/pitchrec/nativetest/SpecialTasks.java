@@ -16,6 +16,15 @@ public class SpecialTasks {
         public final int color;
         Task(String n, String[] s, String i, int c) { name = n; systems = s; icon = i; color = c; }
         public String shortName() { int k = name.indexOf(" – "); return k > 0 ? name.substring(0, k) : name; }
+        // WYSWIETLANIE w jezyku aplikacji (nazwa po polsku zostaje kluczem — zapis, NS, zaliczenia)
+        public String displayName() { return L.t(name); }
+        public String shortNameL() { String n = displayName(); int k = n.indexOf(" – "); return k > 0 ? n.substring(0, k) : n; }
+        public String descriptionL() {
+            String n = displayName();
+            int k = n.indexOf(" – ");
+            String d = k > 0 ? n.substring(k + 3).trim() : "";
+            return d.isEmpty() ? "" : Character.toUpperCase(d.charAt(0)) + d.substring(1);
+        }
         // Opis zadania (to, co po tytule) — pokazywany po wybraniu zadania przy opisie nagrania
         public String description() {
             int k = name.indexOf(" – ");

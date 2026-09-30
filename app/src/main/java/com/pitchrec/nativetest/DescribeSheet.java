@@ -152,13 +152,13 @@ public class DescribeSheet {
                 LinearLayout txBox = new LinearLayout(a);
                 txBox.setOrientation(LinearLayout.VERTICAL);
                 txBox.setPadding((int) Ui.dp(a, 10), 0, 0, 0);
-                TextView tx = Ui.text(a, tk.shortName() + sub, 12f, R.color.pr_text);
+                TextView tx = Ui.text(a, tk.shortNameL() + sub, 12f, R.color.pr_text);
                 if (on) tx.setTypeface(Typeface.DEFAULT_BOLD);
                 tx.setAlpha(tk.forSystem(mySys) || on ? 1f : 0.55f);
                 txBox.addView(tx);
                 // Po dotknieciu: pelny opis zadania (co dokladnie nagrac) + dla jakich systemow
                 if (on) {
-                    String desc = tk.description();
+                    String desc = tk.descriptionL();
                     if (!desc.isEmpty()) {
                         TextView ds = Ui.text(a, desc, 12f, R.color.pr_text);
                         ds.setPadding(0, (int) Ui.dp(a, 4), 0, 0);

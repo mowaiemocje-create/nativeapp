@@ -299,7 +299,7 @@ public class StatsPage {
             LinearLayout colL = new LinearLayout(a);
             colL.setOrientation(LinearLayout.VERTICAL);
             colL.setPadding((int) (10 * d), 0, 0, 0);
-            TextView nm = Ui.text(a, t.shortName(), 13f, st.isEmpty() ? R.color.pr_muted : R.color.pr_text);
+            TextView nm = Ui.text(a, t.shortNameL(), 13f, st.isEmpty() ? R.color.pr_muted : R.color.pr_text);
             if (ok) nm.setTypeface(Typeface.DEFAULT_BOLD);
             colL.addView(nm);
             Long at = sentLocal.get(t.name);
@@ -310,8 +310,8 @@ public class StatsPage {
             TextView sb = Ui.text(a, sub, 10f, ok ? R.color.pr_accent : pend || rej ? R.color.pr_warn : R.color.pr_muted);
             colL.addView(sb);
             row.addView(colL, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            final String full = t.name;
-            row.setOnClickListener(v -> new android.app.AlertDialog.Builder(a).setTitle(t.icon + " " + t.shortName()).setMessage(full).setPositiveButton("OK", null).show());
+            final String full = t.displayName();
+            row.setOnClickListener(v -> new android.app.AlertDialog.Builder(a).setTitle(t.icon + " " + t.shortNameL()).setMessage(full).setPositiveButton("OK", null).show());
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.bottomMargin = (int) (5 * d);
             card.addView(row, lp);
@@ -594,12 +594,15 @@ public class StatsPage {
         });
     }
 
-    private static String loc(JSONObject o) {
+    private String loc(JSONObject o) {
         if (o == null) return "";
+        RateNames.learn(a, o);
         String l = L.lang();
-        String v = "cs".equals(l) || "sk".equals(l) ? o.optString("name_cz", "") : "pl".equals(l) ? o.optString("name_pl", "") : o.optString("name_en", "");
-        if (v.isEmpty()) v = o.optString("name_pl", "");
-        return v.isEmpty() ? o.optString("name", "") : v;
+        String v = "cs".equals(l) || "sk".equals(l) ? o.optString("name_cz", "") : "pl".equals(l) ? o.optString("name_pl", "") : "en".equals(l) ? o.optString("name_en", "") : "";
+        if (!v.isEmpty() && !"null".equals(v)) return v;
+        String pl = o.optString("name_pl", "");
+        if (pl.isEmpty() || "null".equals(pl)) pl = o.optString("name", "");
+        return RateNames.tr("null".equals(pl) ? "" : pl);
     }
 
     // ═════════════ INSPIRACJE NA DZIS ═════════════

@@ -758,7 +758,7 @@ public class DiaryPage {
             }
         } catch (Exception e) {
             btn.setEnabled(true);
-            new AlertDialog.Builder(a).setTitle("Błąd").setMessage(String.valueOf(e.getMessage())).setPositiveButton("OK", null).show();
+            new AlertDialog.Builder(a).setTitle(L.t("Błąd")).setMessage(String.valueOf(e.getMessage())).setPositiveButton("OK", null).show();
         }
     }
 

@@ -269,7 +269,7 @@ public class NsClient {
                                     String unit = w.optString("unit_name", "");
                                     if (unit.isEmpty()) unit = w.optInt("percent_mark", 0) + "%";
                                     if (sb.length() > 0) sb.append("\n");
-                                    sb.append("• ").append(w.optString("category_name", "")).append(" — ").append(unit);
+                                    sb.append("• ").append(RateNames.tr(w.optString("category_name", ""))).append(" — ").append(RateNames.tr(unit));
                                 }
                             }
                             fe.weakText = sb.toString();

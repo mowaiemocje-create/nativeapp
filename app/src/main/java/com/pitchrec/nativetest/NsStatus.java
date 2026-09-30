@@ -54,6 +54,13 @@ public final class NsStatus {
                             String st = !reviewed || re ? "wait" : o.optBoolean("is_correct", false) ? "ok" : "bad";
                             if (!st.equals(MAP.put(id, st))) diff = true;
                             RECS.put(id, o);
+                            org.json.JSONArray rr = o.optJSONArray("record_rates"); // tlumaczenia nazw kryteriow
+                            for (int k = 0; rr != null && k < rr.length(); k++) {
+                                JSONObject x = rr.optJSONObject(k);
+                                if (x == null) continue;
+                                RateNames.learn(c, x.optJSONObject("record_rate_category"));
+                                RateNames.learn(c, x.optJSONObject("record_rate_unit"));
+                            }
                             if (o.optString("date", "").startsWith(today)) tc++;
                         }
                         fetchedAt = System.currentTimeMillis();
