@@ -197,83 +197,102 @@ public class BackgroundRecorderService extends Service {
                 public void run() {
                     try { Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO); } catch (Exception e) { }
                     short[] buffer = new short[finalBufferSize / 2];
-                    float[] yinWindow = new float[YIN_WINDOW];
-                    int yinFillCount = 0;
-                    long samplePos = 0;
-                    float lastSmoothedFreq = 0f; // do wygladzania (fSm), jak w oryginalnym JS
                     float currentAppliedGain = LiveAudioData.gainMultiplier; // do plynnego rampowania gain
                     com.pitchrec.nativetest.NoiseGate gate = new com.pitchrec.nativetest.NoiseGate(LiveAudioData.SAMPLE_RATE);
 
-                    while (recording) {
-                        if (paused) {
-                            try { Thread.sleep(50); } catch (InterruptedException ie) { }
-                            continue;
-                        }
-                        int read = audioRecord.read(buffer, 0, buffer.length);
-                        if (read > 0) {
-                            // Zastosuj gain PLYNNIE (rampowanie próbka-po-próbce w strone
-                            // celu z suwaka) — bez tego, przesuniecie suwaka podczas
-                            // nagrywania powodowalo slyszalne "kliknieice/skok" na granicy
-                            // buforow, bo caly bufor od razu skakal na nowa wartosc.
-                            float targetGain = LiveAudioData.gainMultiplier;
-                            for (int i = 0; i < read; i++) {
-                                currentAppliedGain += (targetGain - currentAppliedGain) * 0.01f;
-                                int amplified = (int) (buffer[i] * currentAppliedGain);
-                                if (amplified > Short.MAX_VALUE) amplified = Short.MAX_VALUE;
-                                else if (amplified < Short.MIN_VALUE) amplified = Short.MIN_VALUE;
-                                buffer[i] = (short) amplified;
-                            }
-
-                            // Bramka szumow — sama mierzy szum tla w pierwszych 1,5 s i scisza
-                            // (nie zeruje) tylko to, co nie jest wyraznie glosniejsze od szumu.
-                            if (LiveAudioData.noiseGateEnabled) gate.process(buffer, read);
-
-                            // Glosnosc wynikowa ×N — od razu, z miekkim limiterem (bez trzaskow)
-                            if (liveBoost > 1) {
-                                final double T = 0.6, K = 0.4;
-                                for (int i = 0; i < read; i++) {
-                                    double x = buffer[i] / 32768.0 * liveBoost, ax = Math.abs(x);
-                                    double y = ax <= T ? ax : T + K * Math.tanh((ax - T) / K);
-                                    buffer[i] = (short) Math.round(Math.signum(x) * Math.min(y, 1.0) * 0.985 * 32767);
-                                }
-                            }
-                            for (int i = 0; i < read; i++) {
-                                int av = buffer[i] < 0 ? -buffer[i] : buffer[i];
-                                if (av > peakAbs) peakAbs = av;
-                            }
-                            try {
-                                writeAudioChunk(buffer, read);
-                            } catch (IOException ioe) { /* kontynuuj */ }
-                            Mp3Stream ms = mp3Stream;
-                            if (ms != null) ms.feed(buffer, read);
-
-                            LiveAudioData.appendSamples(buffer, read);
-
-                            for (int i = 0; i < read; i++) {
-                                yinWindow[yinFillCount] = buffer[i] / 32768f;
-                                yinFillCount++;
+                    // ANALIZA (YIN, pauzy, normy, sylaby) w OSOBNYM watku — watek nagrywania tylko
+                    // czyta mikrofon i zapisuje. Wczesniej ciezsze obliczenia (np. po 2 min ciaglej
+                    // mowy) spowalnialy czytanie mikrofonu: wykres i siatka stawaly, a dzwiek mogl ginac.
+                    final java.util.concurrent.LinkedBlockingQueue<short[]> anaQ = new java.util.concurrent.LinkedBlockingQueue<>();
+                    final short[] POISON = new short[0];
+                    Thread ana = new Thread(() -> {
+                        try { Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT); } catch (Exception e) { }
+                        float[] yinWindow = new float[YIN_WINDOW];
+                        int yinFillCount = 0;
+                        long samplePos = 0;
+                        while (true) {
+                            short[] chunk;
+                            try { chunk = anaQ.take(); } catch (InterruptedException ie) { break; }
+                            if (chunk == POISON) break;
+                            // zaleglosc > ~3 s: pomijamy analize tego kawalka (nagranie i fala dzialaja dalej)
+                            if (anaQ.size() > 40) { samplePos += chunk.length; yinFillCount = 0; continue; }
+                            for (int i = 0; i < chunk.length; i++) {
+                                yinWindow[yinFillCount++] = chunk[i] / 32768f;
                                 if (yinFillCount >= YIN_WINDOW) {
-                                    // RMS calego okna — brakujacy w poprzedniej wersji prog
-                                    // glosnosci (rms>0.006 w oryginalnym JS), ktory zapobiega
-                                    // przyjmowaniu przypadkowych, szumowych wykryc podczas
-                                    // cichych momentow (naturalne przerwy w mowie) —
-                                    // to byla prawdopodobnie glowna przyczyna "skokow mimo
-                                    // stabilnego glosu".
                                     float sum = 0;
                                     for (int j = 0; j < YIN_WINDOW; j++) sum += yinWindow[j] * yinWindow[j];
                                     float rms = (float) Math.sqrt(sum / YIN_WINDOW);
-
                                     float freq = YinPitchDetector.detect(yinWindow);
                                     long windowStartSample = samplePos + i - YIN_WINDOW + 1;
-                                    // VAD + pauzy, ciagla linia pitch (PitchTracker) i ocena emisji wg norm
-                                    LiveAudioData.processFrame(windowStartSample, rms, freq, YinPitchDetector.lastRelaxed);
+                                    try {
+                                        LiveAudioData.processFrame(windowStartSample, rms, freq, YinPitchDetector.lastRelaxed);
+                                    } catch (Throwable t) { /* blad analizy nie moze zatrzymac nagrywania */ }
                                     yinFillCount = 0;
                                 }
                             }
-                            samplePos += read;
+                            samplePos += chunk.length;
                         }
+                        try { LiveAudioData.finishAnalysis(); } catch (Throwable t) { }
+                    }, "PitchRecAnalysis");
+                    ana.start();
+
+                    int readErrors = 0;
+                    boolean micStopped = false;
+                    while (recording) {
+                        if (paused) {
+                            // PAUZA: mikrofon naprawde zatrzymany — po wznowieniu nagrywamy od biezacej
+                            // chwili (bez zaleglego bufora), a odsluch w pauzie nie koliduje z mikrofonem
+                            if (!micStopped) { try { audioRecord.stop(); } catch (Exception e) { } micStopped = true; }
+                            try { Thread.sleep(40); } catch (InterruptedException ie) { }
+                            continue;
+                        }
+                        if (micStopped) {
+                            micStopped = false;
+                            try { audioRecord.startRecording(); } catch (Exception e) { }
+                            if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) recreateAudioRecord(finalBufferSize);
+                        }
+                        int read = audioRecord.read(buffer, 0, buffer.length);
+                        if (read <= 0) {
+                            // mikrofon "umarl" (np. system przelaczyl audio przy odtwarzaniu) — odtwarzamy go
+                            if (read == AudioRecord.ERROR_DEAD_OBJECT || ++readErrors > 25) { recreateAudioRecord(finalBufferSize); readErrors = 0; }
+                            else { try { Thread.sleep(10); } catch (InterruptedException ie) { } }
+                            continue;
+                        }
+                        readErrors = 0;
+                        // Zastosuj gain PLYNNIE (rampowanie próbka-po-próbce w strone celu z suwaka)
+                        float targetGain = LiveAudioData.gainMultiplier;
+                        for (int i = 0; i < read; i++) {
+                            currentAppliedGain += (targetGain - currentAppliedGain) * 0.01f;
+                            int amplified = (int) (buffer[i] * currentAppliedGain);
+                            if (amplified > Short.MAX_VALUE) amplified = Short.MAX_VALUE;
+                            else if (amplified < Short.MIN_VALUE) amplified = Short.MIN_VALUE;
+                            buffer[i] = (short) amplified;
+                        }
+                        // Bramka szumow — sama mierzy szum tla i scisza tylko to, co nie jest glosniejsze od szumu
+                        if (LiveAudioData.noiseGateEnabled) gate.process(buffer, read);
+                        // Glosnosc wynikowa ×N — od razu, z miekkim limiterem (bez trzaskow)
+                        if (liveBoost > 1) {
+                            final double T = 0.6, K = 0.4;
+                            for (int i = 0; i < read; i++) {
+                                double x = buffer[i] / 32768.0 * liveBoost, ax = Math.abs(x);
+                                double y = ax <= T ? ax : T + K * Math.tanh((ax - T) / K);
+                                buffer[i] = (short) Math.round(Math.signum(x) * Math.min(y, 1.0) * 0.985 * 32767);
+                            }
+                        }
+                        for (int i = 0; i < read; i++) {
+                            int av = buffer[i] < 0 ? -buffer[i] : buffer[i];
+                            if (av > peakAbs) peakAbs = av;
+                        }
+                        try {
+                            writeAudioChunk(buffer, read);
+                        } catch (IOException ioe) { /* kontynuuj */ }
+                        Mp3Stream ms = mp3Stream;
+                        if (ms != null) ms.feed(buffer, read);
+                        LiveAudioData.appendSamples(buffer, read);
+                        anaQ.offer(java.util.Arrays.copyOf(buffer, read));
                     }
-                    LiveAudioData.finishAnalysis(); // domkniecie ostatniej porcji mowy / linii pitch
+                    anaQ.offer(POISON);
+                    try { ana.join(4000); } catch (InterruptedException ie) { }
                 }
             }, "PitchRecAudioReadThread");
             recordThread.start();
@@ -347,7 +366,7 @@ public class BackgroundRecorderService extends Service {
         }
         recording = false;
         if (recordThread != null) {
-            try { recordThread.join(2000); } catch (InterruptedException ie) { }
+            try { recordThread.join(6000); } catch (InterruptedException ie) { }
         }
         try { cleanupAudioResources(); } catch (Exception e) { }
         final File wav = outputFile;
@@ -594,6 +613,17 @@ public class BackgroundRecorderService extends Service {
                 raf.seek(pos);
             }
         } catch (Exception e) { /* zostaje nagranie bez dodatkowego wzmocnienia */ }
+    }
+
+    // Odtworzenie mikrofonu po bledzie (np. ERROR_DEAD_OBJECT po zmianie trasy audio)
+    private void recreateAudioRecord(int bufferSize) {
+        try { if (audioRecord != null) { try { audioRecord.stop(); } catch (Exception e) { } audioRecord.release(); } } catch (Exception e) { }
+        try {
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE, CHANNELS, ENCODING, bufferSize);
+            audioRecord.startRecording();
+        } catch (Exception e) {
+            try { Thread.sleep(200); } catch (InterruptedException ie) { }
+        }
     }
 
     private void cleanupAudioResources() {

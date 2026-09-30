@@ -210,6 +210,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setOnButtonClickListener(v -> stopRecordingFlow());
 
         playButton.setOnButtonClickListener(v -> {
+            if (pcm != null) {
+                // odsluch w pauzie nagrywania: play/pauza bez zaczynania od nowa
+                if (pcm.isPlaying()) pcm.pause();
+                else { pcm.resume(); startPcmLoop(); }
+                syncButtons();
+                return;
+            }
             if (currentPlayer != null) {
                 // Jest juz odtwarzacz — przelacz play/pauza (nie zaczynaj od nowa).
                 try {
@@ -237,6 +244,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             // ustawiamy zmienna — bez tego, biala linia wracala natychmiast do
             // rzeczywistej pozycji odtwarzacza przy nastepnej aktualizacji (petla
             // playheadUpdateLoop nadpisywala dotkniecie).
+            if (pcm != null) { // odsluch w pauzie: przeskok = start od wskazanego miejsca
+                boolean was = pcm.isPlaying();
+                if (was) previewDuringPause(sample); else { releasePlayer(); }
+                return;
+            }
             if (currentPlayer != null) {
                 try {
                     seekExact(currentPlayer, (int) ms);
@@ -248,6 +260,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         resetButton.setOnClickListener(v -> resetRecording());
 
         setupBottomNav();
+        redrawHandler.postDelayed(buttonGuard, 400);
         setupGoalLine();
         applySliderVisibility();
         showPage("daw");
@@ -2308,10 +2321,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         headerStatus.setText(L.t("● NAGRYWA"));
         headerStatus.setTextColor(getResources().getColor(R.color.pr_warn));
         pitchWaveView.postOnAnimation(redrawLoop);
+        syncButtons();
     }
 
     private void stopRecordingFlow() {
         releasePlayer(); // podglad z pauzy nie moze grac dalej po STOP
+        saving = true;
         Intent intent = new Intent(this, BackgroundRecorderService.class);
         intent.setAction(BackgroundRecorderService.ACTION_STOP);
         startService(intent);
@@ -2323,6 +2338,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         statusText.setText(getString(R.string.status_processing));
         headerStatus.setText(L.t("● ZAPIS…"));
         headerStatus.setTextColor(getResources().getColor(R.color.pr_accent));
+        syncButtons();
     }
 
     private long pauseStartedAtMs = 0L;
@@ -2339,6 +2355,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         headerStatus.setTextColor(getResources().getColor(R.color.pr_pause));
         playButton.setButtonEnabled(true);
         pitchWaveView.pauseKeepingPosition(); // zachowuje pozycje, nie skacze do poczatku
+        syncButtons();
     }
 
     private void resumeRecordingFlow() {
@@ -2350,6 +2367,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // minus kiedy pauza zaczela sie) — wczesniej blad dodawal tu czas AKTYWNEGO
         // nagrywania (od ostatniego wznowienia), co bylo odwrotnoscia tego co potrzebne.
         pausedAccumMs += System.currentTimeMillis() - pauseStartedAtMs;
+        lastDisplayedSecond = -1L; // licznik czasu od razu wraca do czasu nagrania (po odsluchu w pauzie)
         recordButton.setButtonText(getString(R.string.btn_pause));
         statusText.setText(getString(R.string.status_recording));
         headerStatus.setText(L.t("● NAGRYWA"));
@@ -2360,6 +2378,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pendingSeekSample = 0L;
         pitchWaveView.resetPan(); // czysci biala linie (playhead) — niepotrzebna podczas nagrywania na zywo
         pitchWaveView.setLiveMode(true); // wraca do auto-przewijania najnowszych probek
+        syncButtons();
     }
 
     private void resetRecording() {
@@ -2454,7 +2473,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pitchWaveView.setLiveMode(false); // pozwala przewijac/wskazac miejsce w tym co wlasnie nagrano
             pitchWaveView.resetPan();
             pitchWaveView.invalidate();
-            playButton.setButtonEnabled(true);
+            saving = false;
+            syncButtons();
             headerStatus.setText(L.t("● GOTOWY"));
             headerStatus.setTextColor(getResources().getColor(R.color.pr_muted));
             // Jak w PitchRec: po STOP od razu ekran "ZAPISZ NAGRANIE" (opis nagrania)
@@ -2470,7 +2490,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     @Override
     public void onError(String code, String message) {
-        runOnUiThread(() -> statusText.setText(L.t("Błąd: ") + code + " — " + message));
+        runOnUiThread(() -> { saving = false; statusText.setText(L.t("Błąd: ") + code + " — " + message); syncButtons(); });
     }
 
     private void saveRecordingForPlayback(String base64, String mimeType) {
@@ -2496,22 +2516,47 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // jest łatwo bezpiecznie odtwarzalny w środku nagrywania) — trzeba zatrzymać nagranie.
     private void previewDuringPause(long sampleIndex) {
         String path = com.pitchrec.backgroundrecorder.BackgroundRecorderService.currentOutputFilePath;
-        String format = com.pitchrec.backgroundrecorder.BackgroundRecorderService.currentOutputFormat;
         if (path == null) return;
-
-        if ("mp3".equals(format)) {
-            Toast.makeText(this, L.t("Podgląd MP3 podczas pauzy nie jest wspierany — zatrzymaj nagranie"), Toast.LENGTH_LONG).show();
-            return;
-        }
-
+        releasePlayer();
         try {
-            File source = new File(path);
-            File tempCopy = new File(getCacheDir(), "preview_temp.wav");
-            copyWavWithFixedHeader(source, tempCopy);
-            playFile(tempCopy.getAbsolutePath(), sampleIndex);
-        } catch (IOException e) {
+            final PcmPlayer me = new PcmPlayer(new File(path), sampleIndex);
+            pcm = me;
+            me.start(() -> {
+                if (pcm != me) return;
+                pcm = null;
+                statusText.setText(getString(R.string.status_paused));
+                syncButtons();
+            });
+            playButton.setButtonText(getString(R.string.btn_pause_play));
+            statusText.setText(getString(R.string.status_playing));
+            pitchWaveView.clearTouchHold();
+            startPcmLoop();
+        } catch (Exception e) {
+            pcm = null;
             statusText.setText(L.t("Błąd podglądu: ") + e.getMessage());
         }
+        syncButtons();
+    }
+
+    // ODSLUCH W PAUZIE — pozycja prosto z odtwarzacza PCM (dokladna), odswiezanie co klatke ekranu
+    private PcmPlayer pcm = null;
+    private boolean pcmLoopOn = false;
+    private final Runnable pcmLoop = new Runnable() {
+        @Override public void run() {
+            PcmPlayer p = pcm;
+            if (p == null || !isPaused) { pcmLoopOn = false; return; }
+            long pos = p.positionSample();
+            pitchWaveView.setPlayheadSample(pos);
+            long ms = pos * 1000L / LiveAudioData.SAMPLE_RATE;
+            timeText.setText(formatMs(ms) + " / " + formatMs(p.totalSamples() * 1000L / LiveAudioData.SAMPLE_RATE));
+            if (p.isPlaying()) pitchWaveView.postOnAnimation(this); else pcmLoopOn = false;
+        }
+    };
+
+    private void startPcmLoop() {
+        if (pcmLoopOn) return;
+        pcmLoopOn = true;
+        pitchWaveView.postOnAnimation(pcmLoop);
     }
 
     // Kopiuje aktualną (jeszcze niekompletną) treść pliku WAV, dopisując POPRAWNY nagłówek
@@ -2571,6 +2616,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         releasePlayer();
         pendingSeekSample = 0L;
         loadedFilePath = file.getAbsolutePath();
+        AudioFileLoader.cancelPending();
+        syncButtons();
         pitchWaveView.setLiveMode(false);
         pitchWaveView.resetPan();
         statusText.setText("⏳ " + L.t("Wczytywanie nagrania…"));
@@ -2634,49 +2681,90 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // startSampleIndex: pozycja (w próbkach), od której ma zacząć się odtwarzanie — 0 =
     // od początku. Odpowiada dotknięciu wykresu (suwak odtwarzania).
+    // Odtwarzanie pliku: przygotowanie W TLE (prepareAsync — duze MP3 nie blokuja ekranu),
+    // wywolania od starego odtwarzacza sa ignorowane, a gdy telefon nie potwierdzi przewiniecia,
+    // start i tak nastepuje po 0,7 s.
     private void playFile(String path, long startSampleIndex) {
-        try {
-            if (currentPlayer != null) {
-                currentPlayer.release();
-                currentPlayer = null;
-            }
-            MediaPlayer player = new MediaPlayer();
-            player.setDataSource(path);
-            playingPath = path;
-            player.setOnCompletionListener(mp -> {
-                mp.release();
-                currentPlayer = null;
-                playLoopOn = false;
-                playButton.setButtonText(getString(R.string.btn_play));
-            });
-            player.prepare();
-            int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
-            currentPlayer = player;
+        releasePlayer();
+        final MediaPlayer player = new MediaPlayer();
+        currentPlayer = player;
+        playingPath = path;
+        final int startMs = (int) (startSampleIndex * 1000L / LiveAudioData.SAMPLE_RATE);
+        final boolean[] started = {false};
+        final Runnable go = () -> {
+            if (currentPlayer != player || started[0]) return;
+            started[0] = true;
+            try { player.start(); } catch (Exception e) { releasePlayer(); syncButtons(); return; }
+            statusText.setText(getString(R.string.status_playing));
+            pitchWaveView.clearTouchHold();
+            startPlayheadUpdateLoop();
+            syncButtons();
+        };
+        player.setOnCompletionListener(mp -> {
+            if (currentPlayer != mp) return;
+            try { mp.release(); } catch (Exception e) { }
+            currentPlayer = null;
+            playLoopOn = false;
+            syncButtons();
+        });
+        player.setOnErrorListener((mp, what, extra) -> {
+            if (currentPlayer == mp) { releasePlayer(); statusText.setText(L.t("Błąd odtwarzania: ") + what); syncButtons(); }
+            return true;
+        });
+        player.setOnPreparedListener(mp -> {
+            if (currentPlayer != mp) return;
             if (startMs > 0) {
-                // Niektóre urządzenia nie przewijają poprawnie, jeśli start() jest wołane
-                // natychmiast po seekTo() — czekamy na potwierdzenie zakończenia przewijania.
-                player.setOnSeekCompleteListener(mp -> {
-                    mp.start();
-                    statusText.setText(getString(R.string.status_playing));
-                    playButton.setButtonText(getString(R.string.btn_pause_play));
-                    startPlayheadUpdateLoop();
-                });
-                seekExact(player, startMs);
-            } else {
-                player.start();
-                statusText.setText(getString(R.string.status_playing));
-                playButton.setButtonText(getString(R.string.btn_pause_play));
-                startPlayheadUpdateLoop();
-            }
-        } catch (IOException e) {
+                mp.setOnSeekCompleteListener(m2 -> go.run());
+                try { seekExact(mp, startMs); } catch (Exception e) { go.run(); return; }
+                redrawHandler.postDelayed(go, 700);
+            } else go.run();
+        });
+        try {
+            player.setDataSource(path);
+            player.prepareAsync();
+            playButton.setButtonText(getString(R.string.btn_pause_play));
+        } catch (Exception e) {
+            releasePlayer();
             statusText.setText(L.t("Błąd odtwarzania: ") + e.getMessage());
+            syncButtons();
         }
     }
+
+    // PRZYCISKI zawsze zgodne z faktycznym stanem (nagrywanie / pauza / odtwarzanie) —
+    // wczesniej zdarzalo sie, ze REC i PLAY jednoczesnie pokazywaly "pauze".
+    private volatile boolean saving = false; // po STOP, zanim plik jest gotowy — PLAY zablokowany (nie gra starego pliku)
+
+    private boolean anyPlaying() {
+        try {
+            if (pcm != null && pcm.isPlaying()) return true;
+            return currentPlayer != null && currentPlayer.isPlaying();
+        } catch (Exception e) { return false; }
+    }
+
+    private void syncButtons() {
+        if (recordButton == null || playButton == null || pauseButton == null) return;
+        recordButton.setButtonText(!isRecording ? getString(R.string.btn_rec) : isPaused ? getString(R.string.btn_resume) : getString(R.string.btn_pause));
+        boolean hasFile = loadedFilePath != null || lastSavedFilePath != null;
+        boolean playEn = isRecording ? isPaused : (hasFile && !saving);
+        playButton.setButtonEnabled(playEn);
+        playButton.setButtonText(playEn && anyPlaying() ? getString(R.string.btn_pause_play) : getString(R.string.btn_play));
+        pauseButton.setButtonEnabled(isRecording);
+    }
+
+    // co 0,4 s kontrola spojnosci przycisków (tani test — tylko gdy widac ekran nagrywania)
+    private final Runnable buttonGuard = new Runnable() {
+        @Override public void run() {
+            if ("daw".equals(currentPage)) syncButtons();
+            redrawHandler.postDelayed(this, 400);
+        }
+    };
 
     private String playingPath = null;
 
     // Zwalnia odtwarzacz (np. przy wczytaniu innego nagrania) i zatrzymuje suwak
     private void releasePlayer() {
+        if (pcm != null) { pcm.release(); pcm = null; }
+        pcmLoopOn = false;
         if (currentPlayer != null) {
             try { currentPlayer.release(); } catch (Exception e) { }
             currentPlayer = null;

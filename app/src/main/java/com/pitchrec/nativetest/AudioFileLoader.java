@@ -96,6 +96,12 @@ public class AudioFileLoader {
     // Zwraca true, gdy wczytano z pamieci podrecznej razem z linia pitch
     public static boolean loadWave(File file) throws IOException { return loadWave(file, true); }
 
+    // Kazde nowe wczytanie przerywa liczenie pitch POPRZEDNIEGO pliku (wczesniej nowy plik
+    // czekal, az skonczy sie stary, a DAW w tym czasie stal)
+    private static final java.util.concurrent.atomic.AtomicInteger GEN = new java.util.concurrent.atomic.AtomicInteger();
+
+    public static void cancelPending() { GEN.incrementAndGet(); }
+
     public static synchronized boolean loadWave(File file, boolean useCache) throws IOException {
         LiveAudioData.reset();
         LiveAudioData.CacheData cached = useCache ? readCache(file) : null;
@@ -121,6 +127,7 @@ public class AudioFileLoader {
 
     // 2) PITCH dla wczytanej fali. full=false: tylko linia pitch (bez pauz, norm i sylab).
     public static synchronized void addPitch(File file, boolean full) throws IOException {
+        final int myGen = GEN.get();
         short[] samples = file.getAbsolutePath().equals(lastPath) ? lastSamples : null;
         if (samples == null) {
             samples = file.getName().endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
@@ -130,16 +137,18 @@ public class AudioFileLoader {
         final int frames = samples.length / YIN_WINDOW;
         final float[] rmsA = new float[frames], f0A = new float[frames], relA = new float[frames];
         final short[] src = samples;
-        int threads = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors()));
+        // jeden rdzen zostaje dla ekranu i odtwarzania (inaczej wykres "stawal" w trakcie liczenia)
+        int threads = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() - 1));
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
         final java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger(0);
         java.util.List<java.util.concurrent.Future<?>> jobs = new java.util.ArrayList<>();
         for (int t = 0; t < threads; t++) {
             jobs.add(pool.submit(() -> {
+                try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Throwable e) { }
                 YinPitchDetector.Work w = new YinPitchDetector.Work();
                 float[] win = new float[YIN_WINDOW];
                 int f;
-                while ((f = next.getAndIncrement()) < frames) {
+                while ((f = next.getAndIncrement()) < frames && GEN.get() == myGen) {
                     int base = f * YIN_WINDOW;
                     float sum = 0;
                     for (int j = 0; j < YIN_WINDOW; j++) { float v = src[base + j] / 32768f; win[j] = v; sum += v * v; }
@@ -156,6 +165,7 @@ public class AudioFileLoader {
         finally { pool.shutdown(); }
 
         lastSamples = null; lastPath = null; // pamiec zwalniamy — pitch juz policzony
+        if (GEN.get() != myGen) return;    // w miedzyczasie wczytano inne nagranie
         if (!full) {
             for (int f = 0; f < frames; f++) LiveAudioData.processPitchOnly((long) f * YIN_WINDOW, rmsA[f], f0A[f], relA[f]);
             LiveAudioData.finishPitchOnly();

@@ -146,7 +146,7 @@ public class LiveAudioData {
                     a = fe[k];
                 }
                 s.addAll(afterFour(done.start, a, done.end));
-            } else s = countSyllables(countStart(done.start), done.end);
+            } else s = countSyllablesLong(countStart(done.start), done.end);
             double dur = Math.max(0.2, done.end - done.start);
             done.syllables = s.size();
             done.rate = (float) (s.size() / dur * 60);
@@ -173,8 +173,8 @@ public class LiveAudioData {
                 SyllableDetector.Syl u = new SyllableDetector.Syl(st, (st + ue) / 2, ue);
                 u.four = true;
                 s.add(u);
-                s.addAll(afterFour(st, ue, now));
-            } else s = countSyllables(st, now);
+                s.addAll(afterFourLive(ue, now));
+            } else s = liveCount(st, now);
             liveSyllables = s;
             liveRate = (float) (s.size() / (now - st) * 60);
         }
@@ -203,7 +203,79 @@ public class LiveAudioData {
         List<SyllableDetector.Syl> out = new ArrayList<>();
         if (end - unitEnd <= 0.15) return out;
         double prev = unitEnd;
-        for (SyllableDetector.Syl sy : (SyllableDetector.MODE == 2 ? countSyllables(unitEnd, end) : countSyllables(portionStart, end))) {
+        for (SyllableDetector.Syl sy : (SyllableDetector.MODE == 2 ? countSyllablesLong(unitEnd, end) : countSyllablesLong(portionStart, end))) {
+            if (sy.nucleus <= unitEnd + 0.05) continue;
+            out.add(new SyllableDetector.Syl(prev, sy.nucleus, sy.end));
+            prev = sy.end;
+        }
+        return out;
+    }
+
+    // DLUGIE fragmenty liczone kawalkami po 10 s (sylaba nalezy do kawalka, w ktorym ma srodek) —
+    // koszt rosnie liniowo. Wczesniej jedna porcja mowy trwajaca np. 2 min byla przeliczana w
+    // calosci kilka razy na sekunde i analiza nie nadazala (wykres stawal).
+    static final double CHUNK_S = 10.0;
+
+    public static List<SyllableDetector.Syl> countSyllablesLong(double start, double end) {
+        if (end - start <= CHUNK_S * 1.5) return countSyllables(start, end);
+        List<SyllableDetector.Syl> out = new ArrayList<>();
+        for (double cs = start; cs < end; cs += CHUNK_S) out.addAll(chunk(start, cs, Math.min(end, cs + CHUNK_S), end));
+        return tidy(out);
+    }
+
+    // sylaby z srodkiem w [cs, ce), liczone na oknie z zapasem 1 s z obu stron
+    private static List<SyllableDetector.Syl> chunk(double start, double cs, double ce, double end) {
+        List<SyllableDetector.Syl> out = new ArrayList<>();
+        for (SyllableDetector.Syl sy : countSyllables(Math.max(start, cs - 1.0), Math.min(end, ce + 1.0)))
+            if (sy.nucleus >= cs && sy.nucleus < ce) out.add(sy);
+        return out;
+    }
+
+    // granice sylab na styku kawalkow: poczatek nie wczesniej niz koniec poprzedniej
+    private static List<SyllableDetector.Syl> tidy(List<SyllableDetector.Syl> l) {
+        int n = l.size();
+        if (n < 2) return l;
+        double[] st = new double[n], en = new double[n];
+        for (int i = 0; i < n; i++) { st[i] = l.get(i).start; en[i] = l.get(i).end; }
+        for (int i = 1; i < n; i++) {
+            double pn = l.get(i - 1).nucleus, cn = l.get(i).nucleus;
+            if (en[i - 1] > st[i] || en[i - 1] > cn || st[i] < pn) {
+                double b = (st[i] > pn && st[i] < cn) ? st[i] : (pn + cn) / 2;
+                en[i - 1] = b; st[i] = b;
+            }
+        }
+        List<SyllableDetector.Syl> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            SyllableDetector.Syl o = l.get(i);
+            if (st[i] == o.start && en[i] == o.end) { out.add(o); continue; }
+            SyllableDetector.Syl c = new SyllableDetector.Syl(st[i], o.nucleus, en[i]);
+            c.four = o.four;
+            out.add(c);
+        }
+        return out;
+    }
+
+    // NA ZYWO: gotowe 10-sekundowe kawalki biezacej porcji sa zapamietane, przeliczamy tylko koncowke
+    private static double lcStart = -1, lcUntil = -1;
+    private static final List<SyllableDetector.Syl> lcStable = new ArrayList<>();
+
+    static List<SyllableDetector.Syl> liveCount(double start, double now) {
+        if (start != lcStart) { lcStart = start; lcUntil = start; lcStable.clear(); }
+        while (now - lcUntil > CHUNK_S + 1.5) {
+            lcStable.addAll(chunk(start, lcUntil, lcUntil + CHUNK_S, now));
+            lcUntil += CHUNK_S;
+        }
+        List<SyllableDetector.Syl> out = new ArrayList<>(lcStable);
+        for (SyllableDetector.Syl sy : countSyllables(Math.max(start, lcUntil - 1.0), now))
+            if (sy.nucleus >= lcUntil) out.add(sy);
+        return tidy(out);
+    }
+
+    private static List<SyllableDetector.Syl> afterFourLive(double unitEnd, double end) {
+        List<SyllableDetector.Syl> out = new ArrayList<>();
+        if (end - unitEnd <= 0.15) return out;
+        double prev = unitEnd;
+        for (SyllableDetector.Syl sy : liveCount(unitEnd, end)) {
             if (sy.nucleus <= unitEnd + 0.05) continue;
             out.add(new SyllableDetector.Syl(prev, sy.nucleus, sy.end));
             prev = sy.end;
@@ -276,6 +348,7 @@ public class LiveAudioData {
         liveSyllables = null;
         liveRate = 0f;
         synchronized (lock) { syllables.clear(); sylTotal = 0; sylTime = 0; frameNo = 0; voicedN = 0; }
+        lcStart = -1; lcUntil = -1; lcStable.clear();
         tracker.reset();
         norms.reset();
         synchronized (lock) {
@@ -425,7 +498,16 @@ public class LiveAudioData {
             else hi = mid;
         }
         int pitchStart = Math.max(0, lo - 1);
-        snap.pitchPoints = new ArrayList<>(pitchPts.subList(pitchStart, pitchPts.size()));
+        // tylko do konca widocznego okna (+2 s) — wczesniej kopiowane bylo WSZYSTKO do konca
+        // nagrania, co przy przewijaniu/odsluchu dlugiego nagrania bardzo spowalnialo rysowanie
+        long endSample = snap.visibleStartSample + (long) envelopeChunkCount * ENVELOPE_CHUNK + 2L * SAMPLE_RATE;
+        int lo2 = pitchStart, hi2 = pitchPts.size();
+        while (lo2 < hi2) {
+            int mid = (lo2 + hi2) / 2;
+            if (pitchPts.get(mid).sampleIndex <= endSample) lo2 = mid + 1;
+            else hi2 = mid;
+        }
+        snap.pitchPoints = new ArrayList<>(pitchPts.subList(pitchStart, Math.min(pitchPts.size(), lo2 + 1)));
 
         return snap;
     }

@@ -80,13 +80,16 @@ public class NeonButton extends View {
 
     public void setButtonText(String t) {
         // Tylko symbol — pierwszy niealfanumeryczny znak (▶ ● ■ itp.), bez podpisu tekstowego.
-        symbol = t.replaceAll("[A-Za-zĄĘŁŃÓŚŹŻąęłńóśźż ]", "").trim();
-        if (symbol.isEmpty()) symbol = t;
+        String ns = t.replaceAll("[A-Za-zĄĘŁŃÓŚŹŻąęłńóśźż ]", "").trim();
+        if (ns.isEmpty()) ns = t;
+        if (ns.equals(symbol)) return; // bez zmian — bez przerysowania
+        symbol = ns;
         neonColor = symbol.contains("⏸") ? PAUSE_COLOR : baseColor;
         invalidate();
     }
 
     public void setButtonEnabled(boolean e) {
+        if (enabled == e) return;
         enabled = e;
         invalidate();
     }

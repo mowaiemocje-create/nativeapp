@@ -184,6 +184,9 @@ public class PitchWaveView extends View {
         invalidate();
     }
 
+    // start odtwarzania: widok od razu podaza za biala linia (bez czekania po dotknieciu)
+    public void clearTouchHold() { lastTouchMs = 0L; }
+
     public void resetPan() {
         panOffsetSample = 0L;
         playheadSample = -1L;
