@@ -3031,11 +3031,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         card.addView(top);
         String st = recStatus(meta);
         if (st != null) {
-            String stTxt = "ok".equals(st) ? "✅ " + L.t("zaliczone przez trenera") : "bad".equals(st) ? "↺ " + L.t("do poprawy — zobacz Korektę") : "⏳ " + L.t("czeka na ocenę trenera");
+            String stTxt = ("ok".equals(st) ? "✅ " + L.t("zaliczone przez trenera") : "bad".equals(st) ? "↺ " + L.t("do poprawy") : "⏳ " + L.t("czeka na ocenę trenera")) + "  ·  " + L.t("szczegóły ›");
             TextView stv = Ui.text(this, stTxt, 11f, "ok".equals(st) ? R.color.pr_accent : "bad".equals(st) ? R.color.pr_warn : R.color.pr_pause);
             stv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
             stv.setPadding(0, (int) (4 * d), 0, 0);
-            if ("bad".equals(st)) stv.setOnClickListener(v -> openLoginOnlySection("fix", L.t("KOREKTA")));
+            final String rid = !meta.nsRecordId.isEmpty() ? meta.nsRecordId : meta.fixRecordId;
+            stv.setOnClickListener(v -> showTrainerRating(rid, "bad".equals(st), file));
             card.addView(stv);
         }
 
@@ -3096,6 +3097,232 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // Opisane nagranie mozna tez edytowac — dotkniecie nazwy otwiera opis
         name.setOnClickListener(v -> describeExisting(file, false));
         return card;
+    }
+
+    // ── OCENA TRENERA dla nagrania (z NS: kryteria i ich ocena w %, komentarz) ──
+    private static String nameOf(org.json.JSONObject o) {
+        if (o == null) return "";
+        String l = L.lang();
+        String v = "cs".equals(l) || "sk".equals(l) ? o.optString("name_cz", "") : "pl".equals(l) ? o.optString("name_pl", "") : o.optString("name_en", "");
+        if (v.isEmpty() || "null".equals(v)) v = o.optString("name_pl", "");
+        if (v.isEmpty() || "null".equals(v)) v = o.optString("name", "");
+        return "null".equals(v) ? "" : v;
+    }
+
+    // Karta nagrania -> pelny podglad: wszystkie dane nagrania + cala ocena trenera
+    // (kazde kryterium z wynikiem %, opis poziomu, komentarz tekstowy i GLOSOWY trenera)
+    private MediaPlayer voicePlayer = null;
+
+    private void showTrainerRating(String recordId, boolean toFix, File file) {
+        org.json.JSONObject rec = NsStatus.record(recordId);
+        if (rec == null && recordId != null && !recordId.isEmpty() && isLoggedIn()) {
+            // nagranie spoza ostatnich 100 — pobieramy sam rekord
+            NsClient.request("GET", "/records/" + recordId, nsToken(), nsEmail(), null, null, r -> {
+                org.json.JSONObject o = null;
+                try { if (r.ok) { o = new org.json.JSONObject(r.body); if (o.optJSONObject("record") != null) o = o.optJSONObject("record"); } } catch (Exception e) { }
+                buildRatingDialog(o, recordId, toFix, file);
+            });
+            return;
+        }
+        buildRatingDialog(rec, recordId, toFix, file);
+    }
+
+    private void buildRatingDialog(org.json.JSONObject rec, String recordId, boolean toFix, File file) {
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setPadding((int) (20 * d), (int) (6 * d), (int) (20 * d), (int) (6 * d));
+        RecMeta meta = file != null ? RecMeta.load(this, file.getName()) : new RecMeta();
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM.yyyy, HH:mm", Locale.getDefault());
+        if (rec == null) {
+            box.addView(Ui.text(this, L.t("Nie udało się wczytać oceny — spróbuj za chwilę."), 13f, R.color.pr_text));
+        } else {
+            String cat = nameOf(rec.optJSONObject("record_category"));
+            if (cat.isEmpty()) cat = meta.cat;
+            boolean reviewed = NsStatus.isoMs(rec.optString("reviewed_at", "")) > 0 && !rec.isNull("is_correct");
+            boolean ok = reviewed && rec.optBoolean("is_correct", false) && !toFix;
+            TextView head = Ui.text(this, (!reviewed ? "⏳ " + L.t("czeka na ocenę trenera") : ok ? "✅ " + L.t("Zaliczone") : "↺ " + L.t("Do poprawy")) + (cat.isEmpty() ? "" : "  ·  " + L.cat(cat)), 15f, ok ? R.color.pr_accent : reviewed ? R.color.pr_warn : R.color.pr_pause);
+            head.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            box.addView(head);
+
+            // ── NAGRANIE: wszystkie dane ──
+            TextView l1 = Ui.label(this, "📋 " + L.t("NAGRANIE"));
+            l1.setPadding(0, (int) (12 * d), 0, (int) (2 * d));
+            box.addView(l1);
+            infoRow(box, L.t("Kategoria"), cat.isEmpty() ? "—" : L.cat(cat));
+            if (!meta.special.isEmpty()) infoRow(box, L.t("Zadanie specjalne"), SpecialTasks.find(meta.special) != null ? SpecialTasks.find(meta.special).shortName() : meta.special);
+            if (!meta.sys.isEmpty()) infoRow(box, L.t("System mowy"), meta.sys);
+            if (meta.emotion > 0 && meta.emotion < RecMeta.EMOTION_LABELS.length) infoRow(box, L.t("Samopoczucie"), L.t(RecMeta.EMOTION_LABELS[meta.emotion]));
+            String rd = rec.optString("record_date", rec.optString("date", ""));
+            if (rd.length() >= 10 && !"null".equals(rd)) infoRow(box, L.t("Dzień w NS"), rd.substring(8, 10) + "." + rd.substring(5, 7) + "." + rd.substring(0, 4));
+            if (file != null && file.exists()) infoRow(box, L.t("Nagrano"), df.format(new java.util.Date(file.lastModified())));
+            long sent = NsStatus.isoMs(rec.optString("created_at", ""));
+            if (sent > 0) infoRow(box, L.t("Wysłano"), df.format(new java.util.Date(sent)));
+            long upd = NsStatus.isoMs(rec.optString("record_file_updated_by_author_at", rec.optString("updated_by_author_at", "")));
+            if (upd > 0 && upd - sent > 60000) infoRow(box, L.t("Podmienione (poprawka)"), df.format(new java.util.Date(upd)));
+            long rv = NsStatus.isoMs(rec.optString("reviewed_at", ""));
+            if (rv > 0) infoRow(box, L.t("Oceniono"), df.format(new java.util.Date(rv)));
+            String who = "";
+            org.json.JSONObject rb = rec.optJSONObject("reviewed_by");
+            if (rb == null) rb = rec.optJSONObject("reviewer");
+            if (rb != null) who = (rb.optString("first_name", "") + " " + rb.optString("last_name", "")).trim();
+            if (!who.isEmpty()) infoRow(box, L.t("Trener"), who);
+            if (meta.hasGps()) infoRow(box, "GPS", String.format(Locale.US, "%.4f, %.4f", meta.lat, meta.lon));
+            String desc = rec.optString("description", "").trim();
+            if (desc.isEmpty() || "null".equals(desc)) desc = meta.note;
+            if (desc != null && !desc.isEmpty()) infoRow(box, L.t("Opis"), desc);
+
+            // ── OCENA TRENERA: wszystkie kryteria w kolejnosci trenera ──
+            org.json.JSONArray rates = rec.optJSONArray("record_rates");
+            java.util.List<Object[]> rows = new java.util.ArrayList<>();
+            int full = 0;
+            for (int i = 0; rates != null && i < rates.length(); i++) {
+                org.json.JSONObject r = rates.optJSONObject(i);
+                if (r == null) continue;
+                org.json.JSONObject u = r.optJSONObject("record_rate_unit");
+                String crit = nameOf(r.optJSONObject("record_rate_category"));
+                String unit = nameOf(u);
+                int pct = u != null ? u.optInt("percent_mark", -1) : -1;
+                if (crit.isEmpty() && unit.isEmpty()) continue;
+                if (pct >= 100) full++;
+                rows.add(new Object[]{crit, unit, pct});
+            }
+            TextView l2 = Ui.label(this, "🎯 " + L.t("OCENA TRENERA"));
+            l2.setPadding(0, (int) (14 * d), 0, (int) (2 * d));
+            box.addView(l2);
+            if (rows.isEmpty()) {
+                box.addView(Ui.text(this, reviewed ? L.t("Trener nie zapisał szczegółowych kryteriów dla tego nagrania.") : L.t("Ocena pojawi się tutaj, gdy trener oceni nagranie."), 12f, R.color.pr_muted));
+            } else {
+                int sum = 0, cnt = 0;
+                for (Object[] r : rows) if ((Integer) r[2] >= 0) { sum += (Integer) r[2]; cnt++; }
+                TextView smry = Ui.text(this, L.f("{0} z {1} kryteriów na 100%", full, rows.size()) + (cnt > 0 ? "  ·  " + L.f("średnio {0}%", Math.round(sum / (float) cnt)) : ""), 12f, R.color.pr_text);
+                smry.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                box.addView(smry);
+                addRateGroup(box, null, rows, d);
+                java.util.List<Object[]> weak = new java.util.ArrayList<>();
+                for (Object[] r : rows) if ((Integer) r[2] >= 0 && (Integer) r[2] < 100) weak.add(r);
+                if (!weak.isEmpty()) {
+                    java.util.Collections.sort(weak, (x, y) -> Integer.compare((Integer) x[2], (Integer) y[2]));
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < Math.min(3, weak.size()); i++) sb.append(i == 0 ? "" : ", ").append(weak.get(i)[0]);
+                    TextView focus = Ui.text(this, "💡 " + L.t("Na tym skup się w kolejnych nagraniach: ") + sb, 12f, R.color.pr_warn);
+                    focus.setPadding(0, (int) (10 * d), 0, 0);
+                    box.addView(focus);
+                } else {
+                    TextView bravo = Ui.text(this, "🎉 " + L.t("Wszystkie kryteria na 100% — tak trzymaj!"), 12f, R.color.pr_accent);
+                    bravo.setPadding(0, (int) (10 * d), 0, 0);
+                    box.addView(bravo);
+                }
+            }
+            for (String k : new String[]{"trainer_comment", "comment", "review_comment", "review", "description_trainer"}) {
+                String c = rec.optString(k, "").trim();
+                if (!c.isEmpty() && !"null".equals(c) && !c.startsWith("{")) {
+                    TextView lb = Ui.label(this, "💬 " + L.t("KOMENTARZ TRENERA"));
+                    lb.setPadding(0, (int) (12 * d), 0, (int) (4 * d));
+                    box.addView(lb);
+                    box.addView(Ui.text(this, c, 13f, R.color.pr_text));
+                    break;
+                }
+            }
+            // komentarz GLOSOWY trenera (jesli nagral)
+            android.widget.LinearLayout voiceBox = new android.widget.LinearLayout(this);
+            voiceBox.setOrientation(android.widget.LinearLayout.VERTICAL);
+            box.addView(voiceBox);
+            checkVoiceReview(recordId, voiceBox, d);
+        }
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(box);
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setCustomTitle(nsLogoTitle(L.t("Nagranie i ocena trenera")))
+                .setView(sv)
+                .setPositiveButton(getString(R.string.btn_close), null)
+                .setOnDismissListener(dd -> stopVoiceReview());
+        if (toFix) b.setNeutralButton("↺ " + L.t("KOREKTA"), (dd, w) -> openLoginOnlySection("fix", L.t("KOREKTA")));
+        b.show();
+    }
+
+    private void infoRow(android.widget.LinearLayout box, String k, String v) {
+        android.widget.LinearLayout r = Ui.row(this);
+        r.setPadding(0, (int) Ui.dp(this, 3), 0, 0);
+        TextView kt = Ui.text(this, k, 12f, R.color.pr_muted);
+        r.addView(kt, new android.widget.LinearLayout.LayoutParams((int) Ui.dp(this, 118), android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        r.addView(Ui.text(this, v, 12f, R.color.pr_text), new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(r);
+    }
+
+    private static final String BACKEND = "https://newspeech-backend.mowaiemocje.workers.dev";
+
+    private void checkVoiceReview(String recordId, android.widget.LinearLayout holder, float d) {
+        if (recordId == null || recordId.isEmpty() || !isLoggedIn()) return;
+        String q = "/voice-review/check?record_ids=" + NsClient.enc(recordId) + "&ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail());
+        NsClient.backend("GET", q, null, r -> {
+            try {
+                if (!r.ok) return;
+                org.json.JSONArray has = new org.json.JSONObject(r.body).optJSONArray("has_review");
+                boolean yes = false;
+                for (int i = 0; has != null && i < has.length(); i++) if (recordId.equals(has.optString(i, ""))) yes = true;
+                if (!yes) return;
+                TextView lb = Ui.label(this, "🎧 " + L.t("KOMENTARZ GŁOSOWY TRENERA"));
+                lb.setPadding(0, (int) (12 * d), 0, (int) (4 * d));
+                holder.addView(lb);
+                Button play = Ui.button(this, "▶ " + L.t("Posłuchaj"), R.color.pr_accent, true);
+                play.setOnClickListener(v -> {
+                    if (voicePlayer != null) { stopVoiceReview(); play.setText("▶ " + L.t("Posłuchaj")); return; }
+                    String url = BACKEND + "/voice-review/audio?record_id=" + NsClient.enc(recordId) + "&ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail());
+                    try {
+                        releasePlayer(); // nie grajmy dwoch rzeczy naraz
+                        MediaPlayer mp = new MediaPlayer();
+                        voicePlayer = mp;
+                        mp.setDataSource(url);
+                        mp.setOnPreparedListener(m -> { if (voicePlayer == m) { m.start(); play.setText("■ " + L.t("Zatrzymaj")); } });
+                        mp.setOnCompletionListener(m -> { stopVoiceReview(); play.setText("▶ " + L.t("Posłuchaj")); });
+                        mp.setOnErrorListener((m, w, e) -> { stopVoiceReview(); play.setText("▶ " + L.t("Posłuchaj")); Toast.makeText(this, L.t("Nie udało się odtworzyć komentarza"), Toast.LENGTH_SHORT).show(); return true; });
+                        play.setText("⏳ " + L.t("Wczytywanie…"));
+                        mp.prepareAsync();
+                    } catch (Exception e) { stopVoiceReview(); }
+                });
+                holder.addView(play, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+            } catch (Exception e) { }
+        });
+    }
+
+    private void stopVoiceReview() {
+        MediaPlayer mp = voicePlayer;
+        voicePlayer = null;
+        if (mp != null) try { mp.release(); } catch (Exception e) { }
+    }
+
+    private void addRateGroup(android.widget.LinearLayout box, String title, java.util.List<Object[]> rows, float d) {
+        if (title != null) {
+            TextView lb = Ui.label(this, title);
+            lb.setPadding(0, (int) (12 * d), 0, (int) (4 * d));
+            box.addView(lb);
+        }
+        for (Object[] r : rows) {
+            int pct = (Integer) r[2];
+            int col = pct >= 100 ? 0xFF00C853 : pct >= 50 ? 0xFFE8820C : 0xFFE53935;
+            android.widget.LinearLayout line = Ui.row(this);
+            line.setPadding(0, (int) (5 * d), 0, 0);
+            TextView nm = Ui.text(this, (String) r[0], 13f, R.color.pr_text);
+            nm.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            line.addView(nm, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            if (pct >= 0) { TextView pv = Ui.text(this, pct + "%", 13f, R.color.pr_text); pv.setTextColor(col); pv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); line.addView(pv); }
+            box.addView(line);
+            if (pct >= 0) {
+                android.widget.LinearLayout track = new android.widget.LinearLayout(this);
+                track.setBackground(Ui.rounded(Ui.col(this, R.color.pr_border), 0, 0, 3 * d));
+                float w = Math.max(0.03f, Math.min(1f, pct / 100f));
+                View fill = new View(this);
+                fill.setBackground(Ui.rounded(col, 0, 0, 3 * d));
+                track.addView(fill, new android.widget.LinearLayout.LayoutParams(0, (int) (6 * d), w));
+                track.addView(new View(this), new android.widget.LinearLayout.LayoutParams(0, (int) (6 * d), 1f - w + 0.0001f));
+                android.widget.LinearLayout.LayoutParams tl = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                tl.topMargin = (int) (3 * d);
+                box.addView(track, tl);
+            }
+            String unit = (String) r[1];
+            if (!unit.isEmpty()) box.addView(Ui.text(this, unit, 11f, R.color.pr_muted));
+        }
     }
 
     // Buduje przycisk z obramowaniem (bez wypelnienia) — dokladnie jak przyciski w karcie

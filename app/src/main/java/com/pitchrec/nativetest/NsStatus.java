@@ -14,6 +14,9 @@ import java.util.Map;
 public final class NsStatus {
 
     private static final Map<String, String> MAP = new HashMap<>();
+    private static final Map<String, JSONObject> RECS = new HashMap<>(); // pelny rekord (ocena trenera)
+
+    public static synchronized JSONObject record(String id) { return id == null ? null : RECS.get(id); }
     private static long fetchedAt = 0L;
     private static boolean busy = false;
     public static volatile int todayCount = 0; // nagrania z dzisiejsza data w NS
@@ -50,6 +53,7 @@ public final class NsStatus {
                             boolean re = reviewed && newer(upd, o.optString("reviewed_at", ""));
                             String st = !reviewed || re ? "wait" : o.optBoolean("is_correct", false) ? "ok" : "bad";
                             if (!st.equals(MAP.put(id, st))) diff = true;
+                            RECS.put(id, o);
                             if (o.optString("date", "").startsWith(today)) tc++;
                         }
                         fetchedAt = System.currentTimeMillis();
