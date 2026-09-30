@@ -196,7 +196,7 @@ public class DescribeSheet {
             }
             java.util.Set<String> called = ContactList.calledInPeriod(a);
             int goal = ContactList.goal(a), done = 0;
-            for (ContactList.Member cm : ms) if (called.contains(ContactList.shortName(cm.name))) done++;
+            for (ContactList.Member cm : ms) if (called.contains(cm.label)) done++;
             String to = ContactList.periodTo(a);
             TextView prog = Ui.text(a, (done >= goal ? "🎉 " : "📞 ") + L.f("W tym okresie: {0}/{1} kursantów", Math.min(done, goal), goal)
                     + (to.length() >= 10 ? "  ·  " + L.f("do {0}", to.substring(8, 10) + "." + to.substring(5, 7)) : ""), 13f, R.color.pr_text);
@@ -208,9 +208,9 @@ public class DescribeSheet {
             contactBox.addView(lh);
             // najpierw osoby, do ktorych jeszcze nie dzwoniles
             List<ContactList.Member> sorted = new ArrayList<>(ms);
-            java.util.Collections.sort(sorted, (x, y) -> Boolean.compare(called.contains(ContactList.shortName(x.name)), called.contains(ContactList.shortName(y.name))));
+            java.util.Collections.sort(sorted, (x, y) -> Boolean.compare(called.contains(x.label), called.contains(y.label)));
             for (ContactList.Member cm : sorted) {
-                String sn = ContactList.shortName(cm.name);
+                String sn = cm.label;
                 boolean on = sn.equals(selContact[0]);
                 boolean was = called.contains(sn);
                 LinearLayout row = Ui.row(a);

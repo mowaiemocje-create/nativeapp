@@ -19,6 +19,7 @@ public final class ContactList {
 
     public static final class Member {
         public final String id, name, phone, note;
+        public String label = "";   // "Anna K." — przy powtorce "Karolina M. (2)"
         Member(String id, String name, String phone, String note) { this.id = id; this.name = name; this.phone = phone; this.note = note; }
     }
 
@@ -45,6 +46,17 @@ public final class ContactList {
             if (ph.isEmpty() || "null".equals(ph)) continue;
             String note = m.optString("note", "");
             out.add(new Member(m.optString("ns_student_id", ""), m.optString("name", "").trim(), ph, "null".equals(note) ? "" : note.trim()));
+        }
+        // Etykiety: imie + inicjal; gdy dwie osoby wygladaja tak samo — "Karolina M. (2)".
+        // Numeracja wg id kursanta, zeby byla stala (niezalezna od kolejnosci na liscie).
+        List<Member> byId = new ArrayList<>(out);
+        java.util.Collections.sort(byId, (x, y) -> x.id.compareTo(y.id));
+        java.util.Map<String, Integer> cnt = new java.util.HashMap<>();
+        for (Member mm : byId) {
+            String sn = shortName(mm.name);
+            int n = cnt.getOrDefault(sn, 0) + 1;
+            cnt.put(sn, n);
+            mm.label = n == 1 ? sn : sn + " (" + n + ")";
         }
         return out;
     }
