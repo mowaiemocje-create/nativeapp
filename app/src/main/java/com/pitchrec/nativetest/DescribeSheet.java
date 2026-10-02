@@ -177,6 +177,10 @@ public class DescribeSheet {
         };
         // TELEFON DO KURSANTA — lista od trenera (dopieta do harmonogramu): do kogo dzwonisz
         final String[] selContact = {""};
+        // nagrana rozmowa (☎ w apce) — osoba juz wybrana
+        if (ContactList.CATEGORY.equals(m.cat) && m.note != null && m.note.startsWith("📞 "))
+            for (ContactList.Member cm : ContactList.members(a))
+                if (m.note.equals("📞 " + cm.label) || m.note.startsWith("📞 " + cm.label + " — ")) { selContact[0] = cm.label; break; }
         LinearLayout contactBox = new LinearLayout(a);
         contactBox.setOrientation(LinearLayout.VERTICAL);
         body.addView(contactBox);

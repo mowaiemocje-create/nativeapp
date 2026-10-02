@@ -63,4 +63,5 @@
     <string name="nav_settings_full">⚙\nNastavenia</string>
     <string name="shortcut_rec">Nahrať</string>
     <string name="shortcut_rec_long">Nahrávať hneď</string>
+    <string name="callrec_service_label">New Speech — nahrávanie hovorov</string>
 </resources>

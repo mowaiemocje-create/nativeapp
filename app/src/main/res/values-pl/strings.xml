@@ -63,4 +63,6 @@
     <string name="nav_settings_full">⚙\nUstawienia</string>
     <string name="shortcut_rec">Nagraj</string>
     <string name="shortcut_rec_long">Nagraj od razu</string>
+    <string name="callrec_service_label">New Speech — nagrywanie rozmów</string>
+    <string name="callrec_service_desc">Pozwala aplikacji New Speech nagrać rozmowę telefoniczną z innym kursantem (tak jak Cube ACR). Aplikacja niczego nie czyta z ekranu — usługa jest potrzebna tylko po to, żeby Android pozwolił nagrywać w czasie rozmowy. Nagrywane są tylko rozmowy rozpoczęte przyciskiem ☎ w aplikacji albo po wybraniu „Nagraj następną rozmowę”.</string>
 </resources>

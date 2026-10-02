@@ -523,6 +523,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         in.removeExtra("open_page");
         String oRec = in.getStringExtra("open_rec");
         in.removeExtra("open_rec");
+        if ("callrec".equals(pg)) { handlePendingCallRec(); return; }
         if ("rate".equals(pg)) { if (isLoggedIn() && oRec != null) openRating(oRec); else showPage("recs"); return; }
         if ("recs".equals(pg)) { showPage("recs"); return; }
         if ("inbox".equals(pg)) { if (isLoggedIn()) { prefs().edit().putString("stats_tab", "plan").apply(); openLoginOnlySection("stats", L.t("STATYSTYKI")); } return; }
@@ -718,6 +719,24 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private boolean diaryMonologue = false;
+    private String callRecLabel = null; // != null: opisujemy nagrana rozmowe telefoniczna
+
+    // NAGRANA ROZMOWA (CallRecService) -> wczytanie do DAW i ekran opisu z kategoria "Phone do Kursanta/Trenera"
+    private void handlePendingCallRec() {
+        String v = prefs().getString("callrec_pending", null);
+        if (v == null || isRecording || saving || callRecLabel != null) return;
+        prefs().edit().remove("callrec_pending").apply();
+        String[] pr = v.split("\n", 2);
+        File f = new File(pr[0]);
+        if (!f.exists()) return;
+        android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(4802);
+        showPage("daw");
+        lastSavedFilePath = f.getAbsolutePath();
+        loadAndDisplayFile(f);
+        callRecLabel = pr.length > 1 ? pr[1] : "";
+        describeNewRecording(f);
+    }
 
     // Odtwarzanie nagrania z serwera (odpowiedz glosowa trenera) — przycisk ▶ / ■
     private void playRemoteAudio(String url, android.widget.Button btn) {
@@ -1115,6 +1134,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             init.note = "📔 " + L.t("Podsumowanie dnia");
             banner = "🎙️ " + L.t("Monolog — podsumowanie dnia (do dziennika)");
         }
+        if (fix == null && callRecLabel != null) {
+            init.cat = ContactList.CATEGORY;
+            init.note = callRecLabel.isEmpty() ? "" : "📞 " + callRecLabel;
+            banner = "📞 " + L.t("Nagrana rozmowa telefoniczna") + (callRecLabel.isEmpty() ? " — " + L.t("wybierz, z kim rozmawiałeś") : " — " + callRecLabel);
+        }
+        callRecLabel = null;
         diaryMonologue = false;
         final boolean isFix = fix != null;
         DescribeSheet.show(this, init, true, isFix ? L.t("ZAPISZ POPRAWKĘ") : L.t("ZAPISZ NAGRANIE"), banner, meta -> {
@@ -1625,6 +1650,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         android.widget.Button updBtn = Ui.button(this, L.t("Sprawdź teraz"), R.color.pr_accent, false);
         updBtn.setOnClickListener(v -> { Toast.makeText(this, L.t("Sprawdzanie…"), Toast.LENGTH_SHORT).show(); UpdateChecker.check(this, true); });
         upd.addView(updBtn);
+        android.widget.LinearLayout crs = section(c, "callrec", "📞  " + L.t("NAGRYWANIE ROZMÓW") + "  ·  " + (CallRecService.enabled(this) ? L.t("WŁ") : L.t("WYŁ")));
+        CallRecUi.fillSettings(this, crs, this::renderSettingsPage);
         android.widget.LinearLayout lang = section(c, "lang", "🌐  " + L.t("JĘZYK") + "  ·  " + currentLangName());
         String cur = getSavedLanguage(this);
         String[][] langs = {{"pl", "🇵🇱 Polski"}, {"en", "🇬🇧 English"}, {"cs", "🇨🇿 Čeština"}, {"sk", "🇸🇰 Slovenčina"}, {"de", "🇩🇪 Deutsch"}, {"es", "🇪🇸 Español"}, {"hu", "🇭🇺 Magyar"}};
@@ -3103,6 +3130,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     protected void onResume() {
         super.onResume();
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
+        // nagrana rozmowa telefoniczna czeka na opis
+        new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);
         // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
         if ("recs".equals(currentPage) && isLoggedIn())
             NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));

@@ -471,7 +471,7 @@ public class StatsPage {
                 row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
                 if (!past && !dd.phone.isEmpty()) {
                     android.widget.Button call = Ui.button(a, "☎", R.color.pr_accent, true);
-                    call.setOnClickListener(v -> ContactList.dial(a, dd.phone));
+                    call.setOnClickListener(v -> CallRecUi.dial(a, dd.phone, dd.trainer));
                     row.addView(call, new LinearLayout.LayoutParams((int) (56 * d), LinearLayout.LayoutParams.WRAP_CONTENT));
                 }
                 card.addView(row);
@@ -526,15 +526,18 @@ public class StatsPage {
                     if (!cm.note.isEmpty()) { TextView nt = Ui.text(a, cm.note, 11f, R.color.pr_text); nt.setTextColor(0xFFB0B8C4); tb.addView(nt); }
                     row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
                     android.widget.Button call = Ui.button(a, "☎", R.color.pr_accent, true);
-                    call.setOnClickListener(v -> ContactList.dial(a, cm.phone));
+                    call.setOnClickListener(v -> CallRecUi.dial(a, cm.phone, sn));
                     row.addView(call, new LinearLayout.LayoutParams((int) (60 * d), LinearLayout.LayoutParams.WRAP_CONTENT));
                     LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                     rlp.bottomMargin = (int) (6 * d);
                     card.addView(row, rlp);
                 }
             }
-            card.addView(Ui.text(a, L.t("Po rozmowie nagraj ją w kategorii „Phone do Kursanta/Trenera” i wybierz osobę — licznik sam się uzupełni."), 11f, R.color.pr_muted));
+            card.addView(Ui.text(a, CallRecService.enabled(a) && CallRecService.autoOn(a)
+                    ? L.t("Dzwoń przyciskiem ☎ — rozmowa nagra się sama, a po rozłączeniu zapiszesz ją z wybraną osobą.")
+                    : L.t("Po rozmowie nagraj ją w kategorii „Phone do Kursanta/Trenera” i wybierz osobę — licznik sam się uzupełni."), 11f, R.color.pr_muted));
         }
+        CallRecUi.addArmRow(a, card, () -> fillCalls(card));
     }
 
     private void loadHarmonogram(LinearLayout card) {
