@@ -261,6 +261,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         resetButton.setOnClickListener(v -> resetRecording());
 
         setupBottomNav();
+        setupBadges();
         redrawHandler.postDelayed(buttonGuard, 400);
         setupGoalLine();
         applySliderVisibility();
@@ -431,6 +432,59 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!logged && ("fix".equals(currentPage) || "diary".equals(currentPage) || "stats".equals(currentPage))) showPage("daw");
     }
 
+    // ── KROPKI NA DOLNYM MENU: nieprzeczytane od trenera (Nagrania, Dziennik, Plan) i liczba poprawek (Korekta) ──
+    private final java.util.Map<Integer, BadgeDrawable> badges = new java.util.HashMap<>();
+
+    private void setupBadges() {
+        float d = getResources().getDisplayMetrics().density;
+        for (int id : new int[]{R.id.navRecsIcon, R.id.navFixIcon, R.id.navDiaryIcon, R.id.navStatsIcon}) {
+            android.widget.ImageView ic = findViewById(id);
+            if (ic == null) continue;
+            BadgeDrawable b = new BadgeDrawable(d);
+            badges.put(id, b);
+            ic.addOnLayoutChangeListener((v, l, t, r, bo, ol, ot, or, ob) -> b.setBounds(0, 0, r - l, bo - t));
+            ic.getOverlay().add(b);
+        }
+        TrainerInbox.listener = this::updateBadges;
+        updateBadges();
+    }
+
+    private int fixCount() {
+        if (fixListCache != null) return fixListCache.size();
+        return NsStatus.count("bad");
+    }
+
+    void updateBadges() {
+        boolean logged = isLoggedIn();
+        BadgeDrawable b;
+        if ((b = badges.get(R.id.navRecsIcon)) != null) b.setCount(logged ? TrainerInbox.unread(this, TrainerInbox.T_OK, TrainerInbox.T_BAD, TrainerInbox.T_VOICE) : 0);
+        if ((b = badges.get(R.id.navFixIcon)) != null) b.setCount(logged ? fixCount() : 0);
+        if ((b = badges.get(R.id.navDiaryIcon)) != null) b.setCount(logged ? TrainerInbox.unread(this, TrainerInbox.T_DIARY) : 0);
+        if ((b = badges.get(R.id.navStatsIcon)) != null) b.setCount(logged ? TrainerInbox.unread(this, TrainerInbox.T_CALLS, TrainerInbox.T_LIST) : 0);
+    }
+
+    // Otwarcie pozycji z listy "Od trenera" — prosto w konkretne miejsce
+    void openInboxItem(TrainerInbox.Ev e) {
+        if (TrainerInbox.T_DIARY.equals(e.type)) { TrainerInbox.markRead(this, null, e.date, TrainerInbox.T_DIARY); openLoginOnlySection("diary", L.t("DZIENNIK")); return; }
+        if (TrainerInbox.T_CALLS.equals(e.type) || TrainerInbox.T_LIST.equals(e.type)) { TrainerInbox.markRead(this, null, null, e.type); return; }
+        if (!e.rec.isEmpty()) openRating(e.rec);
+    }
+
+    // Ocena konkretnego nagrania (z powiadomienia / z listy "Od trenera")
+    private void openRating(String rec) {
+        if (rec == null || rec.isEmpty()) return;
+        showPage("recs");
+        File local = null;
+        File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files != null) for (File f : files) {
+            RecMeta m = RecMeta.load(this, f.getName());
+            if (rec.equals(m.nsRecordId) || rec.equals(m.fixRecordId)) { local = f; break; }
+        }
+        final File lf = local;
+        NsStatus.refresh(this, null);
+        new Handler(Looper.getMainLooper()).postDelayed(() -> showTrainerRating(rec, "bad".equals(NsStatus.get(rec)), lf), 250);
+    }
+
     // ── DOLNE MENU I STRONY (jak showPage w PitchRec) ──
     private void setupBottomNav() {
         findViewById(R.id.navDaw).setOnClickListener(v -> showPage("daw"));
@@ -467,8 +521,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String pg = in.getStringExtra("open_page");
         if (pg == null) return;
         in.removeExtra("open_page");
+        String oRec = in.getStringExtra("open_rec");
+        in.removeExtra("open_rec");
+        if ("rate".equals(pg)) { if (isLoggedIn() && oRec != null) openRating(oRec); else showPage("recs"); return; }
+        if ("recs".equals(pg)) { showPage("recs"); return; }
+        if ("inbox".equals(pg)) { if (isLoggedIn()) { prefs().edit().putString("stats_tab", "plan").apply(); openLoginOnlySection("stats", L.t("STATYSTYKI")); } return; }
         if ("map".equals(pg)) { showPage("daw"); if (isLoggedIn()) openMap(); return; }
-        if (("diary".equals(pg) || "fix".equals(pg) || "stats".equals(pg)) && isLoggedIn()) showPage(pg); else showPage("daw");
+        if ("diary".equals(pg) && isLoggedIn()) { openLoginOnlySection("diary", L.t("DZIENNIK")); return; }
+        if ("fix".equals(pg) && isLoggedIn()) { openLoginOnlySection("fix", L.t("KOREKTA")); return; }
+        if ("stats".equals(pg) && isLoggedIn()) { prefs().edit().putString("stats_tab", "plan").apply(); openLoginOnlySection("stats", L.t("STATYSTYKI")); return; }
+        showPage("daw");
     }
 
     private void askNotificationPermissionOnce() {
@@ -496,7 +558,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             TextView lb = findViewById(labels[i]);
             if (lb != null) lb.setTextColor(c);
         }
-        if ("recs".equals(page)) renderRecsPage();
+        if ("recs".equals(page)) { renderRecsPage(); TrainerInbox.markRead(this, null, null, TrainerInbox.T_OK, TrainerInbox.T_BAD); }
+        updateBadges();
         if ("set".equals(page)) renderSettingsPage();
         if ("daw".equals(page)) refreshGoal();
     }
@@ -617,6 +680,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     public String token() { return nsToken(); }
                     public String email() { return nsEmail(); }
                     public boolean isCurrent() { return "stats".equals(currentPage); }
+                    public void openInbox(TrainerInbox.Ev e) { openInboxItem(e); }
                 }).render();
             } else if ("ok".equals(state)) {
                 msg.setText(L.t("Jesteś zalogowany ✓\n\nSekcja ") + title + L.t(" jest w przygotowaniu i pojawi się w kolejnej wersji aplikacji."));
@@ -755,7 +819,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void doLogout() {
-        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").putBoolean("ns_session_expired", false).apply();
+        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").putBoolean("ns_session_expired", false).apply();
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
         updateNavForLogin();
@@ -1908,7 +1972,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 c.addView(er, 1);
                 return;
             }
-            fixListCache = list;
+            fixListCache = list; updateBadges();
             fixListCacheAt = System.currentTimeMillis();
             fillFixList(c, list);
             TextView upd = Ui.text(this, L.t("Zaktualizowano ") + new java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new java.util.Date()) + L.t(" · odświeża się co minutę"), 10f, R.color.pr_muted);
@@ -2019,8 +2083,34 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             vrBox.setOrientation(android.widget.LinearLayout.VERTICAL);
             card.addView(vrBox);
             checkVoiceReview(fe.id, vrBox, d);
+            // ▶ ORYGINAL — porownaj z uwagami trenera (plik z telefonu, a gdy go nie ma — z NS)
+            File orig = null, sentFix = null;
+            File[] allF = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+            if (allF != null) for (File f : allF) {
+                RecMeta m = RecMeta.load(this, f.getName());
+                if (fe.id.equals(m.nsRecordId) && m.fixRecordId.isEmpty() && orig == null) orig = f;
+                if (fe.id.equals(m.fixRecordId) && "sent".equals(m.ns) && f.lastModified() > fe.reviewedAt * 1000L
+                        && (sentFix == null || f.lastModified() > sentFix.lastModified())) sentFix = f;
+            }
+            final String origUrl = orig != null ? orig.getAbsolutePath()
+                    : BACKEND + "/ns-record-audio?record_id=" + NsClient.enc(fe.id) + "&ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail()) + "&ns_server=new";
+            Button po = Ui.button(this, "▶ " + L.t("Posłuchaj oryginału"), R.color.pr_purple, false);
+            po.setOnClickListener(v -> playRemoteAudio(origUrl, po));
+            android.widget.LinearLayout.LayoutParams pol = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            pol.topMargin = (int) (8 * d);
+            card.addView(po, pol);
+            // Rozumiem / Mam pytanie do trenera
+            StudentAck.addButtons(this, card, "record", fe.id);
+            // POPRAWKA JUZ WYSLANA — czeka na ponowna ocene
+            if (sentFix != null) {
+                TextView pend = Ui.text(this, "⏳ " + L.f("Poprawka wysłana {0} — czeka na ponowną ocenę trenera", new java.text.SimpleDateFormat("d.MM, HH:mm", Locale.getDefault()).format(new java.util.Date(sentFix.lastModified()))), 13f, R.color.pr_pause);
+                pend.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                pend.setPadding(0, (int) (10 * d), 0, 0);
+                card.addView(pend);
+                card.setBackground(Ui.rounded(getResources().getColor(R.color.pr_card), getResources().getColor(R.color.pr_pause), d, 14 * d));
+            }
             card.addView(Ui.spacer(this, 10));
-            Button rec = Ui.button(this, L.t("🎤 Nagraj poprawkę"), R.color.pr_accent, true);
+            Button rec = Ui.button(this, sentFix != null ? L.t("🎤 Nagraj jeszcze raz") : L.t("🎤 Nagraj poprawkę"), sentFix != null ? R.color.pr_muted : R.color.pr_accent, true);
             rec.setOnClickListener(v -> startFixRecording(fe.id, fe.categoryName));
             card.addView(rec, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
             c.addView(card);
@@ -3022,6 +3112,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     protected void onResume() {
         super.onResume();
+        if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
         if ("recs".equals(currentPage) && isLoggedIn())
             NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
@@ -3283,6 +3374,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             voiceBox.setOrientation(android.widget.LinearLayout.VERTICAL);
             box.addView(voiceBox);
             checkVoiceReview(recordId, voiceBox, d);
+            // odpowiedz kursanta: Rozumiem / Mam pytanie (tylko gdy jest ocena)
+            if (reviewed) StudentAck.addButtons(this, box, "record", recordId);
+            TrainerInbox.markRead(this, recordId, null);
         }
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
         sv.addView(box);
@@ -3321,6 +3415,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 holder.addView(lb);
                 Button play = Ui.button(this, "▶ " + L.t("Posłuchaj"), R.color.pr_accent, true);
                 play.setOnClickListener(v -> {
+                    StudentAck.listened(this, "record", recordId);
+                    TrainerInbox.markRead(this, recordId, null, TrainerInbox.T_VOICE);
                     if (voicePlayer != null) { stopVoiceReview(); play.setText("▶ " + L.t("Posłuchaj")); return; }
                     String url = BACKEND + "/voice-review/audio?record_id=" + NsClient.enc(recordId) + "&ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail());
                     try {

@@ -77,7 +77,7 @@ public final class CallDays {
 
     private static void notifyIfNeeded(Context c) {
         SharedPreferences p = prefs(c);
-        if (!p.getBoolean("call_days_notif", true)) return;
+        boolean notifOn = p.getBoolean("call_days_notif", true);
         List<Day> ds = days(c);
         String today = today();
         Set<String> seen = new HashSet<>(p.getStringSet("call_days_seen", new HashSet<>()));
@@ -87,10 +87,13 @@ public final class CallDays {
         for (Day d : ds) {
             keep.add(d.id);
             if (!seen.contains(d.id) && d.day.compareTo(today) >= 0) fresh.add(d.label());
+            TrainerInbox.add(c, "calls:" + d.id, TrainerInbox.T_CALLS, "📅 " + L.t("Zadzwoń do trenera:") + " " + d.label(),
+                    (d.trainer.isEmpty() ? "" : d.trainer) + (d.note.isEmpty() ? "" : (d.trainer.isEmpty() ? "" : " · ") + d.note), "", d.day,
+                    System.currentTimeMillis(), first || d.day.compareTo(today) < 0);
         }
         int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         boolean night = hour >= 22 || hour < 7;
-        if (!fresh.isEmpty() && !night) {
+        if (!fresh.isEmpty() && !night && notifOn) {
             notify(c, 4101, "📞 " + L.t("Trener wyznaczył dni telefonu"), android.text.TextUtils.join(", ", fresh) + "\n" + L.t("Zobaczysz je w Statystykach — Harmonogram."), null);
             seen.addAll(keep);
         } else if (first) seen.addAll(keep);
@@ -101,7 +104,7 @@ public final class CallDays {
         int nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
         Set<String> done = new HashSet<>(p.getStringSet("call_days_done", new HashSet<>()));
         for (Day d : ds) {
-            if (!today.equals(d.day) || done.contains(d.id)) continue;
+            if (!notifOn || !today.equals(d.day) || done.contains(d.id)) continue;
             int at = 9 * 60;
             if (d.time.matches("\\d{1,2}:\\d{2}")) { String[] t = d.time.split(":"); at = Math.max(7 * 60, Integer.parseInt(t[0]) * 60 + Integer.parseInt(t[1]) - 60); }
             if (nowMin < at || nowMin >= 22 * 60) continue;

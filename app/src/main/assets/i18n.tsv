@@ -679,3 +679,28 @@ ODPOWIEDZI TRENERA	TRAINER REPLIES	ODPOVĚDI TRENÉRA	ODPOVEDE TRÉNERA	ANTWORTE
 Posłuchaj odpowiedzi głosowej	Listen to the voice reply	Poslechni si hlasovou odpověď	Vypočuj si hlasovú odpoveď	Sprachantwort anhören	Escucha la respuesta de voz	Hangüzenet meghallgatása
 Podsumowanie dnia	Day summary	Shrnutí dne	Zhrnutie dňa	Tagesrückblick	Resumen del día	A nap összefoglalója
 Monolog — podsumowanie dnia (do dziennika)	Monologue — day summary (for the diary)	Monolog — shrnutí dne (do deníku)	Monológ — zhrnutie dňa (do denníka)	Monolog — Tagesrückblick (fürs Tagebuch)	Monólogo — resumen del día (para el diario)	Monológ — a nap összefoglalója (a naplóba)
+PLAN	PLAN	PLÁN	PLÁN	PLAN	PLAN	TERV
+OD TRENERA	FROM YOUR TRAINER	OD TRENÉRA	OD TRÉNERA	VOM TRAINER	DE TU ENTRENADOR	AZ EDZŐTŐL
+Tu pojawią się oceny, komentarze głosowe, odpowiedzi na dziennik i terminy telefonów od trenera.	Ratings, voice comments, diary replies and call dates from your trainer will appear here.	Zde se objeví hodnocení, hlasové komentáře, odpovědi na deník a termíny telefonátů od trenéra.	Tu sa objavia hodnotenia, hlasové komentáre, odpovede na denník a termíny telefonátov od trénera.	Hier erscheinen Bewertungen, Sprachkommentare, Tagebuch-Antworten und Anruftermine deines Trainers.	Aquí aparecerán valoraciones, comentarios de voz, respuestas al diario y fechas de llamada de tu entrenador.	Itt jelennek meg az edző értékelései, hangos megjegyzései, naplóválaszai és hívásidőpontjai.
+▴ Pokaż mniej	▴ Show less	▴ Zobrazit méně	▴ Zobraziť menej	▴ Weniger anzeigen	▴ Mostrar menos	▴ Kevesebb
+▾ Pokaż wszystkie ({0})	▾ Show all ({0})	▾ Zobrazit vše ({0})	▾ Zobraziť všetky ({0})	▾ Alle anzeigen ({0})	▾ Mostrar todo ({0})	▾ Összes ({0})
+Zaliczone przez trenera	Passed by the trainer	Splněno trenérem	Splnené trénerom	Vom Trainer bestanden	Aprobado por el entrenador	Az edző elfogadta
+Komentarz głosowy trenera	Trainer voice comment	Hlasový komentář trenéra	Hlasový komentár trénera	Sprachkommentar des Trainers	Comentario de voz del entrenador	Az edző hangos megjegyzése
+Do Twojego nagrania — dotknij, aby posłuchać	On your recording — tap to listen	K tvé nahrávce — klepni a poslechni si	K tvojej nahrávke — ťukni a vypočuj si	Zu deiner Aufnahme — tippe zum Anhören	Sobre tu grabación — toca para escuchar	A felvételedhez — koppints a meghallgatáshoz
+Trener nagrał komentarz głosowy	Your trainer recorded a voice comment	Trenér nahrál hlasový komentář	Tréner nahral hlasový komentár	Dein Trainer hat einen Sprachkommentar aufgenommen	Tu entrenador grabó un comentario de voz	Az edző hangos megjegyzést rögzített
+Nowe komentarze głosowe: {0}	New voice comments: {0}	Nové hlasové komentáře: {0}	Nové hlasové komentáre: {0}	Neue Sprachkommentare: {0}	Nuevos comentarios de voz: {0}	Új hangos megjegyzések: {0}
+Lista kursantów do dzwonienia	List of students to call	Seznam kurzistů k volání	Zoznam kurzistov na volanie	Liste der Teilnehmer zum Anrufen	Lista de alumnos para llamar	Felhívandó tanulók listája
+{0} osób	{0} people	{0} osob	{0} osôb	{0} Personen	{0} personas	{0} fő
+Posłuchaj oryginału	Listen to the original	Poslechni si originál	Vypočuj si originál	Original anhören	Escucha el original	Eredeti meghallgatása
+Poprawka wysłana {0} — czeka na ponowną ocenę trenera	Correction sent {0} — waiting for the trainer to review again	Oprava odeslána {0} — čeká na nové hodnocení trenéra	Oprava odoslaná {0} — čaká na nové hodnotenie trénera	Korrektur gesendet {0} — wartet auf erneute Bewertung	Corrección enviada {0} — esperando nueva valoración	Javítás elküldve {0} — újraértékelésre vár
+🎤 Nagraj jeszcze raz	🎤 Record again	🎤 Nahrát znovu	🎤 Nahrať znova	🎤 Noch einmal aufnehmen	🎤 Grabar otra vez	🎤 Felvétel újra
+Wysłano trenerowi: Rozumiem	Sent to the trainer: Got it	Odesláno trenérovi: Rozumím	Odoslané trénerovi: Rozumiem	An den Trainer gesendet: Verstanden	Enviado al entrenador: Entendido	Elküldve az edzőnek: Értem
+Twoje pytanie trafiło do trenera	Your question was sent to the trainer	Tvoje otázka byla odeslána trenérovi	Tvoja otázka bola odoslaná trénerovi	Deine Frage wurde an den Trainer gesendet	Tu pregunta se envió al entrenador	A kérdésed eljutott az edzőhöz
+Rozumiem	Got it	Rozumím	Rozumiem	Verstanden	Entendido	Értem
+Kolejne pytanie	Another question	Další otázka	Ďalšia otázka	Weitere Frage	Otra pregunta	Újabb kérdés
+Mam pytanie	I have a question	Mám otázku	Mám otázku	Ich habe eine Frage	Tengo una pregunta	Kérdésem van
+Napisz pytanie do trenera…	Write your question to the trainer…	Napiš otázku trenérovi…	Napíš otázku trénerovi…	Schreib deine Frage an den Trainer…	Escribe tu pregunta al entrenador…	Írd meg a kérdésed az edzőnek…
+Pytanie do trenera	Question to the trainer	Otázka pro trenéra	Otázka pre trénera	Frage an den Trainer	Pregunta al entrenador	Kérdés az edzőnek
+Anuluj	Cancel	Zrušit	Zrušiť	Abbrechen	Cancelar	Mégse
+Wysłano do trenera ✓	Sent to the trainer ✓	Odesláno trenérovi ✓	Odoslané trénerovi ✓	An den Trainer gesendet ✓	Enviado al entrenador ✓	Elküldve az edzőnek ✓
+Nie udało się wysłać — sprawdź internet.	Couldn't send — check your internet.	Nepodařilo se odeslat — zkontroluj internet.	Nepodarilo sa odoslať — skontroluj internet.	Senden fehlgeschlagen — prüfe das Internet.	No se pudo enviar — revisa internet.	Nem sikerült elküldeni — ellenőrizd az internetet.

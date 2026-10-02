@@ -119,6 +119,14 @@ public final class ContactList {
                     if (o.optBoolean("ok", false)) {
                         JSONObject l = o.optJSONObject("list");
                         p.edit().putString("contact_list_json", l == null ? "" : l.toString()).putLong("contact_list_at", System.currentTimeMillis()).apply();
+                        if (l != null) {
+                            JSONArray mm = l.optJSONArray("members");
+                            int n = mm == null ? 0 : mm.length();
+                            boolean firstList = !p.getBoolean("contact_list_seen_init", false);
+                            TrainerInbox.add(c, "list:" + l.optString("id", "") + ":" + n, TrainerInbox.T_LIST, "👥 " + L.t("Lista kursantów do dzwonienia"),
+                                    l.optString("name", "") + " · " + L.f("{0} osób", n), "", "", System.currentTimeMillis(), firstList);
+                            p.edit().putBoolean("contact_list_seen_init", true).apply();
+                        }
                         lastFailed = false;
                     }
                 }

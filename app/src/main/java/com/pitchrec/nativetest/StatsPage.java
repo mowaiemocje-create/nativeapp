@@ -30,7 +30,7 @@ import java.util.Set;
 //  • 🏆 pelna lista osiagniec (40 odznak)
 public class StatsPage {
 
-    public interface Host { String token(); String email(); boolean isCurrent(); }
+    public interface Host { String token(); String email(); boolean isCurrent(); default void openInbox(TrainerInbox.Ev e) { } }
 
     private final Activity a;
     private final LinearLayout root;
@@ -63,24 +63,55 @@ public class StatsPage {
             if (dayKey(r.time).equals(todayKey)) todayCount++;
         }
 
-        LinearLayout harm = Ui.card(a);
-        root.addView(harm);
-        loadHarmonogram(harm);
-        LinearLayout calls = Ui.card(a);
-        calls.setVisibility(View.GONE);
-        root.addView(calls);
-        fillCalls(calls);
-        CallDays.refresh(a, () -> { if (host.isCurrent()) fillCalls(calls); });
-        ContactList.refresh(a, false, () -> { if (host.isCurrent()) fillCalls(calls); });
-        LinearLayout where = Ui.card(a);
-        where.setVisibility(View.GONE);
-        root.addView(where);
-        loadWhereToTrain(where);
+        // ZAKLADKI: 📅 PLAN (od trenera, harmonogram, telefony, zadania) | 📊 STATYSTYKI (liczby, osiagniecia)
+        android.content.SharedPreferences sp = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+        final boolean plan = !"stats".equals(sp.getString("stats_tab", "plan"));
+        LinearLayout tabs = Ui.row(a);
+        int unreadPlan = TrainerInbox.unread(a, TrainerInbox.T_CALLS, TrainerInbox.T_LIST);
+        String[][] tdef = {{"plan", "📅 " + L.t("PLAN") + (unreadPlan > 0 ? "  •" + unreadPlan : "")}, {"stats", "📊 " + L.t("STATYSTYKI")}};
+        for (String[] td : tdef) {
+            boolean on = td[0].equals(plan ? "plan" : "stats");
+            TextView tb = Ui.text(a, td[1], 13f, on ? R.color.pr_bg : R.color.pr_text);
+            tb.setTypeface(Typeface.DEFAULT_BOLD);
+            tb.setGravity(Gravity.CENTER);
+            tb.setPadding(0, (int) (10 * d), 0, (int) (10 * d));
+            int ac = Ui.col(a, R.color.pr_accent);
+            tb.setBackground(Ui.rounded(on ? ac : 0x00000000, ac, d, 10 * d));
+            tb.setOnClickListener(v -> { sp.edit().putString("stats_tab", td[0]).apply(); render(); });
+            tabs.addView(tb, Ui.weight(1f, 6 * d));
+        }
+        root.addView(tabs);
+        root.addView(Ui.spacer(a, 10));
+
+        if (plan) {
+            LinearLayout inbox = Ui.card(a);
+            root.addView(inbox);
+            fillInbox(inbox);
+            LinearLayout harm = Ui.card(a);
+            root.addView(harm);
+            loadHarmonogram(harm);
+            LinearLayout calls = Ui.card(a);
+            calls.setVisibility(View.GONE);
+            root.addView(calls);
+            fillCalls(calls);
+            CallDays.refresh(a, () -> { if (host.isCurrent()) fillCalls(calls); });
+            ContactList.refresh(a, false, () -> { if (host.isCurrent()) fillCalls(calls); });
+            LinearLayout where = Ui.card(a);
+            where.setVisibility(View.GONE);
+            root.addView(where);
+            loadWhereToTrain(where);
+            LinearLayout special = Ui.card(a);
+            root.addView(special);
+            fillSpecial(special);
+            root.addView(Ui.spacer(a, 20));
+            TrainerInbox.markRead(a, null, null, TrainerInbox.T_CALLS, TrainerInbox.T_LIST);
+            return;
+        }
         LinearLayout improve = Ui.card(a);
         improve.setVisibility(View.GONE);
         root.addView(improve);
         loadImprove(improve);
-        if (a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getBoolean("show_insp", true)) {
+        if (sp.getBoolean("show_insp", true)) {
             LinearLayout insp = Ui.card(a);
             root.addView(insp);
             buildInspirations(insp);
@@ -92,9 +123,6 @@ public class StatsPage {
         root.addView(review);
         LinearLayout cats = Ui.card(a);
         root.addView(cats);
-        LinearLayout special = Ui.card(a);
-        root.addView(special);
-        fillSpecial(special);
         LinearLayout miles = Ui.card(a);
         root.addView(miles);
         root.addView(Ui.spacer(a, 20));
@@ -331,6 +359,47 @@ public class StatsPage {
     }
 
     // ═════════════ HARMONOGRAM ═════════════
+    // ═════════════ OD TRENERA: wszystko, co przyszlo od trenera, najnowsze na gorze ═════════════
+    private boolean inboxAll = false;
+
+    private void fillInbox(LinearLayout card) {
+        card.removeAllViews();
+        card.addView(Ui.label(a, "📬 " + L.t("OD TRENERA")));
+        List<TrainerInbox.Ev> all = TrainerInbox.all(a);
+        if (all.isEmpty()) {
+            card.addView(Ui.text(a, L.t("Tu pojawią się oceny, komentarze głosowe, odpowiedzi na dziennik i terminy telefonów od trenera."), 12f, R.color.pr_muted));
+            return;
+        }
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM HH:mm", java.util.Locale.getDefault());
+        int max = inboxAll ? all.size() : Math.min(6, all.size());
+        for (int i = 0; i < max; i++) {
+            TrainerInbox.Ev e = all.get(i);
+            LinearLayout row = Ui.row(a);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding((int) (6 * d), (int) (8 * d), (int) (6 * d), (int) (8 * d));
+            if (!e.read) row.setBackground(Ui.rounded(0x14E53935, 0, 0, 8 * d));
+            LinearLayout tb = new LinearLayout(a);
+            tb.setOrientation(LinearLayout.VERTICAL);
+            TextView t = Ui.text(a, (e.read ? "" : "● ") + e.title, 13f, R.color.pr_text);
+            if (!e.read) { t.setTypeface(Typeface.DEFAULT_BOLD); }
+            tb.addView(t);
+            String sub = e.sub + (e.sub.isEmpty() ? "" : "  ·  ") + df.format(new java.util.Date(e.ts));
+            tb.addView(Ui.text(a, sub, 11f, R.color.pr_muted));
+            row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            boolean go = !e.rec.isEmpty() || TrainerInbox.T_DIARY.equals(e.type);
+            if (go) row.addView(Ui.text(a, "›", 20f, R.color.pr_muted));
+            row.setOnClickListener(v -> { host.openInbox(e); if (host.isCurrent()) fillInbox(card); });
+            card.addView(row);
+        }
+        if (all.size() > 6) {
+            TextView more = Ui.text(a, inboxAll ? L.t("▴ Pokaż mniej") : L.f("▾ Pokaż wszystkie ({0})", all.size()), 12f, R.color.pr_accent);
+            more.setTypeface(Typeface.DEFAULT_BOLD);
+            more.setPadding(0, (int) (8 * d), 0, 0);
+            more.setOnClickListener(v -> { inboxAll = !inboxAll; fillInbox(card); });
+            card.addView(more);
+        }
+    }
+
     // ═════════════ TELEFONY: dni telefonu do trenera + lista kursantów na ten okres ═════════════
     private void fillCalls(LinearLayout card) {
         card.removeAllViews();

@@ -25,6 +25,7 @@ public final class TrainerWatch {
     static final String ACTION = "com.pitchrec.nativetest.TRAINER_CHECK";
     private static final String CHANNEL = "trainer_reviews";
     private static volatile boolean running = false;
+    private static volatile long lastRun = 0L;
 
     private TrainerWatch() { }
 
@@ -50,12 +51,44 @@ public final class TrainerWatch {
     public static void check(Context c, Runnable done) {
         final Context ctx = c.getApplicationContext() != null ? c.getApplicationContext() : c;
         String token = prefs(ctx).getString("ns_token", null);
-        if (!enabled(ctx) || token == null || running) { if (done != null) done.run(); return; }
+        // lista "Od trenera" uzupelnia sie zawsze; powiadomienia tylko gdy wlaczone (patrz notify)
+        if (token == null || running || System.currentTimeMillis() - lastRun < 45000L) { if (done != null) done.run(); return; }
         running = true;
+        lastRun = System.currentTimeMillis();
         String email = prefs(ctx).getString("ns_email", "");
         NsClient.request("GET", "/records?page_size=30&sort_by=date&sort_order=desc", token, email, null, null, r -> {
             try { if (r.ok) checkRecords(ctx, r.body); } catch (Exception e) { }
-            checkDiaryReplies(ctx, token, email, () -> { running = false; if (done != null) done.run(); });
+            checkVoice(ctx, token, email, () ->
+                checkDiaryReplies(ctx, token, email, () -> { running = false; if (done != null) done.run(); }));
+        });
+    }
+
+    private static List<String> lastRecent = new ArrayList<>();
+
+    // Komentarze GLOSOWE trenera do nagran ocenionych w ostatnich 14 dniach — nowe = wpis + powiadomienie
+    private static void checkVoice(Context c, String token, String email, Runnable done) {
+        List<String> ids = lastRecent;
+        if (ids == null || ids.isEmpty()) { done.run(); return; }
+        String q = "/voice-review/check?record_ids=" + NsClient.enc(android.text.TextUtils.join(",", ids)) + "&ns_token=" + NsClient.enc(token) + "&ns_email=" + NsClient.enc(email);
+        NsClient.backend("GET", q, null, r -> {
+            try {
+                if (r.ok) {
+                    JSONArray has = new JSONObject(r.body).optJSONArray("has_review");
+                    SharedPreferences p = prefs(c);
+                    boolean first = !p.getBoolean("voice_seen_init", false);
+                    String newRec = null; int n = 0;
+                    for (int i = 0; has != null && i < has.length(); i++) {
+                        String rid = has.optString(i, "");
+                        if (rid.isEmpty()) continue;
+                        if (TrainerInbox.add(c, "voice:" + rid, TrainerInbox.T_VOICE, "🎧 " + L.t("Komentarz głosowy trenera"),
+                                L.t("Do Twojego nagrania — dotknij, aby posłuchać"), rid, "", System.currentTimeMillis(), first) && !first) { newRec = rid; n++; }
+                    }
+                    p.edit().putBoolean("voice_seen_init", true).apply();
+                    if (n > 0) notify(c, 2104, "🎧 " + L.t("Trener nagrał komentarz głosowy"),
+                            n == 1 ? L.t("Do Twojego nagrania — dotknij, aby posłuchać") : L.f("Nowe komentarze głosowe: {0}", n), n == 1 ? "rate" : "inbox", n == 1 ? newRec : null, null);
+                }
+            } catch (Exception e) { }
+            done.run();
         });
     }
 
@@ -70,25 +103,34 @@ public final class TrainerWatch {
         SharedPreferences p = prefs(c);
         Set<String> seen = new HashSet<>(p.getStringSet("seen_reviews", new HashSet<>()));
         boolean first = !p.getBoolean("seen_reviews_init", false);
-        List<String> ok = new ArrayList<>(), bad = new ArrayList<>();
+        List<String> ok = new ArrayList<>(), bad = new ArrayList<>(), okIds = new ArrayList<>(), badIds = new ArrayList<>();
+        List<String> recent = new ArrayList<>(); // ocenione w ostatnich 14 dniach — sprawdzenie komentarzy glosowych
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.optJSONObject(i);
             if (o == null || o.isNull("reviewed_at") || o.optString("reviewed_at", "").isEmpty() || o.isNull("is_correct")) continue;
             String rev = o.optString("reviewed_at", "");
             String upd = o.optString("record_file_updated_by_author_at", o.optString("updated_by_author_at", ""));
             if (NsStatus.newer(upd, rev)) continue; // plik podmieniony po ocenie — czeka na nowa
-            String key = o.optString("id", "") + "|" + rev;
-            if (seen.contains(key)) continue;
-            seen.add(key);
-            if (first) continue;
+            String rid = o.optString("id", "");
+            long revMs = NsStatus.isoMs(rev);
+            if (revMs > System.currentTimeMillis() - 14 * 86400000L) recent.add(rid);
+            String key = rid + "|" + rev;
             JSONObject cat = o.optJSONObject("record_category");
             String cn = cat != null ? (cat.optString("name_pl", "").isEmpty() ? cat.optString("name", "") : cat.optString("name_pl", "")) : "";
             String d = o.optString("date", "");
             String label = L.cat(cn) + (d.length() >= 10 ? " · " + d.substring(8, 10) + "." + d.substring(5, 7) : "");
-            if (o.optBoolean("is_correct", false)) ok.add(label); else bad.add(label);
+            boolean good = o.optBoolean("is_correct", false);
+            // do listy "Od trenera" (przy pierwszym uruchomieniu jako przeczytane)
+            boolean fresh = TrainerInbox.add(c, "rate:" + key, good ? TrainerInbox.T_OK : TrainerInbox.T_BAD,
+                    good ? "✅ " + L.t("Zaliczone przez trenera") : "↺ " + L.t("Do poprawy"), label, rid, "", revMs, first);
+            if (seen.contains(key)) continue;
+            seen.add(key);
+            if (first || !fresh) continue;
+            if (good) { ok.add(label); okIds.add(rid); } else { bad.add(label); badIds.add(rid); }
         }
         if (seen.size() > 400) { List<String> l = new ArrayList<>(seen); seen = new HashSet<>(l.subList(l.size() - 300, l.size())); }
         p.edit().putStringSet("seen_reviews", seen).putBoolean("seen_reviews_init", true).apply();
+        lastRecent = recent;
         if (ok.isEmpty() && bad.isEmpty()) return;
         String title, text;
         if (ok.size() + bad.size() == 1) {
@@ -98,7 +140,9 @@ public final class TrainerWatch {
             title = "📋 " + L.f("Trener ocenił {0} nagrań", ok.size() + bad.size());
             text = "✅ " + L.t("zaliczone") + ": " + ok.size() + (bad.isEmpty() ? "" : "  ·  ↺ " + L.t("do poprawy") + ": " + bad.size());
         }
-        notify(c, 2102, title, text, bad.isEmpty() ? "stats" : "fix");
+        // jedno nagranie — powiadomienie otwiera od razu jego ocene; kilka — liste nagran / Korekte
+        String one = ok.size() + bad.size() == 1 ? (okIds.isEmpty() ? badIds.get(0) : okIds.get(0)) : null;
+        notify(c, 2102, title, text, one != null ? "rate" : bad.isEmpty() ? "recs" : "fix", one, null);
     }
 
     // Odpowiedzi trenera na dziennik (tekst lub nagranie) — ostatnie 5 wpisow
@@ -131,6 +175,11 @@ public final class TrainerWatch {
                             if (has && !upd.equals(prev)) {
                                 boolean init = prev == null && !prefs(c).getBoolean("diary_reply_init", false);
                                 prefs(c).edit().putString(k, upd).apply();
+                                String txt = o.isNull("text_reply") ? "" : o.optString("text_reply", "");
+                                TrainerInbox.add(c, "diary:" + d + "|" + upd, TrainerInbox.T_DIARY,
+                                        (o.optBoolean("has_audio", false) ? "🎧 " : "💬 ") + L.t("Trener odpowiedział na Twój dziennik"),
+                                        L.t("Wpis z dnia") + " " + d.substring(8, 10) + "." + d.substring(5, 7) + (txt.isEmpty() ? "" : " — " + (txt.length() > 80 ? txt.substring(0, 80) + "…" : txt)),
+                                        "", d, System.currentTimeMillis(), init);
                                 if (!init) fresh.add(d);
                             }
                         }
@@ -140,7 +189,7 @@ public final class TrainerWatch {
                         if (!fresh.isEmpty()) {
                             String d0 = fresh.get(0);
                             notify(c, 2103, "💬 " + L.t("Trener odpowiedział na Twój dziennik"),
-                                    L.t("Wpis z dnia") + " " + d0.substring(8, 10) + "." + d0.substring(5, 7) + " — " + L.t("dotknij, aby przeczytać"), "diary");
+                                    L.t("Wpis z dnia") + " " + d0.substring(8, 10) + "." + d0.substring(5, 7) + " — " + L.t("dotknij, aby przeczytać"), "diary", null, d0);
                         }
                         done.run();
                     }
@@ -149,7 +198,10 @@ public final class TrainerWatch {
         });
     }
 
-    private static void notify(Context c, int id, String title, String text, String page) {
+    private static void notify(Context c, int id, String title, String text, String page) { notify(c, id, title, text, page, null, null); }
+
+    private static void notify(Context c, int id, String title, String text, String page, String rec, String date) {
+        if (!enabled(c)) return;
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
         NotificationChannel ch = new NotificationChannel(CHANNEL, L.t("Oceny trenera"), NotificationManager.IMPORTANCE_DEFAULT);
@@ -157,6 +209,8 @@ public final class TrainerWatch {
         nm.createNotificationChannel(ch);
         Intent open = new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         open.putExtra("open_page", page);
+        if (rec != null) open.putExtra("open_rec", rec);
+        if (date != null) open.putExtra("open_date", date);
         PendingIntent cp = PendingIntent.getActivity(c, id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(c, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)

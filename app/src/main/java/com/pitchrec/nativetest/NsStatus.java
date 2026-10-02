@@ -76,6 +76,8 @@ public final class NsStatus {
 
     public static synchronized void invalidate() { fetchedAt = 0L; }
 
+    public static synchronized int count(String st) { int n = 0; for (String v : MAP.values()) if (st.equals(v)) n++; return n; }
+
     public static synchronized boolean anyWaiting() { return MAP.containsValue("wait"); }
 
     // Czy plik podmieniony (upd) jest NOWSZY niz ocena (rev)? Porownanie czasow, nie napisow —

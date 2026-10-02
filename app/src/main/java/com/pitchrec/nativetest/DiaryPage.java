@@ -909,14 +909,16 @@ public class DiaryPage {
                             Button play = Ui.button(a, "▶ " + L.t("Posłuchaj odpowiedzi głosowej"), R.color.pr_purple, true);
                             String url = BACKEND + "/diary-reply/audio?student_id=" + NsClient.enc(uid) + "&entry_date=" + dt + "&ns_token=" + NsClient.enc(host.token())
                                     + "&ns_email=" + NsClient.enc(host.email()) + "&ns_server=new";
-                            play.setOnClickListener(v -> host.playUrl(url, play));
+                            play.setOnClickListener(v -> { host.playUrl(url, play); StudentAck.listened(a, "diary", dt); });
                             LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                             pl.topMargin = (int) (8 * d);
                             card.addView(play, pl);
                         }
+                        StudentAck.addButtons(a, card, "diary", dt);
                         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                         cl.bottomMargin = (int) (8 * d);
                         box.addView(card, cl);
+                        TrainerInbox.markRead(a, null, dt, TrainerInbox.T_DIARY);
                     }
                 });
             }
