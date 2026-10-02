@@ -79,6 +79,8 @@ public class SpecialTasks {
         // ZS35–ZS36: dluzsze wystapienia w klasie / szkole
         new Task("Wystąpienie w klasie / szkole 8 min – przemówienie na dowolny temat.", s("FIX"), "🎓", 0xFF15803D),
         new Task("Wystąpienie w klasie / szkole 15 min – wystąpienie / lekcja / prezentacja.", s("K1"), "🎓", 0xFF166534),
+        // ZS37 — dla kazdego systemu
+        new Task("Wystąpienie w grupie 10+ osób – wystąp przed dowolną grupą liczącą minimum 10 osób (np. w pracy, w szkole, w klubie, na spotkaniu).", s(), "👥", 0xFF0891B2),
     };
 
     // Stare nazwy (zapisane w opisach nagran przed zmiana listy) -> numer zadania
