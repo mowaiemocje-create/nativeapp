@@ -70,7 +70,7 @@ public final class UpdateChecker {
                 File[] old = dir.listFiles(); if (old != null) for (File f : old) f.delete();
                 dir.mkdirs();
                 File apk = new File(dir, "apka.apk");
-                download(APK_URL, apk);
+                download(APK_URL + "?t=" + System.currentTimeMillis(), apk);
                 p.edit().putLong("upd_dl_at", System.currentTimeMillis()).apply();
                 android.content.pm.PackageInfo pi = a.getPackageManager().getPackageArchiveInfo(apk.getPath(), 0);
                 if (pi == null || !a.getPackageName().equals(pi.packageName)) throw new Exception("bad apk");
@@ -79,7 +79,8 @@ public final class UpdateChecker {
                 done(p);
                 if (remote <= currentCode(a)) {
                     apk.delete();
-                    if (manual) main.post(() -> Toast.makeText(a, L.t("Masz najnowszą wersję ✓") + " (" + currentName(a) + ")", Toast.LENGTH_LONG).show());
+                    final String srv = (pi.versionName == null ? String.valueOf(remote) : pi.versionName);
+                    if (manual) main.post(() -> Toast.makeText(a, L.t("Masz najnowszą wersję ✓") + "\n" + L.f("Telefon: {0} · serwer: {1}", currentName(a), srv), Toast.LENGTH_LONG).show());
                     return;
                 }
                 final String rName = pi.versionName == null ? String.valueOf(remote) : pi.versionName;
@@ -99,8 +100,11 @@ public final class UpdateChecker {
 
     // "odcisk" pliku na serwerze: ETag albo data modyfikacji + rozmiar
     private static String remoteTag() throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(APK_URL).openConnection();
+        HttpURLConnection c = (HttpURLConnection) new URL(APK_URL + "?t=" + System.currentTimeMillis()).openConnection();
         c.setRequestMethod("HEAD");
+        c.setUseCaches(false);
+        c.setRequestProperty("Cache-Control", "no-cache");
+        c.setRequestProperty("Pragma", "no-cache");
         c.setInstanceFollowRedirects(true);
         c.setConnectTimeout(15000);
         c.setReadTimeout(15000);
@@ -151,6 +155,9 @@ public final class UpdateChecker {
         c.setConnectTimeout(15000);
         c.setReadTimeout(60000);
         c.setRequestProperty("User-Agent", "NewSpeech-App");
+        c.setUseCaches(false);
+        c.setRequestProperty("Cache-Control", "no-cache");
+        c.setRequestProperty("Pragma", "no-cache");
         int code = c.getResponseCode();
         if (code >= 300 && code < 400) { // na wszelki wypadek reczne przekierowanie
             String loc = c.getHeaderField("Location");
