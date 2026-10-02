@@ -64,8 +64,15 @@ public final class CallRecUi {
             info.setOnClickListener(v -> openAppInfo(a));
             box.addView(info);
         }
+        // Samsung i inni wylaczaja usluge, gdy apka ma ograniczenia baterii
         box.addView(Ui.spacer(a, 10));
-        box.addView(step(a, Build.VERSION.SDK_INT >= 33 ? "3" : "2", L.t("Dzwoń przyciskiem ☎ w apce. Jeśli rozmówcę słabo słychać na nagraniu, włącz w czasie rozmowy głośnik.")));
+        box.addView(step(a, Build.VERSION.SDK_INT >= 33 ? "3" : "2", L.t("Żeby telefon sam nie wyłączał nagrywania: bateria apki „Bez ograniczeń”. Na Samsungu też: Ustawienia → Bateria → Limity użycia w tle → „Aplikacje nigdy nieusypiane” → dodaj New Speech.")
+                + (batteryFree(a) ? "  ✅" : "")));
+        Button bat = Ui.button(a, "🔋 " + L.t("Bateria: bez ograniczeń"), batteryFree(a) ? R.color.pr_muted : R.color.pr_accent, !batteryFree(a));
+        bat.setOnClickListener(v -> askBattery(a));
+        box.addView(bat);
+        box.addView(Ui.spacer(a, 10));
+        box.addView(step(a, Build.VERSION.SDK_INT >= 33 ? "4" : "3", L.t("Dzwoń przyciskiem ☎ w apce. Jeśli rozmówcę słabo słychać na nagraniu, włącz w czasie rozmowy głośnik.")));
         android.widget.ScrollView sv = new android.widget.ScrollView(a);
         sv.addView(box);
         new AlertDialog.Builder(a)
@@ -79,6 +86,75 @@ public final class CallRecUi {
         TextView t = Ui.text(a, n + ". " + s, 13f, R.color.pr_text);
         t.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
         return t;
+    }
+
+    static boolean batteryFree(Context c) {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) c.getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
+        } catch (Exception e) { return false; }
+    }
+
+    // Systemowe okienko "Zezwolić na dzialanie w tle bez ograniczen?"; gdy niedostepne — Informacje o aplikacji
+    static void askBattery(Activity a) {
+        if (!batteryFree(a)) {
+            try {
+                a.startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + a.getPackageName())));
+                return;
+            } catch (Exception e) { }
+        }
+        openAppInfo(a);
+    }
+
+    // ── PILNOWANIE: telefon (np. Samsung) potrafi sam wylaczyc usluge ──
+    // Zapamietujemy, ze kursant ja wlaczyl; gdy zniknie — przypominamy (okienko w apce + powiadomienie).
+    static void noteState(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE);
+        if (CallRecService.enabled(c)) p.edit().putBoolean("callrec_wanted", true).putBoolean("callrec_off_notified", false).apply();
+    }
+
+    static boolean lostService(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE);
+        return p.getBoolean("callrec_wanted", false) && !CallRecService.enabled(c);
+    }
+
+    // W tle (alarm co ~15 min): powiadomienie raz na kazde wylaczenie
+    public static void watch(Context c) {
+        noteState(c);
+        if (!lostService(c)) return;
+        android.content.SharedPreferences p = c.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE);
+        if (p.getBoolean("callrec_off_notified", false)) return;
+        p.edit().putBoolean("callrec_off_notified", true).apply();
+        android.app.NotificationManager nm = (android.app.NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        nm.createNotificationChannel(new android.app.NotificationChannel("call_rec", L.t("Nagrywanie rozmów"), android.app.NotificationManager.IMPORTANCE_DEFAULT));
+        Intent i = new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        i.putExtra("open_page", "callrec_setup");
+        String text = L.t("Telefon wyłączył nagrywanie rozmów. Dotknij, żeby włączyć ponownie i ustawić baterię „Bez ograniczeń”.");
+        android.app.Notification n = new android.app.Notification.Builder(c, "call_rec")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("⚠️ " + L.t("Nagrywanie rozmów wyłączone"))
+                .setContentText(text)
+                .setStyle(new android.app.Notification.BigTextStyle().bigText(text))
+                .setContentIntent(android.app.PendingIntent.getActivity(c, 4810, i, android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE))
+                .setAutoCancel(true).build();
+        try { nm.notify(4810, n); } catch (SecurityException e) { }
+    }
+
+    private static long lastAsk = 0L;
+
+    // Przy otwarciu apki: okienko, gdy usluga zniknela (najwyzej co 10 min)
+    public static void checkOnResume(Activity a) {
+        noteState(a);
+        if (!lostService(a) || System.currentTimeMillis() - lastAsk < 10 * 60_000L) return;
+        lastAsk = System.currentTimeMillis();
+        new AlertDialog.Builder(a)
+                .setTitle("⚠️ " + L.t("Nagrywanie rozmów wyłączone"))
+                .setMessage(L.t("Telefon sam wyłączył usługę nagrywania rozmów. Włącz ją ponownie i ustaw baterię apki „Bez ograniczeń” — wtedy przestanie się wyłączać."))
+                .setPositiveButton(L.t("Włącz ponownie"), (d, w) -> setup(a))
+                .setNeutralButton(L.t("Nie używam"), (d, w) -> a.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE).edit().putBoolean("callrec_wanted", false).apply())
+                .setNegativeButton(L.t("Później"), null)
+                .show();
     }
 
     static void openAccessibility(Activity a) {
@@ -123,6 +199,12 @@ public final class CallRecUi {
         st.setTypeface(Typeface.DEFAULT_BOLD);
         if (on) st.setTextColor(0xFF00E676);
         s.addView(st);
+        if (on && !batteryFree(a)) {
+            TextView bw = Ui.text(a, "⚠️ " + L.t("Bateria apki ma ograniczenia — telefon może sam wyłączać nagrywanie. Dotknij, żeby zmienić."), 12f, R.color.pr_warn);
+            bw.setPadding(0, (int) Ui.dp(a, 4), 0, 0);
+            bw.setOnClickListener(v -> askBattery(a));
+            s.addView(bw);
+        }
         Button en = Ui.button(a, on ? L.t("Ustawienia ułatwień dostępu") : "📞 " + L.t("Włącz nagrywanie rozmów"), on ? R.color.pr_muted : R.color.pr_accent, !on);
         en.setOnClickListener(v -> { if (on) openAccessibility(a); else setup(a); });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);

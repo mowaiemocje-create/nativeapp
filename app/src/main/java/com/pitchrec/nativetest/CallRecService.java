@@ -118,6 +118,7 @@ public class CallRecService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         running = this;
+        CallRecUi.noteState(this);
         kick();
     }
 

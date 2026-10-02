@@ -524,6 +524,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String oRec = in.getStringExtra("open_rec");
         in.removeExtra("open_rec");
         if ("callrec".equals(pg)) { handlePendingCallRec(); return; }
+        if ("callrec_setup".equals(pg)) { CallRecUi.setup(this); return; }
         if ("rate".equals(pg)) { if (isLoggedIn() && oRec != null) openRating(oRec); else showPage("recs"); return; }
         if ("recs".equals(pg)) { showPage("recs"); return; }
         if ("inbox".equals(pg)) { if (isLoggedIn()) { prefs().edit().putString("stats_tab", "plan").apply(); openLoginOnlySection("stats", L.t("STATYSTYKI")); } return; }
@@ -3153,6 +3154,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);
+        new Handler(Looper.getMainLooper()).postDelayed(() -> { if (!isFinishing() && prefs().getString("callrec_pending", null) == null) CallRecUi.checkOnResume(this); }, 900);
         // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
         if ("recs".equals(currentPage) && isLoggedIn())
             NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));

@@ -71,9 +71,11 @@ public class ReminderReceiver extends BroadcastReceiver {
             schedule(c);
             TrainerWatch.schedule(c);
             AvailWatch.schedule(c);
+            CallRecUi.watch(c);
             return;
         }
         if (AvailWatch.ACTION.equals(act)) {
+            CallRecUi.watch(c); // usluga nagrywania rozmow wylaczona przez telefon?
             final PendingResult pr = goAsync();
             AvailWatch.check(c, () -> CallDays.check(c, () -> { try { pr.finish(); } catch (Exception e) { } }));
             return;

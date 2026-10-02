@@ -45,7 +45,8 @@ public final class AvailWatch {
         PendingIntent p = pi(c);
         // budzik sluzy tez dniom telefonu do trenera — dziala, gdy wlaczone jest cokolwiek z tych dwoch
         boolean any = enabled(c) || prefs(c).getBoolean("call_days_notif", true);
-        if (!any || prefs(c).getString("ns_token", null) == null) { am.cancel(p); return; }
+        boolean callRec = prefs(c).getBoolean("callrec_wanted", false); // pilnowanie uslugi nagrywania rozmow
+        if (!callRec && (!any || prefs(c).getString("ns_token", null) == null)) { am.cancel(p); return; }
         // co ok. 15 min, bez budzenia telefonu (oszczedza baterie) — system moze to nieco przesunac
         am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis() + 60 * 1000L, 15 * 60 * 1000L, p);
     }
