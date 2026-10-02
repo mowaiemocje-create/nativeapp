@@ -94,6 +94,7 @@ public final class CallRecUi {
 
     // Przycisk "Nagraj następną rozmowę" + stan (do karty telefonow w harmonogramie)
     public static void addArmRow(Activity a, LinearLayout card, Runnable refresh) {
+        if (CallRecService.enabled(a) && CallRecService.allOn(a)) return; // i tak nagrywa kazda rozmowe
         boolean armed = CallRecService.armed(a);
         boolean on = CallRecService.enabled(a);
         Button b = Ui.button(a, armed ? "● " + L.t("Następna rozmowa zostanie nagrana — anuluj") : "🔴 " + L.t("Nagraj następną rozmowę (np. gdy ktoś dzwoni do Ciebie)"),
@@ -127,7 +128,13 @@ public final class CallRecUi {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) Ui.dp(a, 6);
         s.addView(en, lp);
-        if (on) {
+        boolean all = CallRecService.allOn(a);
+        Button allB = Ui.button(a, "📞 " + L.t("Nagrywaj wszystkie rozmowy (też do miasta, rodziny)") + ": " + (all ? L.t("WŁ") : L.t("WYŁ")), all ? R.color.pr_accent : R.color.pr_muted, all);
+        allB.setOnClickListener(v -> { p.edit().putBoolean("callrec_all", !all).apply(); CallRecService.arm(a, "", 0); rerender.run(); });
+        LinearLayout.LayoutParams lpA = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lpA.topMargin = (int) Ui.dp(a, 6);
+        s.addView(allB, lpA);
+        if (on && !all) {
             boolean armed = CallRecService.armed(a);
             Button nx = Ui.button(a, armed ? "● " + L.t("Następna rozmowa zostanie nagrana — anuluj") : "🔴 " + L.t("Nagraj następną rozmowę (np. gdy ktoś dzwoni do Ciebie)"), armed ? R.color.pr_accent : R.color.pr_muted, armed);
             nx.setOnClickListener(v -> { if (CallRecService.armed(a)) CallRecService.disarm(a); else armNext(a); rerender.run(); });
@@ -157,6 +164,22 @@ public final class CallRecUi {
             b.setOnClickListener(v -> { p.edit().putString("callrec_src", code).apply(); rerender.run(); });
             row.addView(b, Ui.weight(1f, i % 2 == 0 ? Ui.dp(a, 6) : 0));
         }
+        // Glosnosc nagrania rozmowy
+        TextView bh = Ui.text(a, L.t("Głośność nagrania — zawsze do 0 dB; Auto/Mocno dodatkowo wyrównuje mnie i rozmówcę:"), 12f, R.color.pr_muted);
+        bh.setPadding(0, (int) Ui.dp(a, 10), 0, (int) Ui.dp(a, 4));
+        s.addView(bh);
+        String bc = p.getString("callrec_boost", "auto");
+        String[][] bo = {{"auto", L.t("Auto")}, {"strong", L.t("Mocno")}, {"off", L.t("Tylko 0 dB")}};
+        LinearLayout br = Ui.row(a);
+        s.addView(br);
+        for (int i = 0; i < bo.length; i++) {
+            String code = bo[i][0];
+            boolean sel = code.equals(bc);
+            Button b = Ui.button(a, bo[i][1], sel ? R.color.pr_accent : R.color.pr_muted, sel);
+            b.setTextSize(11f);
+            b.setOnClickListener(v -> { p.edit().putString("callrec_boost", code).apply(); rerender.run(); });
+            br.addView(b, Ui.weight(1f, i < bo.length - 1 ? Ui.dp(a, 6) : 0));
+        }
         String last = p.getString("callrec_last", "");
         if (!last.isEmpty()) {
             TextView lt = Ui.text(a, L.t("Ostatnie nagranie rozmowy:") + " " + last, 11f, R.color.pr_muted);
@@ -165,7 +188,9 @@ public final class CallRecUi {
         }
         String err = p.getString("callrec_last_err", "");
         if (!err.isEmpty()) s.addView(Ui.text(a, "⚠️ " + err, 11f, R.color.pr_warn));
-        TextView h = Ui.text(a, L.t("Nagrywane są tylko rozmowy rozpoczęte przyciskiem ☎ w apce albo po „Nagraj następną rozmowę”. Nie działa przez słuchawki Bluetooth. Poinformuj rozmówcę, że rozmowa jest nagrywana."), 11f, R.color.pr_muted);
+        TextView h = Ui.text(a, all
+                ? L.t("Nagrywana jest każda rozmowa. Po rozłączeniu wybierasz: zapisz jako ćwiczenie albo usuń. Rozmowy z ☎ w apce od razu mają wybraną osobę. Nie działa przez słuchawki Bluetooth.")
+                : L.t("Nagrywane są tylko rozmowy rozpoczęte przyciskiem ☎ w apce albo po „Nagraj następną rozmowę”. Nie działa przez słuchawki Bluetooth. Poinformuj rozmówcę, że rozmowa jest nagrywana."), 11f, R.color.pr_muted);
         h.setPadding(0, (int) Ui.dp(a, 8), 0, 0);
         s.addView(h);
     }

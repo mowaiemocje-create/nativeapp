@@ -43,8 +43,10 @@ public class CallRecService extends AccessibilityService {
     private Thread recThread;
     private long recStart = 0L;
     private String recLabel = "";
+    private boolean recFromList = false;
     private File recFile;
     private volatile int peak = 0;
+    private volatile int outPeak = 0; // szczyt PO wyrownaniu — do normalizacji 0 dB
     private String usedSource = "";
 
     // ── API dla apki ──
@@ -58,6 +60,9 @@ public class CallRecService extends AccessibilityService {
         } catch (Exception e) { }
         return false;
     }
+
+    // Nagrywaj WSZYSTKIE rozmowy (tez do miasta, rodziny) — nie tylko te z ☎ w apce
+    public static boolean allOn(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("callrec_all", true); }
 
     public static boolean autoOn(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("callrec_auto", true); }
 
@@ -90,6 +95,14 @@ public class CallRecService extends AccessibilityService {
         if (Build.VERSION.SDK_INT >= 29) return new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC};
         if (Build.VERSION.SDK_INT == 28) return new int[]{MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.MIC};
         return new int[]{MediaRecorder.AudioSource.VOICE_CALL, MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC};
+    }
+
+    // Wyrownanie glosnosci: auto (domyslnie) / mocne / wylaczone
+    static CallAgc makeAgc(Context c) {
+        String m = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("callrec_boost", "auto");
+        if ("off".equals(m)) return null;
+        if ("strong".equals(m)) return new CallAgc(6500f, 30f);
+        return new CallAgc(4000f, 16f);
     }
 
     static String sourceName(int s) {
@@ -141,17 +154,19 @@ public class CallRecService extends AccessibilityService {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             boolean call = inCall();
-            if (!recording && call && armed(CallRecService.this)) startRec();
+            boolean want = armed(CallRecService.this) || allOn(CallRecService.this);
+            if (!recording && call && want) startRec();
             else if (recording && !call) stopRec();
-            // gdy nic nie jest uzbrojone i nie nagrywamy — sprawdzamy rzadziej (oszczednie)
-            boolean active = recording || armed(CallRecService.this);
+            // gdy nic nie ma byc nagrane — sprawdzamy rzadziej (oszczednie)
+            boolean active = recording || want;
             h.postDelayed(this, active ? 1000L : 15000L);
         }
     };
 
     private void startRec() {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        recLabel = p.getString("callrec_label", "");
+        recFromList = armed(this);
+        recLabel = recFromList ? p.getString("callrec_label", "") : "";
         disarm(this);
         recStart = System.currentTimeMillis();
         recFile = new File(getCacheDir(), "callrec_" + recStart + ".mp3"); // do nagran trafia dopiero gotowy plik
@@ -179,14 +194,24 @@ public class CallRecService extends AccessibilityService {
                 if (ar == null) throw new Exception("AudioRecord");
                 mp3 = new Mp3Stream(recFile, SAMPLE_RATE);
                 short[] b = new short[2048];
+                final Mp3Stream out = mp3;
+                CallAgc agc = makeAgc(CallRecService.this);
+                outPeak = 0;
+                final CallAgc.Sink sink = (sb, sn) -> {
+                    int op = outPeak;
+                    for (int i = 0; i < sn; i++) { int v = Math.abs((int) sb[i]); if (v > op) op = v; }
+                    outPeak = op;
+                    out.feed(sb, sn);
+                };
                 while (recording) {
                     int n = ar.read(b, 0, b.length);
                     if (n <= 0) continue;
                     int pk = peak;
                     for (int i = 0; i < n; i++) { int v = Math.abs((int) b[i]); if (v > pk) pk = v; }
                     peak = pk;
-                    mp3.feed(b, n);
+                    if (agc != null) agc.process(b, n, sink); else sink.put(b, n);
                 }
+                if (agc != null) agc.flush(sink);
             } catch (Exception e) {
                 recording = false;
                 getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("callrec_last_err", "start: " + e.getMessage()).apply();
@@ -194,6 +219,13 @@ public class CallRecService extends AccessibilityService {
                 try { if (ar != null) { ar.stop(); ar.release(); } } catch (Exception e) { }
             }
             File done = mp3 != null ? mp3.finish() : null;
+            // NORMALIZACJA 0 dB: caly plik podglosniony tak, zeby najglosniejsze miejsce trafilo
+            // tuz pod 0 dBFS (bez ponownego kodowania, krokami 1,5 dB — jak "Automatyczna głośność")
+            if (done != null && outPeak >= 33) {
+                double g = 32390.0 / outPeak;
+                int steps = (int) Math.floor(20 * Math.log10(g) / 1.5);
+                if (steps > 0) try { com.pitchrec.backgroundrecorder.Mp3Gain.apply(done, steps); } catch (Exception e) { }
+            }
             h.post(() -> finished(done));
         }, "callrec");
         recThread.start();
@@ -216,7 +248,7 @@ public class CallRecService extends AccessibilityService {
         File dest = new File(getFilesDir(), "recording_" + recStart + ".mp3");
         if (f.renameTo(dest)) f = dest;
         boolean silent = peak < 300; // praktycznie cisza — telefon blokuje nagrywanie w czasie rozmowy
-        p.edit().putString("callrec_pending", f.getAbsolutePath() + "\n" + recLabel).apply();
+        p.edit().putString("callrec_pending", f.getAbsolutePath() + "\n" + recLabel + "\n" + (recFromList ? "list" : "any") + "\n" + dur).apply();
         String who = recLabel.isEmpty() ? "" : " — " + recLabel;
         if (silent) notifyDone("⚠️ " + L.t("Nagranie rozmowy jest ciche") + who,
                 L.t("Telefon mógł zablokować dźwięk. Spróbuj z włączonym głośnikiem albo zmień źródło dźwięku w Ustawieniach."), true);

@@ -68,5 +68,5 @@
     <string name="shortcut_rec">Record</string>
     <string name="shortcut_rec_long">Start recording now</string>
     <string name="callrec_service_label">New Speech — call recording</string>
-    <string name="callrec_service_desc">Lets New Speech record a phone call with another student (the same method Cube ACR uses). The app does not read anything from your screen — the service is only needed so Android allows recording during a call. Only calls started with the ☎ button in the app, or after choosing “Record next call”, are recorded.</string>
+    <string name="callrec_service_desc">Lets New Speech record your phone calls for speech practice (the same method Cube ACR uses) — calls to students, the trainer, offices or family. The app does not read anything from your screen — the service is only needed so Android allows recording during a call. After each call you choose: save it as an exercise or delete it.</string>
 </resources>

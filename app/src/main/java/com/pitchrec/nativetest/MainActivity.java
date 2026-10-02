@@ -726,17 +726,34 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String v = prefs().getString("callrec_pending", null);
         if (v == null || isRecording || saving || callRecLabel != null) return;
         prefs().edit().remove("callrec_pending").apply();
-        String[] pr = v.split("\n", 2);
+        String[] pr = v.split("\n", -1);
         File f = new File(pr[0]);
         if (!f.exists()) return;
         android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(4802);
-        showPage("daw");
-        lastSavedFilePath = f.getAbsolutePath();
-        loadAndDisplayFile(f);
-        callRecLabel = pr.length > 1 ? pr[1] : "";
-        describeNewRecording(f);
+        final String label = pr.length > 1 ? pr[1] : "";
+        boolean fromList = pr.length < 3 || "list".equals(pr[2]);
+        Runnable go = () -> {
+            showPage("daw");
+            lastSavedFilePath = f.getAbsolutePath();
+            loadAndDisplayFile(f);
+            callRecLabel = label;
+            callRecFromList = fromList;
+            describeNewRecording(f);
+        };
+        if (fromList) { go.run(); return; }
+        // zwykla rozmowa (np. do miasta, rodzina) — najpierw pytamy, czy to cwiczenie
+        long sec = 0;
+        try { sec = Long.parseLong(pr[3]) / 1000; } catch (Exception e) { }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("📞 " + L.t("Rozmowa nagrana") + (sec > 0 ? String.format(Locale.US, " (%d:%02d)", sec / 60, sec % 60) : ""))
+                .setMessage(L.t("Zapisać tę rozmowę jako ćwiczenie? Wybierzesz kategorię, np. Telefon do miasta."))
+                .setPositiveButton(L.t("Zapisz i opisz"), (d, w) -> go.run())
+                .setNegativeButton(L.t("Usuń nagranie"), (d, w) -> { f.delete(); Toast.makeText(this, L.t("Nagranie rozmowy usunięte"), Toast.LENGTH_SHORT).show(); })
+                .setCancelable(false)
+                .show();
     }
+    private boolean callRecFromList = true;
 
     // Odtwarzanie nagrania z serwera (odpowiedz glosowa trenera) — przycisk ▶ / ■
     private void playRemoteAudio(String url, android.widget.Button btn) {
@@ -1135,9 +1152,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             banner = "🎙️ " + L.t("Monolog — podsumowanie dnia (do dziennika)");
         }
         if (fix == null && callRecLabel != null) {
-            init.cat = ContactList.CATEGORY;
-            init.note = callRecLabel.isEmpty() ? "" : "📞 " + callRecLabel;
-            banner = "📞 " + L.t("Nagrana rozmowa telefoniczna") + (callRecLabel.isEmpty() ? " — " + L.t("wybierz, z kim rozmawiałeś") : " — " + callRecLabel);
+            if (callRecFromList) {
+                init.cat = ContactList.CATEGORY;
+                init.note = callRecLabel.isEmpty() ? "" : "📞 " + callRecLabel;
+                banner = "📞 " + L.t("Nagrana rozmowa telefoniczna") + (callRecLabel.isEmpty() ? " — " + L.t("wybierz, z kim rozmawiałeś") : " — " + callRecLabel);
+            } else {
+                banner = "📞 " + L.t("Nagrana rozmowa telefoniczna") + " — " + L.t("wybierz kategorię (np. Telefon do miasta)");
+            }
         }
         callRecLabel = null;
         diaryMonologue = false;
