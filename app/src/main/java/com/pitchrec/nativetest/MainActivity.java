@@ -642,7 +642,33 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 promptLogin(L.t("Twoja sesja NewSpeech wygasła. Zaloguj się ponownie."));
             }
             public boolean isCurrent() { return "diary".equals(currentPage); }
+            public void recordMonologue() {
+                // MONOLOG — PODSUMOWANIE DNIA: nagranie z gotowa kategoria "Monolog / Czytanie"
+                if (isRecording) { showPage("daw"); return; }
+                diaryMonologue = true;
+                showPage("daw");
+                new Handler(Looper.getMainLooper()).postDelayed(MainActivity.this::startRecordingFlow, 300);
+            }
+            public void playUrl(String url, android.widget.Button btn) { playRemoteAudio(url, btn); }
         };
+    }
+
+    private boolean diaryMonologue = false;
+
+    // Odtwarzanie nagrania z serwera (odpowiedz glosowa trenera) — przycisk ▶ / ■
+    private void playRemoteAudio(String url, android.widget.Button btn) {
+        if (voicePlayer != null) { stopVoiceReview(); btn.setText("▶ " + L.t("Posłuchaj")); return; }
+        try {
+            releasePlayer();
+            MediaPlayer mp = new MediaPlayer();
+            voicePlayer = mp;
+            mp.setDataSource(url);
+            mp.setOnPreparedListener(m -> { if (voicePlayer == m) { m.start(); btn.setText("■ " + L.t("Zatrzymaj")); } });
+            mp.setOnCompletionListener(m -> { stopVoiceReview(); btn.setText("▶ " + L.t("Posłuchaj")); });
+            mp.setOnErrorListener((m, w, e) -> { stopVoiceReview(); btn.setText("▶ " + L.t("Posłuchaj")); Toast.makeText(this, L.t("Nie udało się odtworzyć komentarza"), Toast.LENGTH_SHORT).show(); return true; });
+            btn.setText("⏳ " + L.t("Wczytywanie…"));
+            mp.prepareAsync();
+        } catch (Exception e) { stopVoiceReview(); }
     }
 
     private TextView pageTitle(String t) {
@@ -1020,6 +1046,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pre.fixSys = fix[2];
             pre.save(this, file.getName());
         }
+        if (fix == null && diaryMonologue) {
+            init.cat = "Monolog / Czytanie";
+            init.note = "📔 " + L.t("Podsumowanie dnia");
+            banner = "🎙️ " + L.t("Monolog — podsumowanie dnia (do dziennika)");
+        }
+        diaryMonologue = false;
         final boolean isFix = fix != null;
         DescribeSheet.show(this, init, true, isFix ? L.t("ZAPISZ POPRAWKĘ") : L.t("ZAPISZ NAGRANIE"), banner, meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
@@ -1982,6 +2014,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             resolveFixSys(fe.id, sys -> sysTv.setText(sys.isEmpty()
                     ? "🗣 " + L.t("System mowy") + ": ? — " + L.t("nagraj w tym samym systemie co oryginał")
                     : "🗣 " + L.t("System mowy") + ": " + sys + " — " + L.t("poprawka musi być w tym samym systemie")));
+            // komentarz GLOSOWY trenera do tego nagrania (jesli nagral)
+            android.widget.LinearLayout vrBox = new android.widget.LinearLayout(this);
+            vrBox.setOrientation(android.widget.LinearLayout.VERTICAL);
+            card.addView(vrBox);
+            checkVoiceReview(fe.id, vrBox, d);
             card.addView(Ui.spacer(this, 10));
             Button rec = Ui.button(this, L.t("🎤 Nagraj poprawkę"), R.color.pr_accent, true);
             rec.setOnClickListener(v -> startFixRecording(fe.id, fe.categoryName));

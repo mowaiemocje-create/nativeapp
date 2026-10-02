@@ -34,6 +34,8 @@ public class DiaryPage {
         String studentName();
         void onAuthExpired();
         boolean isCurrent();
+        void recordMonologue();                               // monolog — podsumowanie dnia
+        void playUrl(String url, android.widget.Button btn);  // odpowiedz glosowa trenera
     }
 
     static class Draft {
@@ -250,6 +252,18 @@ public class DiaryPage {
     }
 
     private void buildForm() {
+        // ODPOWIEDZI TRENERA (tekst + glos) — zawsze na gorze dziennika
+        LinearLayout replies = new LinearLayout(a);
+        replies.setOrientation(LinearLayout.VERTICAL);
+        root.addView(replies);
+        loadTrainerReplies(replies);
+        // Wyrazny przycisk: MONOLOG — PODSUMOWANIE DNIA
+        Button mono = Ui.button(a, "🎙️  " + L.t("NAGRAJ MONOLOG — PODSUMOWANIE DNIA"), R.color.pr_pause, true);
+        mono.setTextSize(14f);
+        mono.setOnClickListener(v -> host.recordMonologue());
+        LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (56 * d));
+        ml.bottomMargin = (int) (12 * d);
+        root.addView(mono, ml);
         if (draft.locked) {
             TextView lock = Ui.text(a, L.t("🔒 Trener już sprawdził ten wpis — edycja zablokowana"), 12f, R.color.pr_pause);
             lock.setTypeface(Typeface.DEFAULT_BOLD);
@@ -842,6 +856,73 @@ public class DiaryPage {
     }
 
     // ── historia ──
+    private static final String BACKEND = "https://newspeech-backend.mowaiemocje.workers.dev";
+
+    // Ostatnie wpisy z odpowiedzia trenera (do 3, najnowsze pierwsze): tekst + przycisk ▶ dla glosu
+    private void loadTrainerReplies(LinearLayout box) {
+        String uid = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getString("ns_user_id", "");
+        if (uid.isEmpty() || host.token() == null) return;
+        NsClient.request("GET", "/diaries?sort_by=date&sort_order=desc&page_size=7", host.token(), host.email(), null, null, r -> {
+            JSONArray list = collection(r);
+            if (list == null || !host.isCurrent()) return;
+            final List<String> dates = new ArrayList<>();
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject e = list.optJSONObject(i);
+                String dd = e == null ? "" : e.optString("date", "");
+                if (dd.length() >= 10) dates.add(dd.substring(0, 10));
+            }
+            if (dates.isEmpty()) return;
+            final JSONObject[] got = new JSONObject[dates.size()];
+            final int[] left = {dates.size()};
+            for (int i = 0; i < dates.size(); i++) {
+                final int k = i;
+                String q = "/diary-reply/get?student_id=" + NsClient.enc(uid) + "&entry_date=" + dates.get(i) + "&ns_token=" + NsClient.enc(host.token())
+                        + "&ns_email=" + NsClient.enc(host.email()) + "&ns_server=new";
+                NsClient.backend("GET", q, null, r2 -> {
+                    try { if (r2.ok) got[k] = new JSONObject(r2.body); } catch (Exception e) { }
+                    if (--left[0] > 0 || !host.isCurrent()) return;
+                    box.removeAllViews();
+                    int shown = 0;
+                    for (int j = 0; j < dates.size() && shown < 3; j++) {
+                        JSONObject o = got[j];
+                        if (o == null) continue;
+                        String txt = o.isNull("text_reply") ? "" : o.optString("text_reply", "").trim();
+                        boolean audio = o.optBoolean("has_audio", false);
+                        if (txt.isEmpty() && !audio) continue;
+                        if (shown == 0) {
+                            TextView h = Ui.text(a, "🎓 " + L.t("ODPOWIEDZI TRENERA"), 12f, R.color.pr_purple);
+                            h.setTypeface(Typeface.DEFAULT_BOLD);
+                            h.setTextColor(0xFF8E44AD);
+                            h.setPadding(0, 0, 0, (int) (6 * d));
+                            box.addView(h);
+                        }
+                        shown++;
+                        String dt = dates.get(j);
+                        LinearLayout card = Ui.card(a);
+                        card.setBackground(Ui.rounded(0x1A8E44AD, 0xFF8E44AD, 1.5f * d, 10 * d));
+                        TextView t = Ui.text(a, "💬 " + L.t("Wpis z dnia") + " " + dt.substring(8, 10) + "." + dt.substring(5, 7), 13f, R.color.pr_purple);
+                        t.setTypeface(Typeface.DEFAULT_BOLD);
+                        t.setTextColor(0xFF8E44AD);
+                        card.addView(t);
+                        if (!txt.isEmpty()) { TextView tx = Ui.text(a, txt, 14f, R.color.pr_text); tx.setPadding(0, (int) (6 * d), 0, 0); card.addView(tx); }
+                        if (audio) {
+                            Button play = Ui.button(a, "▶ " + L.t("Posłuchaj odpowiedzi głosowej"), R.color.pr_purple, true);
+                            String url = BACKEND + "/diary-reply/audio?student_id=" + NsClient.enc(uid) + "&entry_date=" + dt + "&ns_token=" + NsClient.enc(host.token())
+                                    + "&ns_email=" + NsClient.enc(host.email()) + "&ns_server=new";
+                            play.setOnClickListener(v -> host.playUrl(url, play));
+                            LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                            pl.topMargin = (int) (8 * d);
+                            card.addView(play, pl);
+                        }
+                        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                        cl.bottomMargin = (int) (8 * d);
+                        box.addView(card, cl);
+                    }
+                });
+            }
+        });
+    }
+
     private void showHistory() {
         NsClient.request("GET", "/diaries?sort_by=date&sort_order=desc&page_size=30", host.token(), host.email(), null, null, r -> {
             if (r.isAuthError()) { host.onAuthExpired(); return; }
