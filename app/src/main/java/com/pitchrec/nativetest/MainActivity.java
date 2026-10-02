@@ -473,7 +473,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Ocena konkretnego nagrania (z powiadomienia / z listy "Od trenera")
     private void openRating(String rec) {
         if (rec == null || rec.isEmpty()) return;
-        showPage("recs");
+        // tylko okno oceny (dane z NS) — bez przechodzenia do listy i bez wczytywania nagrania
         File local = null;
         File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
         if (files != null) for (File f : files) {
@@ -2082,25 +2082,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             android.widget.LinearLayout vrBox = new android.widget.LinearLayout(this);
             vrBox.setOrientation(android.widget.LinearLayout.VERTICAL);
             card.addView(vrBox);
-            checkVoiceReview(fe.id, vrBox, d);
-            // ▶ ORYGINAL — porownaj z uwagami trenera (plik z telefonu, a gdy go nie ma — z NS)
-            File orig = null, sentFix = null;
+            checkVoiceReview(fe.id, vrBox, d, true);
+            // poprawka juz wyslana? (nagranie z telefonu z fixRecordId = to nagranie, wyslane po ocenie)
+            File sentFix = null;
             File[] allF = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
             if (allF != null) for (File f : allF) {
                 RecMeta m = RecMeta.load(this, f.getName());
-                if (fe.id.equals(m.nsRecordId) && m.fixRecordId.isEmpty() && orig == null) orig = f;
                 if (fe.id.equals(m.fixRecordId) && "sent".equals(m.ns) && f.lastModified() > fe.reviewedAt * 1000L
                         && (sentFix == null || f.lastModified() > sentFix.lastModified())) sentFix = f;
             }
-            final String origUrl = orig != null ? orig.getAbsolutePath()
-                    : BACKEND + "/ns-record-audio?record_id=" + NsClient.enc(fe.id) + "&ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail()) + "&ns_server=new";
-            Button po = Ui.button(this, "▶ " + L.t("Posłuchaj oryginału"), R.color.pr_purple, false);
-            po.setOnClickListener(v -> playRemoteAudio(origUrl, po));
-            android.widget.LinearLayout.LayoutParams pol = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-            pol.topMargin = (int) (8 * d);
-            card.addView(po, pol);
-            // Rozumiem / Mam pytanie do trenera
-            StudentAck.addButtons(this, card, "record", fe.id);
             // POPRAWKA JUZ WYSLANA — czeka na ponowna ocene
             if (sentFix != null) {
                 TextView pend = Ui.text(this, "⏳ " + L.f("Poprawka wysłana {0} — czeka na ponowną ocenę trenera", new java.text.SimpleDateFormat("d.MM, HH:mm", Locale.getDefault()).format(new java.util.Date(sentFix.lastModified()))), 13f, R.color.pr_pause);
@@ -3359,6 +3349,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     box.addView(bravo);
                 }
             }
+            boolean hasText = false;
             for (String k : new String[]{"trainer_comment", "comment", "review_comment", "review", "description_trainer"}) {
                 String c = rec.optString(k, "").trim();
                 if (!c.isEmpty() && !"null".equals(c) && !c.startsWith("{")) {
@@ -3366,16 +3357,17 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     lb.setPadding(0, (int) (12 * d), 0, (int) (4 * d));
                     box.addView(lb);
                     box.addView(Ui.text(this, c, 13f, R.color.pr_text));
+                    hasText = true;
                     break;
                 }
             }
+            // odpowiedz kursanta (Rozumiem / Mam pytanie) — tylko gdy trener cos napisal lub nagral
+            if (hasText) StudentAck.addButtons(this, box, "record", recordId);
             // komentarz GLOSOWY trenera (jesli nagral)
             android.widget.LinearLayout voiceBox = new android.widget.LinearLayout(this);
             voiceBox.setOrientation(android.widget.LinearLayout.VERTICAL);
             box.addView(voiceBox);
-            checkVoiceReview(recordId, voiceBox, d);
-            // odpowiedz kursanta: Rozumiem / Mam pytanie (tylko gdy jest ocena)
-            if (reviewed) StudentAck.addButtons(this, box, "record", recordId);
+            checkVoiceReview(recordId, voiceBox, d, !hasText);
             TrainerInbox.markRead(this, recordId, null);
         }
         android.widget.ScrollView sv = new android.widget.ScrollView(this);
@@ -3400,7 +3392,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private static final String BACKEND = "https://newspeech-backend.mowaiemocje.workers.dev";
 
-    private void checkVoiceReview(String recordId, android.widget.LinearLayout holder, float d) {
+    private void checkVoiceReview(String recordId, android.widget.LinearLayout holder, float d) { checkVoiceReview(recordId, holder, d, false); }
+
+    // withAck: pod odtwarzaczem dodaj „Rozumiem / Mam pytanie” (tylko gdy trener nagral komentarz)
+    private void checkVoiceReview(String recordId, android.widget.LinearLayout holder, float d, boolean withAck) {
         if (recordId == null || recordId.isEmpty() || !isLoggedIn()) return;
         String q = "/voice-review/check?record_ids=" + NsClient.enc(recordId) + "&ns_token=" + NsClient.enc(nsToken()) + "&ns_email=" + NsClient.enc(nsEmail());
         NsClient.backend("GET", q, null, r -> {
@@ -3432,6 +3427,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     } catch (Exception e) { stopVoiceReview(); }
                 });
                 holder.addView(play, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+                if (withAck) StudentAck.addButtons(this, holder, "record", recordId);
             } catch (Exception e) { }
         });
     }

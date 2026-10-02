@@ -18,6 +18,8 @@ import org.json.JSONObject;
 // Trener widzi to w swoim panelu. kind: "record" (ref = id nagrania) | "diary" (ref = data wpisu)
 public final class StudentAck {
 
+    public static volatile String lastError = "";
+
     private StudentAck() { }
 
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences("app_settings", Context.MODE_PRIVATE); }
@@ -40,6 +42,8 @@ public final class StudentAck {
         } catch (Exception e) { }
         NsClient.backend("POST", "/student-ack", b.toString(), r -> {
             boolean ok = r.ok;
+            // powod bledu do komunikatu (np. 404 = serwer bez tej funkcji, 401 = sesja wygasla)
+            lastError = ok ? "" : r.status == 0 ? L.t("brak połączenia") : r.status == 404 ? L.t("serwer jeszcze tego nie obsługuje (worker)") : r.status == 401 ? L.t("zaloguj się ponownie") : "HTTP " + r.status;
             if (ok) p.edit().putBoolean(key(kind, ref, ack), true).apply();
             if (cb != null) cb.done(ok);
         });
@@ -73,7 +77,7 @@ public final class StudentAck {
         if (!ok) {
             Button b1 = Ui.button(a, "👍 " + L.t("Rozumiem"), R.color.pr_accent, false);
             b1.setOnClickListener(v -> { b1.setEnabled(false); send(a, kind, ref, "ok", null, s -> {
-                if (!s) { b1.setEnabled(true); Toast.makeText(a, L.t("Nie udało się wysłać — sprawdź internet."), Toast.LENGTH_SHORT).show(); }
+                if (!s) { b1.setEnabled(true); Toast.makeText(a, L.t("Nie udało się wysłać") + " — " + lastError, Toast.LENGTH_LONG).show(); }
                 render(a, wrap, kind, ref); }); });
             row.addView(b1, Ui.weight(1f, 6 * d));
         }
@@ -91,7 +95,7 @@ public final class StudentAck {
                         String txt = in.getText().toString().trim();
                         if (txt.isEmpty()) return;
                         send(a, kind, ref, "question", txt, s -> {
-                            Toast.makeText(a, s ? L.t("Wysłano do trenera ✓") : L.t("Nie udało się wysłać — sprawdź internet."), Toast.LENGTH_SHORT).show();
+                            Toast.makeText(a, s ? L.t("Wysłano do trenera ✓") : L.t("Nie udało się wysłać") + " — " + lastError, Toast.LENGTH_LONG).show();
                             render(a, wrap, kind, ref);
                         });
                     })

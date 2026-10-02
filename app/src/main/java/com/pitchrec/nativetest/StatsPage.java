@@ -360,44 +360,80 @@ public class StatsPage {
 
     // ═════════════ HARMONOGRAM ═════════════
     // ═════════════ OD TRENERA: wszystko, co przyszlo od trenera, najnowsze na gorze ═════════════
-    private boolean inboxAll = false;
+    // Krotko: tylko NIEPRZECZYTANE, zgrupowane (np. "✅ 3 zaliczone · ↺ 1 do poprawy").
+    // Dotkniecie grupy rozwija jej pozycje; pozycja oceny otwiera okno oceny (dane z NS — nagranie
+    // nie musi byc w telefonie). Gdy wszystko przeczytane — jedna linijka + "historia".
+    private String inboxOpen = "";
 
     private void fillInbox(LinearLayout card) {
         card.removeAllViews();
         card.addView(Ui.label(a, "📬 " + L.t("OD TRENERA")));
         List<TrainerInbox.Ev> all = TrainerInbox.all(a);
-        if (all.isEmpty()) {
-            card.addView(Ui.text(a, L.t("Tu pojawią się oceny, komentarze głosowe, odpowiedzi na dziennik i terminy telefonów od trenera."), 12f, R.color.pr_muted));
+        List<TrainerInbox.Ev> rates = new ArrayList<>(), voice = new ArrayList<>(), diary = new ArrayList<>(), other = new ArrayList<>();
+        int ok = 0, bad = 0;
+        for (TrainerInbox.Ev e : all) {
+            if (e.read) continue;
+            if (TrainerInbox.T_OK.equals(e.type)) { rates.add(e); ok++; }
+            else if (TrainerInbox.T_BAD.equals(e.type)) { rates.add(e); bad++; }
+            else if (TrainerInbox.T_VOICE.equals(e.type)) voice.add(e);
+            else if (TrainerInbox.T_DIARY.equals(e.type)) diary.add(e);
+            else other.add(e);
+        }
+        if (rates.isEmpty() && voice.isEmpty() && diary.isEmpty() && other.isEmpty()) {
+            TextView none = Ui.text(a, "✓ " + L.t("Wszystko przeczytane"), 13f, R.color.pr_accent);
+            none.setTypeface(Typeface.DEFAULT_BOLD);
+            card.addView(none);
+            if (!all.isEmpty()) {
+                boolean open = "hist".equals(inboxOpen);
+                TextView h = Ui.text(a, (open ? "▴ " : "▾ ") + L.t("Historia"), 12f, R.color.pr_muted);
+                h.setPadding(0, (int) (6 * d), 0, 0);
+                h.setOnClickListener(v -> { inboxOpen = open ? "" : "hist"; fillInbox(card); });
+                card.addView(h);
+                if (open) for (int i = 0; i < Math.min(8, all.size()); i++) inboxRow(card, all.get(i));
+            }
             return;
         }
+        if (!rates.isEmpty()) {
+            String t = (ok > 0 ? "✅ " + L.f("{0} zaliczone", ok) : "") + (ok > 0 && bad > 0 ? "  ·  " : "") + (bad > 0 ? "↺ " + L.f("{0} do poprawy", bad) : "");
+            group(card, "rates", t, rates);
+        }
+        if (!voice.isEmpty()) group(card, "voice", "🎧 " + L.f("Komentarze głosowe: {0}", voice.size()), voice);
+        for (TrainerInbox.Ev e : diary) inboxRow(card, e);
+        for (TrainerInbox.Ev e : other) inboxRow(card, e);
+    }
+
+    private void group(LinearLayout card, String key, String title, List<TrainerInbox.Ev> items) {
+        boolean open = key.equals(inboxOpen);
+        LinearLayout row = Ui.row(a);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding((int) (6 * d), (int) (9 * d), (int) (6 * d), (int) (9 * d));
+        row.setBackground(Ui.rounded(0x14E53935, 0, 0, 8 * d));
+        TextView t = Ui.text(a, title, 14f, R.color.pr_text);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        row.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(Ui.text(a, open ? "▴" : "▾", 16f, R.color.pr_muted));
+        row.setOnClickListener(v -> { inboxOpen = open ? "" : key; fillInbox((LinearLayout) row.getParent()); });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (4 * d);
+        card.addView(row, lp);
+        if (open) for (TrainerInbox.Ev e : items) inboxRow(card, e);
+    }
+
+    private void inboxRow(LinearLayout card, TrainerInbox.Ev e) {
         java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d.MM HH:mm", java.util.Locale.getDefault());
-        int max = inboxAll ? all.size() : Math.min(6, all.size());
-        for (int i = 0; i < max; i++) {
-            TrainerInbox.Ev e = all.get(i);
-            LinearLayout row = Ui.row(a);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding((int) (6 * d), (int) (8 * d), (int) (6 * d), (int) (8 * d));
-            if (!e.read) row.setBackground(Ui.rounded(0x14E53935, 0, 0, 8 * d));
-            LinearLayout tb = new LinearLayout(a);
-            tb.setOrientation(LinearLayout.VERTICAL);
-            TextView t = Ui.text(a, (e.read ? "" : "● ") + e.title, 13f, R.color.pr_text);
-            if (!e.read) { t.setTypeface(Typeface.DEFAULT_BOLD); }
-            tb.addView(t);
-            String sub = e.sub + (e.sub.isEmpty() ? "" : "  ·  ") + df.format(new java.util.Date(e.ts));
-            tb.addView(Ui.text(a, sub, 11f, R.color.pr_muted));
-            row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            boolean go = !e.rec.isEmpty() || TrainerInbox.T_DIARY.equals(e.type);
-            if (go) row.addView(Ui.text(a, "›", 20f, R.color.pr_muted));
-            row.setOnClickListener(v -> { host.openInbox(e); if (host.isCurrent()) fillInbox(card); });
-            card.addView(row);
-        }
-        if (all.size() > 6) {
-            TextView more = Ui.text(a, inboxAll ? L.t("▴ Pokaż mniej") : L.f("▾ Pokaż wszystkie ({0})", all.size()), 12f, R.color.pr_accent);
-            more.setTypeface(Typeface.DEFAULT_BOLD);
-            more.setPadding(0, (int) (8 * d), 0, 0);
-            more.setOnClickListener(v -> { inboxAll = !inboxAll; fillInbox(card); });
-            card.addView(more);
-        }
+        LinearLayout row = Ui.row(a);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding((int) (14 * d), (int) (7 * d), (int) (6 * d), (int) (7 * d));
+        LinearLayout tb = new LinearLayout(a);
+        tb.setOrientation(LinearLayout.VERTICAL);
+        TextView t = Ui.text(a, e.title, 13f, R.color.pr_text);
+        if (!e.read) t.setTypeface(Typeface.DEFAULT_BOLD);
+        tb.addView(t);
+        tb.addView(Ui.text(a, e.sub + (e.sub.isEmpty() ? "" : "  ·  ") + df.format(new java.util.Date(e.ts)), 11f, R.color.pr_muted));
+        row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (!e.rec.isEmpty() || TrainerInbox.T_DIARY.equals(e.type)) row.addView(Ui.text(a, "›", 20f, R.color.pr_muted));
+        row.setOnClickListener(v -> { host.openInbox(e); if (host.isCurrent()) fillInbox(card); });
+        card.addView(row);
     }
 
     // ═════════════ TELEFONY: dni telefonu do trenera + lista kursantów na ten okres ═════════════

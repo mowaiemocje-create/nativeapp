@@ -704,3 +704,12 @@ Pytanie do trenera	Question to the trainer	Otázka pro trenéra	Otázka pre tré
 Anuluj	Cancel	Zrušit	Zrušiť	Abbrechen	Cancelar	Mégse
 Wysłano do trenera ✓	Sent to the trainer ✓	Odesláno trenérovi ✓	Odoslané trénerovi ✓	An den Trainer gesendet ✓	Enviado al entrenador ✓	Elküldve az edzőnek ✓
 Nie udało się wysłać — sprawdź internet.	Couldn't send — check your internet.	Nepodařilo se odeslat — zkontroluj internet.	Nepodarilo sa odoslať — skontroluj internet.	Senden fehlgeschlagen — prüfe das Internet.	No se pudo enviar — revisa internet.	Nem sikerült elküldeni — ellenőrizd az internetet.
+Wszystko przeczytane	All read	Vše přečteno	Všetko prečítané	Alles gelesen	Todo leído	Minden elolvasva
+Historia	History	Historie	História	Verlauf	Historial	Előzmények
+{0} zaliczone	{0} passed	{0} splněno	{0} splnené	{0} bestanden	{0} aprobadas	{0} elfogadva
+{0} do poprawy	{0} to correct	{0} k opravě	{0} na opravu	{0} zu korrigieren	{0} por corregir	{0} javítandó
+Komentarze głosowe: {0}	Voice comments: {0}	Hlasové komentáře: {0}	Hlasové komentáre: {0}	Sprachkommentare: {0}	Comentarios de voz: {0}	Hangos megjegyzések: {0}
+Nie udało się wysłać	Couldn't send	Nepodařilo se odeslat	Nepodarilo sa odoslať	Senden fehlgeschlagen	No se pudo enviar	Nem sikerült elküldeni
+brak połączenia	no connection	bez připojení	bez pripojenia	keine Verbindung	sin conexión	nincs kapcsolat
+serwer jeszcze tego nie obsługuje (worker)	the server doesn't support this yet (worker)	server to zatím nepodporuje (worker)	server to zatiaľ nepodporuje (worker)	der Server unterstützt das noch nicht (Worker)	el servidor aún no lo admite (worker)	a szerver ezt még nem támogatja (worker)
+zaloguj się ponownie	log in again	přihlas se znovu	prihlás sa znova	melde dich erneut an	vuelve a iniciar sesión	jelentkezz be újra
