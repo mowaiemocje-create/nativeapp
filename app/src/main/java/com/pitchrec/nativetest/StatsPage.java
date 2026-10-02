@@ -480,7 +480,7 @@ public class StatsPage {
                     JSONObject v = arr.optJSONObject(i);
                     if (v == null || vId.equals(v.optString("id", ""))) continue;
                     String dd = v.optString("date", "");
-                    if (!dd.isEmpty() && dd.compareTo(vDate) < 0) { start = dd; break; }
+                    if (!dd.isEmpty() && dd.compareTo(vDate) < 0) { start = HarmoGoal.dayAfter(dd); break; } // nagrania z dnia poprzedniego harmonogramu naleza do starego okresu
                 }
             }
             if (start == null) start = visit.optString("created_at", "1970-01-01");

@@ -63,7 +63,7 @@ public final class HarmoGoal {
                 JSONObject v = arr.optJSONObject(i);
                 if (v == null || vId.equals(v.optString("id", ""))) continue;
                 String dd = v.optString("date", "");
-                if (!dd.isEmpty() && dd.compareTo(vDate) < 0) { start = dd; break; }
+                if (!dd.isEmpty() && dd.compareTo(vDate) < 0) { start = HarmoGoal.dayAfter(dd); break; } // nagrania z dnia poprzedniego harmonogramu naleza do starego okresu
             }
             if (start == null) start = visit.optString("created_at", "1970-01-01");
             String from = start.length() >= 10 ? start.substring(0, 10) : start;
@@ -110,6 +110,15 @@ public final class HarmoGoal {
         prefs(c).edit().putLong("goal_at", System.currentTimeMillis()).putBoolean("goal_active", active)
                 .putInt("goal_per_day", perDay).putInt("goal_missing", missing).putInt("goal_days", daysLeft)
                 .putString("goal_deadline", dl).putBoolean("goal_on_track", onTrack).apply();
+    }
+
+    // "2026-10-01" -> "2026-10-02"
+    public static String dayAfter(String d) {
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            return f.format(new java.util.Date(f.parse(d.substring(0, 10)).getTime() + 86400000L));
+        } catch (Exception e) { return d; }
     }
 
     public static void invalidate(Context c) { prefs(c).edit().putLong("goal_at", 0L).apply(); }

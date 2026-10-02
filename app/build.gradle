@@ -8,11 +8,27 @@ android {
         applicationId "com.pitchrec.nativetest"
         minSdkVersion 26
         targetSdkVersion 36
-        versionCode 1
-        versionName "0.1-test"
+        // numer kompilacji z GitHub Actions (-PbuildNo=...) — rosnie przy kazdym pushu,
+        // dzieki temu aplikacja wie, ze na serwerze jest nowsza wersja
+        versionCode (project.hasProperty('buildNo') ? project.property('buildNo').toInteger() : 1)
+        versionName (project.hasProperty('buildNo') ? "1." + project.property('buildNo') : "0.1-test")
+    }
+
+    // STALY klucz podpisu (sekret APP_KEYSTORE_B64 w GitHub). Bez stalego klucza kazda kompilacja
+    // ma inny podpis i Android nie pozwala zainstalowac aktualizacji na istniejacej aplikacji.
+    signingConfigs {
+        fixed {
+            storeFile file("ci.keystore")
+            storePassword "newspeech-app"
+            keyAlias "newspeech"
+            keyPassword "newspeech-app"
+        }
     }
 
     buildTypes {
+        debug {
+            if (file("ci.keystore").exists()) signingConfig signingConfigs.fixed
+        }
         release {
             minifyEnabled false
         }

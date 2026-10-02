@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main, master ]
 
+permissions:
+  contents: write   # publikacja wydania (Releases) z APK do automatycznej aktualizacji
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,11 +32,42 @@ jobs:
           curl -L -o app/libs/net.sourceforge.lame-3.98.4.jar \
             https://github.com/nwaldispuehl/java-lame/releases/download/v3.98.4/net.sourceforge.lame-3.98.4.jar
 
+      # Staly klucz podpisu z sekretu (bez niego aktualizacje nie instaluja sie na istniejacej apce)
+      - name: Signing key
+        env:
+          KS: ${{ secrets.APP_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then echo "$KS" | base64 -d > app/ci.keystore; echo "HAS_KS=true" >> $GITHUB_ENV; else echo "HAS_KS=false" >> $GITHUB_ENV; fi
+
       - name: Build APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon -PbuildNo=${{ github.run_number }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: pitchrec-native-test-debug.apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Wydanie "latest": aplikacja sama sprawdza version.json i pobiera newspeech.apk
+      - name: Prepare update files
+        if: env.HAS_KS == 'true'
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk out/newspeech.apk
+          jq -n --argjson c ${{ github.run_number }} --arg n "1.${{ github.run_number }}" --arg m "$MSG" \
+            '{versionCode:$c, versionName:$n, notes:($m | split("\n")[0])}' > out/version.json
+          cat out/version.json
+
+      - name: Publish release
+        if: env.HAS_KS == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: NewSpeech 1.${{ github.run_number }}
+          body: ${{ github.event.head_commit.message }}
+          make_latest: true
+          files: |
+            out/newspeech.apk
+            out/version.json

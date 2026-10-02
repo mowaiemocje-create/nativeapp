@@ -274,6 +274,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
         CallDays.check(this, null);             // dni telefonu do trenera (powiadomienia)
         askNotificationPermissionOnce();
+        UpdateChecker.check(this, false);      // nowa wersja aplikacji (GitHub Releases)
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
         statusText.setOnClickListener(v -> {
@@ -1522,6 +1523,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         mp.addView(hint(avail ? L.t("Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach.") : L.t("Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).")));
 
         // 7) Jezyk
+        android.widget.LinearLayout upd = section(c, "upd", "⬆  " + L.t("AKTUALIZACJE") + "  ·  " + UpdateChecker.currentName(this));
+        upd.addView(toggleRow("⬆ " + L.t("Automatycznie pobieraj nowe wersje"), UpdateChecker.enabled(this), on -> prefs().edit().putBoolean("auto_update", on).apply()));
+        upd.addView(hint(L.t("Nowa wersja pobiera się sama w tle; zostaniesz zapytany o instalację. Nagrania i ustawienia zostają.")));
+        android.widget.Button updBtn = Ui.button(this, L.t("Sprawdź teraz"), R.color.pr_accent, false);
+        updBtn.setOnClickListener(v -> { Toast.makeText(this, L.t("Sprawdzanie…"), Toast.LENGTH_SHORT).show(); UpdateChecker.check(this, true); });
+        upd.addView(updBtn);
         android.widget.LinearLayout lang = section(c, "lang", "🌐  " + L.t("JĘZYK") + "  ·  " + currentLangName());
         String cur = getSavedLanguage(this);
         String[][] langs = {{"pl", "🇵🇱 Polski"}, {"en", "🇬🇧 English"}, {"cs", "🇨🇿 Čeština"}, {"sk", "🇸🇰 Slovenčina"}, {"de", "🇩🇪 Deutsch"}, {"es", "🇪🇸 Español"}, {"hu", "🇭🇺 Magyar"}};
