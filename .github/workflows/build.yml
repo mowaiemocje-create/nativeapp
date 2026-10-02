@@ -25,9 +25,14 @@ jobs:
       # (czysty port LAME do Javy, potrzebny do kodowania MP3 bez C++/NDK).
       - name: Download java-lame JAR
         run: |
+          # JAR jest juz w repo (app/libs) — pobieramy tylko, gdy go brak albo jest uszkodzony
           mkdir -p app/libs
-          curl -L -o app/libs/net.sourceforge.lame-3.98.4.jar \
-            https://github.com/nwaldispuehl/java-lame/releases/download/v3.98.4/net.sourceforge.lame-3.98.4.jar
+          J=app/libs/net.sourceforge.lame-3.98.4.jar
+          if ! unzip -tq "$J" >/dev/null 2>&1; then
+            curl -fL --retry 5 --retry-delay 5 -o "$J" \
+              https://github.com/nwaldispuehl/java-lame/releases/download/v3.98.4/net.sourceforge.lame-3.98.4.jar
+            unzip -tq "$J"
+          fi
 
       # Staly klucz podpisu z sekretu (bez niego aktualizacje nie instaluja sie na istniejacej apce)
       - name: Signing key
