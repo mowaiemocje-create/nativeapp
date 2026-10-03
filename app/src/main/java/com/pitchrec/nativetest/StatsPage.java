@@ -439,12 +439,14 @@ public class StatsPage {
     // ═════════════ TELEFONY: dni telefonu do trenera + lista kursantów na ten okres ═════════════
     private void fillCalls(LinearLayout card) {
         card.removeAllViews();
-        List<CallDays.Day> ds = CallDays.days(a);
+        String today = CallDays.today();
+        // tylko dzisiejsze i przyszle terminy — minione nie sa juz potrzebne
+        List<CallDays.Day> ds = new ArrayList<>();
+        for (CallDays.Day dd : CallDays.days(a)) if (dd.day.compareTo(today) >= 0) ds.add(dd);
         List<ContactList.Member> ms = ContactList.members(a);
         if (ds.isEmpty() && ms.isEmpty()) { card.setVisibility(View.GONE); return; }
         card.setVisibility(View.VISIBLE);
         card.addView(Ui.label(a, "📞 " + L.t("TELEFONY W HARMONOGRAMIE")));
-        String today = CallDays.today();
         if (!ds.isEmpty()) {
             TextView h = Ui.text(a, L.t("Zadzwoń do trenera:"), 13f, R.color.pr_text);
             h.setTypeface(Typeface.DEFAULT_BOLD);
