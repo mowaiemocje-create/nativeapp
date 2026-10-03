@@ -367,11 +367,11 @@ public final class CallRecUi {
             row.addView(b, Ui.weight(1f, i % 2 == 0 ? Ui.dp(a, 6) : 0));
         }
         // Glosnosc nagrania rozmowy
-        TextView bh = Ui.text(a, L.t("Głośność nagrania — zawsze do 0 dB; Auto/Mocno dodatkowo wyrównuje mnie i rozmówcę:"), 12f, R.color.pr_muted);
+        TextView bh = Ui.text(a, L.t("Głośność nagrania rozmowy:"), 12f, R.color.pr_muted);
         bh.setPadding(0, (int) Ui.dp(a, 10), 0, (int) Ui.dp(a, 4));
         s.addView(bh);
         String bc = p.getString("callrec_boost", "auto");
-        String[][] bo = {{"auto", L.t("Auto")}, {"strong", L.t("Mocno")}, {"off", L.t("Tylko 0 dB")}};
+        String[][] bo = {{"auto", L.t("Auto")}, {"strong", L.t("Mocno")}, {"off", L.t("Bez wyrównania")}};
         LinearLayout br = Ui.row(a);
         s.addView(br);
         for (int i = 0; i < bo.length; i++) {
@@ -382,6 +382,11 @@ public final class CallRecUi {
             b.setOnClickListener(v -> { p.edit().putString("callrec_boost", code).apply(); rerender.run(); });
             br.addView(b, Ui.weight(1f, i < bo.length - 1 ? Ui.dp(a, 6) : 0));
         }
+        TextView bi = Ui.text(a, L.t("Po rozłączeniu apka wyrównuje głośność: cichy rozmówca jest podgłaśniany, kompresja wyrównuje sylaby, a limiter nie dopuszcza do przesteru. Treść i brzmienie głosu się nie zmieniają."), 11f, R.color.pr_muted);
+        bi.setPadding(0, (int) Ui.dp(a, 4), 0, 0);
+        s.addView(bi);
+        String post = p.getString("callrec_post", "");
+        if (!post.isEmpty()) s.addView(Ui.text(a, "🔊 " + post, 11f, R.color.pr_muted));
         String last = p.getString("callrec_last", "");
         if (!last.isEmpty()) {
             TextView lt = Ui.text(a, L.t("Ostatnie nagranie rozmowy:") + " " + last, 11f, R.color.pr_muted);

@@ -46,7 +46,6 @@ public class CallRecService extends AccessibilityService {
     private boolean recFromList = false;
     private File recFile;
     private volatile int peak = 0;
-    private volatile int outPeak = 0; // szczyt PO wyrownaniu — do normalizacji 0 dB
     private String usedSource = "";
 
     // ── API dla apki ──
@@ -95,14 +94,6 @@ public class CallRecService extends AccessibilityService {
         if (Build.VERSION.SDK_INT >= 29) return new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC};
         if (Build.VERSION.SDK_INT == 28) return new int[]{MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.MIC};
         return new int[]{MediaRecorder.AudioSource.VOICE_CALL, MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC};
-    }
-
-    // Wyrownanie glosnosci: auto (domyslnie) / mocne / wylaczone
-    static CallAgc makeAgc(Context c) {
-        String m = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("callrec_boost", "auto");
-        if ("off".equals(m)) return null;
-        if ("strong".equals(m)) return new CallAgc(13000f, 50f);
-        return new CallAgc(9500f, 30f);
     }
 
     static String sourceName(int s) {
@@ -211,9 +202,10 @@ public class CallRecService extends AccessibilityService {
         recording = true;
         notifyRecording();
         final int[] srcs = sources(this);
+        pcmFile = new File(getCacheDir(), "callrec_" + recStart + ".pcm");
         recThread = new Thread(() -> {
             AudioRecord ar = null;
-            Mp3Stream mp3 = null;
+            java.io.OutputStream pcmOut = null;
             try {
                 int min = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                 int buf = Math.max(min * 2, SAMPLE_RATE);
@@ -229,43 +221,72 @@ public class CallRecService extends AccessibilityService {
                     ar = null;
                 }
                 if (ar == null) throw new Exception("AudioRecord");
-                mp3 = new Mp3Stream(recFile, SAMPLE_RATE);
+                // SUROWY dzwiek rozmowy do pliku tymczasowego — obrobka (wyrownanie, kompresja,
+                // normalizacja, limiter) po rozlaczeniu, na calym nagraniu naraz (CallPost)
+                pcmOut = new java.io.BufferedOutputStream(new java.io.FileOutputStream(pcmFile), 1 << 16);
                 short[] b = new short[2048];
-                final Mp3Stream out = mp3;
-                CallAgc agc = makeAgc(CallRecService.this);
-                outPeak = 0;
-                final CallAgc.Sink sink = (sb, sn) -> {
-                    int op = outPeak;
-                    for (int i = 0; i < sn; i++) { int v = Math.abs((int) sb[i]); if (v > op) op = v; }
-                    outPeak = op;
-                    out.feed(sb, sn);
-                };
+                byte[] bb = new byte[4096];
                 while (recording) {
                     int n = ar.read(b, 0, b.length);
                     if (n <= 0) continue;
                     int pk = peak;
-                    for (int i = 0; i < n; i++) { int v = Math.abs((int) b[i]); if (v > pk) pk = v; }
+                    for (int i = 0; i < n; i++) {
+                        int v = b[i];
+                        if (Math.abs(v) > pk) pk = Math.abs(v);
+                        bb[2 * i] = (byte) (v & 0xff); bb[2 * i + 1] = (byte) ((v >> 8) & 0xff);
+                    }
                     peak = pk;
-                    if (agc != null) agc.process(b, n, sink); else sink.put(b, n);
+                    pcmOut.write(bb, 0, 2 * n);
                 }
-                if (agc != null) agc.flush(sink);
             } catch (Exception e) {
                 recording = false;
                 getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("callrec_last_err", "start: " + e.getMessage()).apply();
             } finally {
                 try { if (ar != null) { ar.stop(); ar.release(); } } catch (Exception e) { }
+                try { if (pcmOut != null) pcmOut.close(); } catch (Exception e) { }
             }
-            File done = mp3 != null ? mp3.finish() : null;
-            // NORMALIZACJA 0 dB: caly plik podglosniony tak, zeby najglosniejsze miejsce trafilo
-            // tuz pod 0 dBFS (bez ponownego kodowania, krokami 1,5 dB — jak "Automatyczna głośność")
-            if (done != null && outPeak >= 33) {
-                double g = 32390.0 / outPeak;
-                int steps = (int) Math.floor(20 * Math.log10(g) / 1.5);
-                if (steps > 0) try { com.pitchrec.backgroundrecorder.Mp3Gain.apply(done, steps); } catch (Exception e) { }
+            recEnd = System.currentTimeMillis();
+            File done = null;
+            if (pcmFile.length() > 2 * SAMPLE_RATE) {
+                notifyProcessing();
+                String mode = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("callrec_boost", "auto");
+                if (CallPost.process(pcmFile, recFile, mode)) done = recFile;
+                else done = encodeRaw(pcmFile, recFile); // awaryjnie: bez obrobki
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("callrec_post", CallPost.lastInfo).apply();
             }
-            h.post(() -> finished(done));
+            pcmFile.delete();
+            final File fin = done;
+            h.post(() -> finished(fin));
         }, "callrec");
         recThread.start();
+    }
+
+    private File pcmFile;
+    private long recEnd = 0L;
+
+    // Awaryjnie (gdy obrobka sie nie uda): surowe nagranie prosto do MP3
+    private static File encodeRaw(File pcm, File mp3) {
+        try (CallPost.Pcm in = new CallPost.Pcm(pcm)) {
+            Mp3Stream out = new Mp3Stream(mp3, SAMPLE_RATE);
+            long n = pcm.length() / 2;
+            short[] buf = new short[4096];
+            int bn = 0;
+            for (long t = 0; t < n; t++) { buf[bn++] = (short) in.next(); if (bn == buf.length) { out.feed(buf, bn); bn = 0; } }
+            if (bn > 0) out.feed(buf, bn);
+            return out.finish();
+        } catch (Exception e) { return null; }
+    }
+
+    // "Przygotowuję nagranie…" — obrobka dlugiej rozmowy trwa chwile
+    private void notifyProcessing() {
+        NotificationManager nm = nm();
+        if (nm == null) return;
+        Notification n = new Notification.Builder(this, CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("⏳ " + L.t("Przygotowuję nagranie rozmowy…"))
+                .setContentText(L.t("Wyrównuję głośność — chwilę to potrwa."))
+                .setOngoing(true).build();
+        try { nm.notify(NOTIF_ID, n); } catch (SecurityException e) { }
     }
 
     private void stopRec() {
@@ -276,7 +297,7 @@ public class CallRecService extends AccessibilityService {
         holdAwake(false);
         if (inForeground) { try { stopForeground(true); } catch (Exception e) { } inForeground = false; }
         cancelNotif(NOTIF_ID);
-        long dur = System.currentTimeMillis() - recStart;
+        long dur = (recEnd > recStart ? recEnd : System.currentTimeMillis()) - recStart;
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         p.edit().putString("callrec_last", usedSource + " · " + (dur / 1000) + " s · peak " + peak + (stopReason.isEmpty() ? "" : " · " + stopReason)).apply();
         if (f == null || !f.exists() || dur < 4000) {
