@@ -540,17 +540,58 @@ public class StatsPage {
         CallRecUi.addArmRow(a, card, () -> fillCalls(card));
     }
 
-    private void loadHarmonogram(LinearLayout card) {
+    // HARMONOGRAM W PAMIECI: przy zmianie okna pokazujemy od razu ostatnio pobrany harmonogram
+    // (bez "Wczytywanie…"); z serwera odswiezamy dopiero, gdy ma ponad 10 min, po wyslaniu
+    // nagrania albo po dotknieciu ⟳.
+    private static final long HARMO_TTL = 10 * 60 * 1000L;
+
+    public static void invalidateHarmonogram(android.content.Context c) {
+        c.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).edit().putLong("harmo_cache_at", 0L).apply();
+    }
+
+    private void loadHarmonogram(LinearLayout card) { loadHarmonogram(card, false); }
+
+    private void loadHarmonogram(LinearLayout card, boolean force) {
+        android.content.SharedPreferences sp = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+        String cached = sp.getString("harmo_cache", null);
+        boolean shown = false;
+        if (cached != null) {
+            try {
+                JSONObject cj = new JSONObject(cached);
+                if (host.email().equals(cj.optString("email", "")) && cj.optJSONObject("visit") != null) {
+                    fillHarmonogram(card, cj.optJSONObject("visit"), cj.optJSONObject("by"), cj.optString("from", ""), cj.optString("to", ""));
+                    shown = true;
+                }
+            } catch (Exception e) { }
+        }
+        if (shown && !force && System.currentTimeMillis() - sp.getLong("harmo_cache_at", 0L) < HARMO_TTL) return;
+        if (shown) { setHarmoRefreshing(card, true); fetchHarmonogram(card, null); return; }
+        card.removeAllViews();
         card.addView(Ui.label(a, "📅 " + L.t("HARMONOGRAM")));
         TextView loading = Ui.text(a, "⏳ " + L.t("Wczytywanie harmonogramu…"), 12f, R.color.pr_muted);
         card.addView(loading);
+        fetchHarmonogram(card, loading);
+    }
+
+    // Ikonka ⟳ w naglowku karty — kreci sie podczas odswiezania
+    private void setHarmoRefreshing(LinearLayout card, boolean on) {
+        View v = card.findViewWithTag("harmo_refresh");
+        if (v instanceof TextView) ((TextView) v).setText(on ? "⏳" : "⟳");
+    }
+
+    private void fetchHarmonogram(LinearLayout card, TextView loading) {
         String today = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new java.util.Date());
         NsClient.request("GET", "/visit_dates?page=1&page_size=5&sort_by=date&sort_order=asc&date_from=" + today, host.token(), host.email(), null, null, r1 -> {
             JSONObject next = firstWithReqs(r1);
             if (next != null) { loadPrev(card, next); return; }
             NsClient.request("GET", "/visit_dates?page=1&page_size=5&sort_by=date&sort_order=desc", host.token(), host.email(), null, null, r2 -> {
                 JSONObject last = firstWithReqs(r2);
-                if (last == null) { loading.setText(r1.ok ? L.t("Brak harmonogramu — trener nie ustalił jeszcze wymagań.") : L.t("Nie udało się wczytać harmonogramu.")); return; }
+                if (last == null) {
+                    if (loading != null) loading.setText(r1.ok ? L.t("Brak harmonogramu — trener nie ustalił jeszcze wymagań.") : L.t("Nie udało się wczytać harmonogramu."));
+                    else setHarmoRefreshing(card, false);
+                    if (r1.ok) a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).edit().remove("harmo_cache").apply();
+                    return;
+                }
                 loadPrev(card, last);
             });
         });
@@ -600,6 +641,19 @@ public class StatsPage {
                 if (!host.isCurrent()) return;
                 JSONObject by = null;
                 try { JSONObject dj = new JSONObject(rs.body); if (dj.optBoolean("ok", false)) by = dj.optJSONObject("byCategory"); } catch (Exception e) { }
+                if (by == null && card.findViewWithTag("harmo_refresh") != null) {
+                    // brak polaczenia — zostaje harmonogram z pamieci (nie zerujemy liczb)
+                    setHarmoRefreshing(card, false);
+                    android.widget.Toast.makeText(a, L.t("Nie udało się odświeżyć harmonogramu — sprawdź internet."), android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (by != null) {
+                    try {
+                        JSONObject cj = new JSONObject().put("email", host.email()).put("visit", visit).put("by", by).put("from", from).put("to", to);
+                        a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).edit()
+                                .putString("harmo_cache", cj.toString()).putLong("harmo_cache_at", System.currentTimeMillis()).apply();
+                    } catch (Exception e) { }
+                }
                 fillHarmonogram(card, visit, by, from, to);
             });
         });
@@ -612,7 +666,21 @@ public class StatsPage {
 
     private void fillHarmonogram(LinearLayout card, JSONObject visit, JSONObject by, String from, String to) {
         card.removeAllViews();
-        card.addView(Ui.label(a, "📅 " + L.t("HARMONOGRAM")));
+        // naglowek: HARMONOGRAM + kiedy pobrano + ⟳ odswiez
+        LinearLayout hh = Ui.row(a);
+        hh.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        hh.addView(Ui.label(a, "📅 " + L.t("HARMONOGRAM")), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        long at = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getLong("harmo_cache_at", 0L);
+        if (at > 0) {
+            String ago = new java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(new java.util.Date(at));
+            hh.addView(Ui.text(a, L.f("stan z {0}", ago), 10f, R.color.pr_muted));
+        }
+        TextView rf = Ui.text(a, "⟳", 22f, R.color.pr_accent);
+        rf.setTag("harmo_refresh");
+        rf.setPadding((int) (12 * d), 0, (int) (4 * d), 0);
+        rf.setOnClickListener(v -> { setHarmoRefreshing(card, true); loadHarmonogram(card, true); });
+        hh.addView(rf);
+        card.addView(hh);
         long deadline = parseDay(to);
         long now = System.currentTimeMillis();
         boolean active = deadline + 86400000L > now;

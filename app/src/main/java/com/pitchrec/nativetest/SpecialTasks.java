@@ -104,8 +104,48 @@ public class SpecialTasks {
         return c.getSharedPreferences("app_settings", Context.MODE_PRIVATE);
     }
 
+    // Zaliczone = zaliczone nagrania Special w NS + zaliczenia wpisane recznie przez trenera w panelu
+    // (np. wideo z WhatsAppa) — te drugie z workera /special-tasks/mine; trener moze je tez cofnac.
     public static java.util.Set<String> approved(Context c) {
-        return new java.util.HashSet<>(prefs(c).getStringSet("special_ok", new java.util.HashSet<>()));
+        java.util.Set<String> s = new java.util.HashSet<>(prefs(c).getStringSet("special_ok", new java.util.HashSet<>()));
+        s.addAll(prefs(c).getStringSet("special_credit", new java.util.HashSet<>()));
+        return s;
+    }
+
+    // Zaliczenia od trenera z panelu (kody ZS01–ZS37) -> nazwy zadan
+    public static void refreshCredits(Context c, Runnable done) {
+        android.content.SharedPreferences p = prefs(c);
+        String token = p.getString("ns_token", null);
+        if (token == null) { if (done != null) done.run(); return; }
+        String q = "/special-tasks/mine?ns_token=" + NsClient.enc(token) + "&ns_email=" + NsClient.enc(p.getString("ns_email", "")) + "&ns_server=new";
+        NsClient.backend("GET", q, null, r -> {
+            try {
+                if (r.ok) {
+                    org.json.JSONObject o = new org.json.JSONObject(r.body);
+                    org.json.JSONArray arr = o.optJSONArray("done");
+                    java.util.Set<String> old = p.getStringSet("special_credit", new java.util.HashSet<>());
+                    java.util.Set<String> now = new java.util.HashSet<>();
+                    boolean first = !p.getBoolean("special_credit_init", false);
+                    for (int i = 0; arr != null && i < arr.length(); i++) {
+                        org.json.JSONObject d = arr.optJSONObject(i);
+                        if (d == null) continue;
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^ZS(\\d{2})$").matcher(d.optString("code", "").toUpperCase(java.util.Locale.US));
+                        if (!m.find()) continue;
+                        int k = Integer.parseInt(m.group(1));
+                        if (k < 1 || k > ALL.length) continue;
+                        Task t = ALL[k - 1];
+                        now.add(t.name);
+                        if (!old.contains(t.name)) {
+                            long ts = d.optLong("done_at", System.currentTimeMillis() / 1000) * 1000L;
+                            TrainerInbox.add(c, "special:" + d.optString("code", ""), TrainerInbox.T_OK, "⭐ " + L.t("Trener zaliczył zadanie specjalne"),
+                                    t.icon + " " + t.shortNameL(), "", "", ts, first);
+                        }
+                    }
+                    p.edit().putStringSet("special_credit", now).putBoolean("special_credit_init", true).apply();
+                }
+            } catch (Exception e) { /* zostaje poprzedni stan */ }
+            if (done != null) done.run();
+        });
     }
 
     public static String state(Context c, Task t) {
@@ -115,7 +155,7 @@ public class SpecialTasks {
     }
 
     // Pobiera nagrania Special z NewSpeech i odczytuje z nazw plikow kody zadan
-    public static void refreshFromNs(Context c, Runnable done) { refreshFromNs(c, done, true); }
+    public static void refreshFromNs(Context c, Runnable done) { refreshFromNs(c, () -> refreshCredits(c, done), true); }
 
     private static void refreshFromNs(Context c, Runnable done, boolean filtered) {
         String token = prefs(c).getString("ns_token", null);
@@ -132,7 +172,7 @@ public class SpecialTasks {
                 try {
                     String b = r.body.trim();
                     org.json.JSONArray arr = b.startsWith("[") ? new org.json.JSONArray(b) : new org.json.JSONObject(b).optJSONArray("collection");
-                    java.util.Set<String> ok = approved(c);
+                    java.util.Set<String> ok = new java.util.HashSet<>(prefs(c).getStringSet("special_ok", new java.util.HashSet<>()));
                     Map<String, String> st = new HashMap<>();
                     for (int i = 0; arr != null && i < arr.length(); i++) {
                         org.json.JSONObject o = arr.optJSONObject(i);

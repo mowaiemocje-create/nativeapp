@@ -467,6 +467,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     void openInboxItem(TrainerInbox.Ev e) {
         if (TrainerInbox.T_DIARY.equals(e.type)) { TrainerInbox.markRead(this, null, e.date, TrainerInbox.T_DIARY); openLoginOnlySection("diary", L.t("DZIENNIK")); return; }
         if (TrainerInbox.T_CALLS.equals(e.type) || TrainerInbox.T_LIST.equals(e.type)) { TrainerInbox.markRead(this, null, null, e.type); return; }
+        if (e.id.startsWith("special:")) {
+            // zaliczenie zadania specjalnego przez trenera — pokaz zadania w Statystykach
+            TrainerInbox.markRead(this, "", null, TrainerInbox.T_OK);
+            prefs().edit().putString("stats_tab", "stats").apply();
+            openLoginOnlySection("stats", L.t("STATYSTYKI"));
+            return;
+        }
         if (!e.rec.isEmpty()) openRating(e.rec);
     }
 
@@ -856,7 +863,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void doLogout() {
-        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").putBoolean("ns_session_expired", false).apply();
+        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").remove("special_credit").remove("special_credit_init").remove("harmo_cache").putBoolean("ns_session_expired", false).apply();
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
         updateNavForLogin();
@@ -1027,6 +1034,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); }
                 setStatus(isFix ? L.t("☁✓ Poprawka wysłana! Czeka na ocenę trenera.") : L.t("☁✓ NS: wysłano (") + L.cat(meta.cat) + ")");
                 Toast.makeText(this, isFix ? L.t("☁✓ Poprawka wysłana") : L.t("☁✓ Wysłano do NS"), Toast.LENGTH_SHORT).show();
+                StatsPage.invalidateHarmonogram(this); // nowe nagranie — harmonogram odswiezy sie przy nastepnym wejsciu
                 if (isFix) fixListCache = null;
                 afterSendRefresh();
             } else if (isFix && r.isLimitError()) {
@@ -1099,6 +1107,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private void sendNext(java.util.List<File> todo, int idx, int okCount) {
         if (idx >= todo.size()) {
             setStatus(L.t("☁✓ Wysłano ") + okCount + L.t(" nagrań do NS"));
+            StatsPage.invalidateHarmonogram(this);
             if ("recs".equals(currentPage)) renderRecsPage();
             return;
         }
@@ -2606,6 +2615,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if ("set".equals(currentPage)) renderSettingsPage();
             return;
         }
+        if (requestCode == CallRecUi.REQ_PERMS || requestCode == 7301) { CallRecUi.refreshOpenSetup(); return; } // kreator nagrywania rozmow / powiadomienia
         if (requestCode == REQUEST_MIC_PERMISSION && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             startRecordingFlow();
@@ -3154,6 +3164,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);
+        CallRecUi.refreshOpenSetup(); // powrot z ustawien systemu — odswiez ✅/⚠️ w kreatorze
         new Handler(Looper.getMainLooper()).postDelayed(() -> { if (!isFinishing() && prefs().getString("callrec_pending", null) == null) CallRecUi.checkOnResume(this); }, 900);
         // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
         if ("recs".equals(currentPage) && isLoggedIn())

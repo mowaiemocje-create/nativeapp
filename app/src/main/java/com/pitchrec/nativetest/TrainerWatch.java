@@ -59,7 +59,9 @@ public final class TrainerWatch {
         NsClient.request("GET", "/records?page_size=30&sort_by=date&sort_order=desc", token, email, null, null, r -> {
             try { if (r.ok) checkRecords(ctx, r.body); } catch (Exception e) { }
             checkVoice(ctx, token, email, () ->
-                checkDiaryReplies(ctx, token, email, () -> { running = false; if (done != null) done.run(); }));
+                checkDiaryReplies(ctx, token, email, () ->
+                    // zadania specjalne zaliczone recznie przez trenera w panelu
+                    SpecialTasks.refreshCredits(ctx, () -> { running = false; if (done != null) done.run(); })));
         });
     }
 

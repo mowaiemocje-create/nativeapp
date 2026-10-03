@@ -881,14 +881,33 @@ public class DiaryPage {
                 NsClient.backend("GET", q, null, r2 -> {
                     try { if (r2.ok) got[k] = new JSONObject(r2.body); } catch (Exception e) { }
                     if (--left[0] > 0 || !host.isCurrent()) return;
+                    lastReplies = got;
+                    lastReplyDates = dates;
+                    renderReplies(box, uid);
+                });
+            }
+        });
+    }
+
+    // Odpowiedzi trenera na gorze dziennika. Te, przy ktorych kursant kliknal „Rozumiem”, znikaja
+    // (mozna je jeszcze rozwinac linkiem „przeczytane”).
+    private JSONObject[] lastReplies = null;
+    private List<String> lastReplyDates = null;
+    private boolean showAckedReplies = false;
+
+    private void renderReplies(LinearLayout box, String uid) {
+        JSONObject[] got = lastReplies;
+        List<String> dates = lastReplyDates;
+        if (got == null || dates == null) return;
                     box.removeAllViews();
-                    int shown = 0;
+                    int shown = 0, acked = 0;
                     for (int j = 0; j < dates.size() && shown < 3; j++) {
                         JSONObject o = got[j];
                         if (o == null) continue;
                         String txt = o.isNull("text_reply") ? "" : o.optString("text_reply", "").trim();
                         boolean audio = o.optBoolean("has_audio", false);
                         if (txt.isEmpty() && !audio) continue;
+                        if (StudentAck.sent(a, "diary", dates.get(j), "ok")) { acked++; if (!showAckedReplies) continue; }
                         if (shown == 0) {
                             TextView h = Ui.text(a, "🎓 " + L.t("ODPOWIEDZI TRENERA"), 12f, R.color.pr_purple);
                             h.setTypeface(Typeface.DEFAULT_BOLD);
@@ -914,15 +933,20 @@ public class DiaryPage {
                             pl.topMargin = (int) (8 * d);
                             card.addView(play, pl);
                         }
-                        StudentAck.addButtons(a, card, "diary", dt);
+                        // „Rozumiem” -> odpowiedz znika z gory dziennika
+                        StudentAck.addButtons(a, card, "diary", dt, () -> card.postDelayed(() -> renderReplies(box, uid), 900));
                         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                         cl.bottomMargin = (int) (8 * d);
                         box.addView(card, cl);
                         TrainerInbox.markRead(a, null, dt, TrainerInbox.T_DIARY);
                     }
-                });
-            }
-        });
+                    if (acked > 0) {
+                        TextView more = Ui.text(a, showAckedReplies ? "▴ " + L.t("Ukryj przeczytane odpowiedzi trenera")
+                                : "👍 " + L.f("Przeczytane odpowiedzi trenera: {0} · pokaż", acked), 12f, R.color.pr_muted);
+                        more.setPadding(0, (int) (2 * d), 0, (int) (8 * d));
+                        more.setOnClickListener(v -> { showAckedReplies = !showAckedReplies; renderReplies(box, uid); });
+                        box.addView(more);
+                    }
     }
 
     private void showHistory() {

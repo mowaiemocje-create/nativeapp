@@ -101,8 +101,8 @@ public class CallRecService extends AccessibilityService {
     static CallAgc makeAgc(Context c) {
         String m = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("callrec_boost", "auto");
         if ("off".equals(m)) return null;
-        if ("strong".equals(m)) return new CallAgc(6500f, 30f);
-        return new CallAgc(4000f, 16f);
+        if ("strong".equals(m)) return new CallAgc(13000f, 50f);
+        return new CallAgc(9500f, 30f);
     }
 
     static String sourceName(int s) {
@@ -144,28 +144,64 @@ public class CallRecService extends AccessibilityService {
         h.post(tick);
     }
 
-    private boolean inCall() {
+    private int lastMode = 0;
+    private int notCallTicks = 0;
+
+    private int mode() {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        if (am == null) return false;
-        int m = am.getMode();
-        return m == AudioManager.MODE_IN_CALL;
+        return am == null ? 0 : am.getMode();
+    }
+
+    // start nagrywania: zwykla rozmowa telefoniczna
+    private boolean inCall() { lastMode = mode(); return lastMode == AudioManager.MODE_IN_CALL; }
+
+    // w trakcie nagrywania rozmowa "trwa" takze w trybach, w ktore niektore telefony przelaczaja sie
+    // w czasie polaczenia (VoLTE / Wi-Fi calling = IN_COMMUNICATION, filtrowanie polaczen itp.)
+    private boolean stillInCall() {
+        lastMode = mode();
+        return lastMode == 2 || lastMode == 3 || lastMode == 4 || lastMode == 5 || lastMode == 6;
     }
 
     // Co sekunde sprawdzamy, czy trwa rozmowa (tryb audio telefonu) — bez uprawnien do stanu telefonu
     private final Runnable tick = new Runnable() {
         @Override public void run() {
-            boolean call = inCall();
+            boolean call = recording ? stillInCall() : inCall();
             boolean want = armed(CallRecService.this) || allOn(CallRecService.this);
             if (!recording && call && want) startRec();
-            else if (recording && !call) stopRec();
+            else if (recording && !call) {
+                // koniec dopiero po 3 kolejnych sprawdzeniach — chwilowa zmiana trybu (np. przy wygaszeniu
+                // ekranu czujnikiem zblizeniowym) nie przerywa nagrania
+                if (++notCallTicks >= 3) { stopReason = "mode " + lastMode; stopRec(); }
+            } else notCallTicks = 0;
             // gdy nic nie ma byc nagrane — sprawdzamy rzadziej (oszczednie)
             boolean active = recording || want;
             h.postDelayed(this, active ? 1000L : 15000L);
         }
     };
 
+    private android.os.PowerManager.WakeLock wakeLock;
+    private String stopReason = "";
+    private boolean inForeground = false;
+
+    // Procesor nie moze zasnac w czasie nagrywania (inaczej po wygaszeniu ekranu nagranie sie urywa)
+    private void holdAwake(boolean on) {
+        try {
+            if (on) {
+                if (wakeLock == null) {
+                    android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+                    wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "newspeech:callrec");
+                    wakeLock.setReferenceCounted(false);
+                }
+                wakeLock.acquire(3 * 60 * 60 * 1000L); // najdluzej 3 h
+            } else if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Exception e) { }
+    }
+
     private void startRec() {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        notCallTicks = 0;
+        stopReason = "";
+        holdAwake(true);
         recFromList = armed(this);
         recLabel = recFromList ? p.getString("callrec_label", "") : "";
         disarm(this);
@@ -237,10 +273,12 @@ public class CallRecService extends AccessibilityService {
     }
 
     private void finished(File f) {
+        holdAwake(false);
+        if (inForeground) { try { stopForeground(true); } catch (Exception e) { } inForeground = false; }
         cancelNotif(NOTIF_ID);
         long dur = System.currentTimeMillis() - recStart;
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        p.edit().putString("callrec_last", usedSource + " · " + (dur / 1000) + " s · peak " + peak).apply();
+        p.edit().putString("callrec_last", usedSource + " · " + (dur / 1000) + " s · peak " + peak + (stopReason.isEmpty() ? "" : " · " + stopReason)).apply();
         if (f == null || !f.exists() || dur < 4000) {
             if (f != null) f.delete();
             if (f == null) notifyDone(L.t("Nie udało się nagrać rozmowy"), L.t("Telefon nie pozwolił nagrywać. Sprawdź Ustawienia → Nagrywanie rozmów."), false);
@@ -276,6 +314,14 @@ public class CallRecService extends AccessibilityService {
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle(t).setContentText(L.t("Nagrywanie skończy się samo po rozłączeniu."))
                 .setOngoing(true).build();
+        // usluga pierwszoplanowa (mikrofon) — system nie usypia apki w czasie rozmowy; gdy telefon
+        // na to nie pozwoli, zostaje zwykle powiadomienie
+        try {
+            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, 128 /* FOREGROUND_SERVICE_TYPE_MICROPHONE */);
+            else startForeground(NOTIF_ID, n);
+            inForeground = true;
+            return;
+        } catch (Exception e) { inForeground = false; }
         try { nm.notify(NOTIF_ID, n); } catch (SecurityException e) { }
     }
 

@@ -47,39 +47,159 @@ public final class CallRecUi {
     }
 
     // Instrukcja wlaczenia uslugi ulatwien dostepu (z obejsciem "ustawien z ograniczeniami" Androida 13+)
+    // ── KREATOR "SPRAWDŹ TELEFON": lista wszystkiego, czego potrzebuje nagrywanie rozmow,
+    // ze stanem ✅/⚠️. Co sie da — apka ustawia sama (zgody: mikrofon, powiadomienia, bateria);
+    // reszte otwiera dokladnie na wlasciwym ekranie ustawien (Android nie pozwala apce zmieniac
+    // ustawien systemu bez Ciebie). Po powrocie do apki lista sama sie odswieza.
+    private static java.lang.ref.WeakReference<LinearLayout> openBox = null;
+    private static java.lang.ref.WeakReference<Activity> openAct = null;
+    static final int REQ_PERMS = 7302;
+
     public static void setup(Activity a) {
-        float d = a.getResources().getDisplayMetrics().density;
         LinearLayout box = new LinearLayout(a);
         box.setOrientation(LinearLayout.VERTICAL);
-        int p = (int) (18 * d);
-        box.setPadding(p, (int) (8 * d), p, 0);
-        box.addView(step(a, "1", L.t("Otwórz „Ułatwienia dostępu” i znajdź „New Speech — nagrywanie rozmów” (na Samsungu: Zainstalowane aplikacje; na innych: Pobrane aplikacje / Usługi). Włącz i potwierdź.")));
-        Button acc = Ui.button(a, "♿ " + L.t("Otwórz ułatwienia dostępu"), R.color.pr_accent, true);
-        acc.setOnClickListener(v -> openAccessibility(a));
-        box.addView(acc);
-        if (Build.VERSION.SDK_INT >= 33) {
-            box.addView(Ui.spacer(a, 10));
-            box.addView(step(a, "2", L.t("Przełącznik jest szary albo widzisz „Ustawienie ograniczone”? Otwórz Informacje o aplikacji → menu ⋮ w prawym górnym rogu → „Zezwól na ustawienia z ograniczeniami”. Potem wróć do kroku 1.")));
-            Button info = Ui.button(a, "ⓘ " + L.t("Otwórz informacje o aplikacji"), R.color.pr_muted, false);
-            info.setOnClickListener(v -> openAppInfo(a));
-            box.addView(info);
-        }
-        // Samsung i inni wylaczaja usluge, gdy apka ma ograniczenia baterii
-        box.addView(Ui.spacer(a, 10));
-        box.addView(step(a, Build.VERSION.SDK_INT >= 33 ? "3" : "2", L.t("Żeby telefon sam nie wyłączał nagrywania: bateria apki „Bez ograniczeń”. Na Samsungu też: Ustawienia → Bateria → Limity użycia w tle → „Aplikacje nigdy nieusypiane” → dodaj New Speech.")
-                + (batteryFree(a) ? "  ✅" : "")));
-        Button bat = Ui.button(a, "🔋 " + L.t("Bateria: bez ograniczeń"), batteryFree(a) ? R.color.pr_muted : R.color.pr_accent, !batteryFree(a));
-        bat.setOnClickListener(v -> askBattery(a));
-        box.addView(bat);
-        box.addView(Ui.spacer(a, 10));
-        box.addView(step(a, Build.VERSION.SDK_INT >= 33 ? "4" : "3", L.t("Dzwoń przyciskiem ☎ w apce. Jeśli rozmówcę słabo słychać na nagraniu, włącz w czasie rozmowy głośnik.")));
+        int p = (int) Ui.dp(a, 18);
+        box.setPadding(p, (int) Ui.dp(a, 8), p, 0);
+        openBox = new java.lang.ref.WeakReference<>(box);
+        openAct = new java.lang.ref.WeakReference<>(a);
+        fillWizard(a, box);
         android.widget.ScrollView sv = new android.widget.ScrollView(a);
         sv.addView(box);
-        new AlertDialog.Builder(a)
-                .setTitle("📞 " + L.t("Włącz nagrywanie rozmów"))
+        AlertDialog dlg = new AlertDialog.Builder(a)
+                .setTitle("📞 " + L.t("Nagrywanie rozmów — sprawdź telefon"))
                 .setView(sv)
                 .setPositiveButton("OK", null)
                 .show();
+        dlg.setOnDismissListener(x -> { openBox = null; });
+    }
+
+    // Wolane z MainActivity.onResume / po zgodach — odswieza stany ✅/⚠️ w otwartym kreatorze
+    public static void refreshOpenSetup() {
+        LinearLayout box = openBox == null ? null : openBox.get();
+        Activity a = openAct == null ? null : openAct.get();
+        if (box != null && a != null && !a.isFinishing()) fillWizard(a, box);
+    }
+
+    static boolean has(Context c, String perm) {
+        return androidx.core.content.ContextCompat.checkSelfPermission(c, perm) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    static boolean notifOk(Context c) {
+        if (Build.VERSION.SDK_INT < 33) return true;
+        return has(c, "android.permission.POST_NOTIFICATIONS");
+    }
+
+    private static void fillWizard(Activity a, LinearLayout box) {
+        box.removeAllViews();
+        boolean mic = has(a, android.Manifest.permission.RECORD_AUDIO);
+        boolean notif = notifOk(a);
+        boolean acc = CallRecService.enabled(a);
+        boolean bat = batteryFree(a);
+        int ok = (mic ? 1 : 0) + (notif ? 1 : 0) + (acc ? 1 : 0) + (bat ? 1 : 0);
+        TextView sum = Ui.text(a, ok == 4 ? "🎉 " + L.t("Wszystko gotowe — rozmowy będą się nagrywać.") : L.f("Gotowe {0} z 4. Dotknij przycisków poniżej.", ok), 14f, R.color.pr_text);
+        sum.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        if (ok == 4) sum.setTextColor(0xFF00E676);
+        box.addView(sum);
+        if (ok < 4) {
+            Button all = Ui.button(a, "⚡ " + L.t("Ustaw automatycznie, co się da"), R.color.pr_accent, true);
+            all.setOnClickListener(v -> autoFix(a));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = (int) Ui.dp(a, 8);
+            box.addView(all, lp);
+        }
+        box.addView(Ui.spacer(a, 8));
+        row(a, box, mic, "🎤 " + L.t("Mikrofon"), L.t("Zgoda na nagrywanie dźwięku."), L.t("Zezwól"), () -> askPerms(a));
+        row(a, box, notif, "🔔 " + L.t("Powiadomienia"), L.t("Żeby widzieć „Nagrywam rozmowę” i móc od razu opisać nagranie."), L.t("Zezwól"), () -> askPerms(a));
+        row(a, box, bat, "🔋 " + L.t("Bateria bez ograniczeń"), L.t("Bez tego telefon usypia apkę — wyłącza usługę albo urywa nagranie po wygaszeniu ekranu."), L.t("Ustaw"), () -> askBattery(a));
+        row(a, box, acc, "♿ " + L.t("Usługa nagrywania rozmów"), L.t("Ułatwienia dostępu → Zainstalowane / Pobrane aplikacje → „New Speech — nagrywanie rozmów” → Włącz."), L.t("Otwórz"), () -> openAccessibility(a));
+        if (!acc && Build.VERSION.SDK_INT >= 33)
+            hint(a, box, L.t("Przełącznik jest szary („Ustawienie ograniczone”)? Informacje o aplikacji → ⋮ w prawym górnym rogu → „Zezwól na ustawienia z ograniczeniami”, potem wróć tutaj."), L.t("Informacje o aplikacji"), () -> openAppInfo(a));
+        // producent: dodatkowe usypianie aplikacji (nie da sie sprawdzic stanu — tylko otworzyc)
+        Intent vendor = vendorIntent(a);
+        if (vendor != null)
+            hint(a, box, "📱 " + vendorText(), L.t("Otwórz"), () -> { try { a.startActivity(vendor); } catch (Exception e) { openAppInfo(a); } });
+        hint(a, box, "💡 " + L.t("Wygaszanie ekranu przy uchu jest normalne — nagrywanie trwa dalej. Nie używaj słuchawek Bluetooth (nie nagrywają się)."), null, null);
+    }
+
+    private static void row(Activity a, LinearLayout box, boolean ok, String title, String sub, String btn, Runnable fix) {
+        LinearLayout r = Ui.row(a);
+        r.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        int pd = (int) Ui.dp(a, 8);
+        r.setPadding(pd, pd, pd, pd);
+        r.setBackground(Ui.rounded(ok ? 0x2200E676 : 0x22FFB300, ok ? 0x6600E676 : 0x66FFB300, Ui.dp(a, 1), Ui.dp(a, 10)));
+        LinearLayout tb = new LinearLayout(a);
+        tb.setOrientation(LinearLayout.VERTICAL);
+        TextView t = Ui.text(a, (ok ? "✅ " : "⚠️ ") + title, 14f, R.color.pr_text);
+        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        tb.addView(t);
+        if (!ok) tb.addView(Ui.text(a, sub, 11f, R.color.pr_muted));
+        r.addView(tb, Ui.weight(1f, Ui.dp(a, 6)));
+        if (!ok) {
+            Button b = Ui.button(a, btn, R.color.pr_accent, true);
+            b.setOnClickListener(v -> fix.run());
+            r.addView(b);
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = (int) Ui.dp(a, 6);
+        box.addView(r, lp);
+    }
+
+    private static void hint(Activity a, LinearLayout box, String text, String btn, Runnable go) {
+        TextView t = Ui.text(a, text, 11f, R.color.pr_muted);
+        t.setPadding(0, (int) Ui.dp(a, 4), 0, (int) Ui.dp(a, 2));
+        box.addView(t);
+        if (btn != null) {
+            Button b = Ui.button(a, btn, R.color.pr_muted, false);
+            b.setOnClickListener(v -> go.run());
+            box.addView(b);
+        }
+    }
+
+    // Kolejno: zgody (mikrofon + powiadomienia jednym okienkiem) -> bateria -> ulatwienia dostepu
+    static void autoFix(Activity a) {
+        if (!has(a, android.Manifest.permission.RECORD_AUDIO) || !notifOk(a)) { askPerms(a); return; }
+        if (!batteryFree(a)) { askBattery(a); return; }
+        if (!CallRecService.enabled(a)) { openAccessibility(a); return; }
+        refreshOpenSetup();
+    }
+
+    static void askPerms(Activity a) {
+        java.util.List<String> need = new java.util.ArrayList<>();
+        if (!has(a, android.Manifest.permission.RECORD_AUDIO)) need.add(android.Manifest.permission.RECORD_AUDIO);
+        if (!notifOk(a)) need.add("android.permission.POST_NOTIFICATIONS");
+        if (need.isEmpty()) { refreshOpenSetup(); return; }
+        androidx.core.app.ActivityCompat.requestPermissions(a, need.toArray(new String[0]), REQ_PERMS);
+    }
+
+    // Ekran usypiania aplikacji u producenta (Samsung, Xiaomi, Huawei, Oppo/Realme, Vivo)
+    static Intent vendorIntent(Context c) {
+        String m = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(java.util.Locale.US);
+        String[][] cand;
+        if (m.contains("samsung")) cand = new String[][]{
+                {"com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"},
+                {"com.samsung.android.sm", "com.samsung.android.sm.battery.ui.BatteryActivity"}};
+        else if (m.contains("xiaomi") || m.contains("redmi") || m.contains("poco")) cand = new String[][]{
+                {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"}};
+        else if (m.contains("huawei") || m.contains("honor")) cand = new String[][]{
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"}};
+        else if (m.contains("oppo") || m.contains("realme") || m.contains("oneplus")) cand = new String[][]{
+                {"com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"}};
+        else if (m.contains("vivo")) cand = new String[][]{
+                {"com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"}};
+        else return null;
+        for (String[] cn : cand) {
+            Intent i = new Intent().setComponent(new android.content.ComponentName(cn[0], cn[1])).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try { if (c.getPackageManager().resolveActivity(i, 0) != null) return i; } catch (Exception e) { }
+        }
+        return null;
+    }
+
+    static String vendorText() {
+        String m = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(java.util.Locale.US);
+        if (m.contains("samsung")) return L.t("Samsung: Bateria → Limity użycia w tle → „Aplikacje nigdy nieusypiane” → dodaj New Speech.");
+        if (m.contains("xiaomi") || m.contains("redmi") || m.contains("poco")) return L.t("Xiaomi: włącz „Autostart” dla New Speech.");
+        if (m.contains("huawei") || m.contains("honor")) return L.t("Huawei: Uruchamianie aplikacji → New Speech → zarządzaj ręcznie (wszystko włączone).");
+        return L.t("Zezwól apce New Speech na działanie w tle / autostart.");
     }
 
     private static TextView step(Activity a, String n, String s) {
@@ -205,8 +325,8 @@ public final class CallRecUi {
             bw.setOnClickListener(v -> askBattery(a));
             s.addView(bw);
         }
-        Button en = Ui.button(a, on ? L.t("Ustawienia ułatwień dostępu") : "📞 " + L.t("Włącz nagrywanie rozmów"), on ? R.color.pr_muted : R.color.pr_accent, !on);
-        en.setOnClickListener(v -> { if (on) openAccessibility(a); else setup(a); });
+        Button en = Ui.button(a, on ? "🔧 " + L.t("Sprawdź telefon (kreator ustawień)") : "📞 " + L.t("Włącz nagrywanie rozmów"), on ? R.color.pr_muted : R.color.pr_accent, !on);
+        en.setOnClickListener(v -> setup(a));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) Ui.dp(a, 6);
         s.addView(en, lp);

@@ -63,6 +63,7 @@
             android:name=".CallRecService"
             android:label="@string/callrec_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:foregroundServiceType="microphone"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

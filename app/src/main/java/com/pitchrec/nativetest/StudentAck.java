@@ -55,16 +55,19 @@ public final class StudentAck {
     }
 
     // Wiersz przyciskow pod komentarzem trenera
-    public static void addButtons(Activity a, LinearLayout box, String kind, String ref) {
+    public static void addButtons(Activity a, LinearLayout box, String kind, String ref) { addButtons(a, box, kind, ref, null); }
+
+    // onOk: wolane po udanym "Rozumiem" (np. dziennik chowa wtedy odpowiedz trenera)
+    public static void addButtons(Activity a, LinearLayout box, String kind, String ref, Runnable onOk) {
         float d = a.getResources().getDisplayMetrics().density;
         LinearLayout wrap = new LinearLayout(a);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(0, (int) (8 * d), 0, 0);
         box.addView(wrap);
-        render(a, wrap, kind, ref);
+        render(a, wrap, kind, ref, onOk);
     }
 
-    private static void render(Activity a, LinearLayout wrap, String kind, String ref) {
+    private static void render(Activity a, LinearLayout wrap, String kind, String ref, Runnable onOk) {
         float d = a.getResources().getDisplayMetrics().density;
         wrap.removeAllViews();
         boolean ok = sent(a, kind, ref, "ok"), q = sent(a, kind, ref, "question");
@@ -78,7 +81,8 @@ public final class StudentAck {
             Button b1 = Ui.button(a, "👍 " + L.t("Rozumiem"), R.color.pr_accent, false);
             b1.setOnClickListener(v -> { b1.setEnabled(false); send(a, kind, ref, "ok", null, s -> {
                 if (!s) { b1.setEnabled(true); Toast.makeText(a, L.t("Nie udało się wysłać") + " — " + lastError, Toast.LENGTH_LONG).show(); }
-                render(a, wrap, kind, ref); }); });
+                render(a, wrap, kind, ref, onOk);
+                if (s && onOk != null) onOk.run(); }); });
             row.addView(b1, Ui.weight(1f, 6 * d));
         }
         Button b2 = Ui.button(a, "❓ " + L.t(q ? "Kolejne pytanie" : "Mam pytanie"), R.color.pr_pause, false);
@@ -96,7 +100,7 @@ public final class StudentAck {
                         if (txt.isEmpty()) return;
                         send(a, kind, ref, "question", txt, s -> {
                             Toast.makeText(a, s ? L.t("Wysłano do trenera ✓") : L.t("Nie udało się wysłać") + " — " + lastError, Toast.LENGTH_LONG).show();
-                            render(a, wrap, kind, ref);
+                            render(a, wrap, kind, ref, onOk);
                         });
                     })
                     .setNegativeButton(L.t("Anuluj"), null).show();
