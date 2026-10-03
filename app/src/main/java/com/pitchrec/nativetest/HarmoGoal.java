@@ -30,7 +30,7 @@ public final class HarmoGoal {
             if (v != null) { withVisit(c, token, email, v, done); return; }
             NsClient.request("GET", "/visit_dates?page=1&page_size=5&sort_by=date&sort_order=desc", token, email, null, null, r2 -> {
                 JSONObject last = firstWithReqs(r2);
-                if (last == null) { save(c, false, 0, 0, 0, "", false); busy = false; if (done != null) done.run(); return; }
+                if (last == null) { if (r2.ok) save(c, false, 0, 0, 0, "", false, ""); busy = false; if (done != null) done.run(); return; }
                 withVisit(c, token, email, last, done);
             });
         });
@@ -94,7 +94,7 @@ public final class HarmoGoal {
                     int elapsed = (int) Math.max(1, Math.ceil((now - st) / 86400000.0));
                     boolean onTrack = totSent / (double) elapsed >= Math.max(missing, toSend) / (double) daysLeft - 0.01;
                     String dl = to.length() >= 10 ? to.substring(8, 10) + "." + to.substring(5, 7) : to;
-                    save(c, active && totReq > 0, perDay, missing, daysLeft, dl, onTrack);
+                    save(c, active && totReq > 0, perDay, missing, daysLeft, dl, onTrack, to);
                 } catch (Exception e) { }
                 busy = false;
                 if (done != null) done.run();
@@ -106,8 +106,8 @@ public final class HarmoGoal {
         try { return new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(d.substring(0, 10)).getTime(); } catch (Exception e) { return 0L; }
     }
 
-    private static void save(Context c, boolean active, int perDay, int missing, int daysLeft, String dl, boolean onTrack) {
-        prefs(c).edit().putLong("goal_at", System.currentTimeMillis()).putBoolean("goal_active", active)
+    private static void save(Context c, boolean active, int perDay, int missing, int daysLeft, String dl, boolean onTrack, String endDay) {
+        prefs(c).edit().putLong("goal_at", System.currentTimeMillis()).putBoolean("goal_active", active).putString("goal_end", endDay == null ? "" : endDay)
                 .putInt("goal_per_day", perDay).putInt("goal_missing", missing).putInt("goal_days", daysLeft)
                 .putString("goal_deadline", dl).putBoolean("goal_on_track", onTrack).apply();
     }
@@ -119,6 +119,17 @@ public final class HarmoGoal {
             f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
             return f.format(new java.util.Date(f.parse(d.substring(0, 10)).getTime() + 86400000L));
         } catch (Exception e) { return d; }
+    }
+
+    // KONIEC HARMONOGRAMU: ostatni harmonogram juz minal (i nie ma nowego) — apka nie wysyla
+    // wtedy powiadomien (przypomnienia, oceny, dostepnosc, dni telefonu). Wracaja same, gdy
+    // trener doda nowy harmonogram (sprawdzane w tle co ~30 min).
+    public static boolean ended(Context c) {
+        SharedPreferences p = prefs(c);
+        if (p.getString("ns_token", null) == null) return false;
+        String end = p.getString("goal_end", "");
+        if (end.length() < 10) return false;
+        return System.currentTimeMillis() > parse(end) + 86400000L;
     }
 
     public static void invalidate(Context c) { prefs(c).edit().putLong("goal_at", 0L).apply(); }

@@ -136,6 +136,7 @@ public final class AvailWatch {
             PendingIntent dp = PendingIntent.getActivity(c, id + 1, dial, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             b.addAction(new Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(c, android.R.drawable.ic_menu_call), "☎ " + L.t("Zadzwoń"), dp).build());
         }
+        if (HarmoGoal.ended(c)) return; // harmonogram sie skonczyl — bez powiadomien
         try { nm.notify(id, b.build()); } catch (SecurityException e) { }
     }
 }

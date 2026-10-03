@@ -168,6 +168,7 @@ public class ReminderReceiver extends BroadcastReceiver {
                 .setContentIntent(cp)
                 .setAutoCancel(true)
                 .build();
+        if (HarmoGoal.ended(c)) return; // harmonogram sie skonczyl — bez powiadomien
         try { nm.notify(2003, n); } catch (SecurityException e) { /* brak zgody na powiadomienia */ }
     }
 }

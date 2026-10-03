@@ -727,6 +727,10 @@ public class StatsPage {
         hero.addView(heroTxt, Ui.weight(1f, 0));
         card.addView(hero);
         card.addView(bar(pct / 100f, pct >= 100 ? 0xFF00C853 : 0xFFE8820C, 10));
+        if (!active) { // harmonogram sie skonczyl — mozna zamowic kolejna analize mowy
+            card.addView(Ui.spacer(a, 10));
+            card.addView(AnalysisOffer.card(a, true));
+        }
 
         // Tempo + motywacja
         if (totReq > 0 && active && missing > 0) {

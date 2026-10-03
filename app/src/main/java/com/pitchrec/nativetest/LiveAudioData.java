@@ -65,6 +65,10 @@ public class LiveAudioData {
     public static final Norms norms = new Norms();
     // Podpowiedzi na wykresie — wlaczane/wylaczane w Ustawieniach
     public static volatile boolean showPauses = true, showNorms = true, showArrows = true, showTempo = false;
+    // Normy i strzalki intonacji — tylko dla zalogowanych kursantow (ustawienie zostaje zapamietane)
+    public static volatile boolean loggedIn = false;
+    public static boolean normsOn() { return showNorms && loggedIn; }
+    public static boolean arrowsOn() { return showArrows && loggedIn; }
     // wczytywanie pliku do DAW: pomijamy obliczenia potrzebne tylko na zywo (szybsze ladowanie)
     public static volatile boolean batch = false;
     private static final PitchTracker.Sink PITCH_SINK = LiveAudioData::appendPitch;
@@ -130,7 +134,7 @@ public class LiveAudioData {
     private static void handleSyllables(double now) {
         Norms.Segment done = norms.pollFinished();
         // sylaby sa potrzebne do tempa ORAZ do strzalek (po jednej na sylabe)
-        if (!showTempo && !showArrows) { liveSyllables = null; return; }
+        if (!showTempo && !arrowsOn()) { liveSyllables = null; return; }
         if (done != null) {
             List<SyllableDetector.Syl> s;
             if (done.fourPhase && done.unitEnd > 0) {

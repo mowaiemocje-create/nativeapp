@@ -793,6 +793,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .setMessage(message)
                 .setPositiveButton(L.t("Przejdź do logowania"), (d, w) -> showPage("set"))
                 .setNegativeButton(getString(R.string.btn_cancel), null)
+                // nie jestes jeszcze kursantem? — od razu oferta analizy mowy
+                .setNeutralButton("🎯 " + L.t("Analiza mowy"), (d, w) -> AnalysisOffer.dialog(this))
                 .show();
     }
 
@@ -875,6 +877,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private android.widget.LinearLayout accountSection;
 
     private void refreshAccountSection() {
+        LiveAudioData.loggedIn = isLoggedIn();
         if (accountSection == null) return;
         accountSection.removeAllViews();
         float density = getResources().getDisplayMetrics().density;
@@ -1463,6 +1466,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(acc);
         refreshAccountSection();
         if (isLoggedIn()) verifySession(null);
+        else c.addView(AnalysisOffer.card(this, false)); // niezalogowany: mozna wykupic analize mowy
 
         // 2) MAPA NAGRAN — duzy przycisk od razu pod logowaniem, obok NORMY
         final boolean logged = isLoggedIn();
@@ -1476,7 +1480,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         normBtn.setTextSize(13f);
         normBtn.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
         normBtn.setOnClickListener(v -> renderNormsPage());
-        tiles.addView(normBtn, Ui.weight(1f, 0));
+        if (logged) tiles.addView(normBtn, Ui.weight(1f, 0)); // normy tylko dla kursantow (po zalogowaniu)
         android.widget.LinearLayout.LayoutParams tlp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
         tlp.bottomMargin = (int) (8 * d);
         c.addView(tiles, tlp);
@@ -1580,6 +1584,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         // 3a) Przypomnienia (tylko po zalogowaniu — sprawdzaja nagrania i dziennik w NS)
         android.widget.LinearLayout rem = logged ? section(c, "rem", "🔔  " + L.t("PRZYPOMNIENIA")) : new android.widget.LinearLayout(this);
+        if (logged && HarmoGoal.ended(this)) {
+            TextView paused = Ui.text(this, "⏸ " + L.t("Harmonogram się zakończył — powiadomienia są wstrzymane. Wrócą same, gdy trener doda nowy harmonogram."), 12f, R.color.pr_warn);
+            paused.setPadding(0, 0, 0, (int) (6 * d));
+            rem.addView(paused);
+        }
         rem.setOrientation(android.widget.LinearLayout.VERTICAL);
         rem.addView(toggleRow("🔔 " + L.t("Przypomnienie o 20:00"), ReminderReceiver.enabled(this), on -> {
             prefs().edit().putBoolean("reminder_on", on).apply();
@@ -1608,9 +1617,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // 3b) Podpowiedzi na wykresie i w statystykach
         android.widget.LinearLayout hints = section(c, "hints", "💡  " + L.t("PODPOWIEDZI") + "  ·  " + L.t("pauzy, strzałki, tempo"));
         hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
-        hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
-        hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
-        if (LiveAudioData.showArrows) {
+        // normy i strzalki — tylko dla zalogowanych kursantow
+        if (logged) hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
+        if (logged) hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
+        if (logged && LiveAudioData.showArrows) {
             hints.addView(normStepper("   " + L.t("Strzałka od zmiany tonu o"), LiveAudioData.arrowThresholdSt, 0.5f, 6f, 0.5f, "%.1f st", v -> { LiveAudioData.arrowThresholdSt = v; saveDawSettings(); }));
             hints.addView(hint(L.t("st = półton. Mniejsza zmiana tonu w sylabie nie daje strzałki; im większa zmiana, tym bardziej stroma strzałka.")));
         }
@@ -1652,8 +1662,25 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         addColorRow(daw, Ui.text(this, L.t("Kolor fali"), 13f, R.color.pr_text), LiveAudioData.waveColor, color -> { LiveAudioData.waveColor = color; saveDawSettings(); });
 
         // 6) Mapa i dostepnosc do rozmowy
-        android.widget.LinearLayout mp = section(c, "map", "📍  " + L.t("MAPA, GPS I DOSTĘPNOŚĆ"));
-        if (gpsHolder[0] != null) { mp.addView(gpsHolder[0]); mp.addView(divider()); }
+        android.widget.LinearLayout mp = section(c, "map", logged ? "📍  " + L.t("MAPA, GPS I DOSTĘPNOŚĆ") : "📍  GPS");
+        if (gpsHolder[0] != null) { mp.addView(gpsHolder[0]); if (logged) mp.addView(divider()); }
+        if (logged) addMapSettings(mp); // mapa i "Chętnie porozmawiam" — tylko dla zalogowanych
+
+        // 7) Jezyk
+        android.widget.LinearLayout upd = section(c, "upd", "⬆  " + L.t("AKTUALIZACJE") + "  ·  " + UpdateChecker.currentName(this));
+        upd.addView(toggleRow("⬆ " + L.t("Automatycznie pobieraj nowe wersje"), UpdateChecker.enabled(this), on -> prefs().edit().putBoolean("auto_update", on).apply()));
+        upd.addView(hint(L.t("Nowa wersja pobiera się sama w tle; zostaniesz zapytany o instalację. Nagrania i ustawienia zostają.")));
+        android.widget.Button updBtn = Ui.button(this, L.t("Sprawdź teraz"), R.color.pr_accent, false);
+        updBtn.setOnClickListener(v -> { Toast.makeText(this, L.t("Sprawdzanie…"), Toast.LENGTH_SHORT).show(); UpdateChecker.check(this, true); });
+        upd.addView(updBtn);
+        if (logged) { // nagrywanie rozmow — tylko dla kursantow
+            android.widget.LinearLayout crs = section(c, "callrec", "📞  " + L.t("NAGRYWANIE ROZMÓW") + "  ·  " + (CallRecService.enabled(this) ? L.t("WŁ") : L.t("WYŁ")));
+            CallRecUi.fillSettings(this, crs, this::renderSettingsPage);
+        }
+        renderLangAndAbout(c, d);
+    }
+
+    private void addMapSettings(android.widget.LinearLayout mp) {
         mp.addView(toggleRow("📡 " + L.t("Pokazuj mnie na mapie na żywo"), prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
         mp.addView(hint(L.t("Po zapisaniu nagrania w kategorii Sklepy, Przechodzień, Special albo Miasto – inne inni kursanci widzą Cię na mapie przez ok. 20 min: imię, miasto, system mowy i kategorię.")));
         mp.addView(hint(L.t("Na mapie jako:") + " " + mapName(prefs().getString("student_name", ""))));
@@ -1673,16 +1700,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
         mp.addView(av, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
         mp.addView(hint(avail ? L.t("Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach.") : L.t("Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).")));
+    }
 
-        // 7) Jezyk
-        android.widget.LinearLayout upd = section(c, "upd", "⬆  " + L.t("AKTUALIZACJE") + "  ·  " + UpdateChecker.currentName(this));
-        upd.addView(toggleRow("⬆ " + L.t("Automatycznie pobieraj nowe wersje"), UpdateChecker.enabled(this), on -> prefs().edit().putBoolean("auto_update", on).apply()));
-        upd.addView(hint(L.t("Nowa wersja pobiera się sama w tle; zostaniesz zapytany o instalację. Nagrania i ustawienia zostają.")));
-        android.widget.Button updBtn = Ui.button(this, L.t("Sprawdź teraz"), R.color.pr_accent, false);
-        updBtn.setOnClickListener(v -> { Toast.makeText(this, L.t("Sprawdzanie…"), Toast.LENGTH_SHORT).show(); UpdateChecker.check(this, true); });
-        upd.addView(updBtn);
-        android.widget.LinearLayout crs = section(c, "callrec", "📞  " + L.t("NAGRYWANIE ROZMÓW") + "  ·  " + (CallRecService.enabled(this) ? L.t("WŁ") : L.t("WYŁ")));
-        CallRecUi.fillSettings(this, crs, this::renderSettingsPage);
+    private void renderLangAndAbout(android.widget.LinearLayout c, float d) {
         android.widget.LinearLayout lang = section(c, "lang", "🌐  " + L.t("JĘZYK") + "  ·  " + currentLangName());
         String cur = getSavedLanguage(this);
         String[][] langs = {{"pl", "🇵🇱 Polski"}, {"en", "🇬🇧 English"}, {"cs", "🇨🇿 Čeština"}, {"sk", "🇸🇰 Slovenčina"}, {"de", "🇩🇪 Deutsch"}, {"es", "🇪🇸 Español"}, {"hu", "🇭🇺 Magyar"}};
@@ -3161,6 +3181,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     protected void onResume() {
         super.onResume();
+        LiveAudioData.loggedIn = isLoggedIn();
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);

@@ -548,9 +548,9 @@ public class PitchWaveView extends View {
             }
             canvas.drawPath(pitchPath, pitchPaint);
 
-            if (LiveAudioData.showNorms || LiveAudioData.showTempo) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.normsOn() || LiveAudioData.showTempo) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
             if (LiveAudioData.showTempo) drawSyllableTicks(canvas, w, h, rulerHeight, visibleStartSample, visibleSampleRange);
-            if (LiveAudioData.showArrows) drawArrows(canvas, w, h, rulerHeight, pitchPts, pz, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.arrowsOn()) drawArrows(canvas, w, h, rulerHeight, pitchPts, pz, visibleStartSample, visibleSampleRange);
         }
     }
 
@@ -740,7 +740,7 @@ public class PitchWaveView extends View {
             float x0 = (float) ((sg.start * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
             float x1 = (float) ((sg.end * LiveAudioData.SAMPLE_RATE - visStart) / visRange * w);
             if (x1 < 0 || x0 > w) continue;
-            boolean scored = LiveAudioData.showNorms && sg.result != null;
+            boolean scored = LiveAudioData.normsOn() && sg.result != null;
             int col = scored ? scoreColor(sg.result.score) : 0xFFB388FF;
             normPaint.setStyle(Paint.Style.FILL);
             // pasek pod podzialka: sylaba 4-fazowa w kolorze oceny, dalsze sylaby fioletowe
@@ -787,7 +787,7 @@ public class PitchWaveView extends View {
         float pad = dp(8);
         hintText.setFakeBoldText(true);
         Norms.Result r = LiveAudioData.norms.live;
-        if (LiveAudioData.showNorms && r != null && System.currentTimeMillis() - LiveAudioData.norms.liveAtMs < 2500) {
+        if (LiveAudioData.normsOn() && r != null && System.currentTimeMillis() - LiveAudioData.norms.liveAtMs < 2500) {
             int col = scoreColor(r.score);
             String l1 = L.t("SYLABA 4-FAZOWA") + " " + r.score + "%  ·  " + L.f(r.detail, r.args);
             String q = r.hasQuiet == null ? L.t("WEJŚCIE") + ": …" : r.hasQuiet ? L.t("WEJŚCIE") + ": " + L.t("łagodne ✓") : L.t("WEJŚCIE") + ": " + L.t("za głośno ✗");
