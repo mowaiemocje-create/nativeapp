@@ -18,6 +18,9 @@ import java.io.FileInputStream;
 final class CallPost {
 
     static final int SR = 44100;
+    // WZMOCNIENIE WSTEPNE x10 (+20 dB) — surowy dzwiek rozmowy z telefonu bywa bardzo cichy;
+    // limiter na koncu pilnuje, zeby nic nie przesterowalo
+    static final double PRE = 10.0;
     private static final int F = 882;     // ramka 20 ms
     private static final int B = 220;     // blok kompresora 5 ms
     private static final int LOOK = 220;  // wyprzedzenie limitera 5 ms
@@ -51,7 +54,7 @@ final class CallPost {
                 double sum = 0; int cnt = 0, fi = 0;
                 try (Pcm in = new Pcm(pcm)) {
                     for (long t = 0; t < n; t++) {
-                        double x = h.f(in.next() / 32768.0);
+                        double x = h.f(in.next() * PRE / 32768.0);
                         sum += x * x;
                         if (++cnt == F) { db[fi++] = toDb(Math.sqrt(sum / cnt)); sum = 0; cnt = 0; }
                     }
@@ -62,8 +65,10 @@ final class CallPost {
             // poziom szumu = 10. percentyl ramek; mowa = co najmniej 12 dB nad szumem
             float[] sorted = java.util.Arrays.copyOf(db, frames);
             java.util.Arrays.sort(sorted);
-            float noise = sorted[Math.max(0, frames / 10)];
-            float speech = Math.max(noise + 12f, -66f);
+            int firstReal = 0;
+            while (firstReal < frames - 1 && sorted[firstReal] < -110f) firstReal++;   // pomijamy cyfrowa cisze
+            float noise = sorted[Math.min(frames - 1, firstReal + (frames - firstReal) / 10)];
+            float speech = Math.max(noise + 10f, -90f);
 
             // ── wzmocnienie WYROWNUJACE dla kazdej ramki ──
             float[] g = new float[frames];
@@ -77,7 +82,7 @@ final class CallPost {
                     } else {
                         cur += (Math.min(cur, 12f) - cur) * 0.05f;   // w ciszy nie pompujemy szumu
                     }
-                    float exp = Math.min(18f, Math.max(0f, speech - db[i])); // ekspander: cisza jeszcze ciszej
+                    float exp = Math.min(12f, 0.5f * Math.max(0f, speech - db[i])); // ekspander: cisza lekko ciszej
                     g[i] = cur - exp;
                 }
                 // wygladzenie (5 ramek = 100 ms), zeby nie bylo slychac zmian
@@ -97,7 +102,7 @@ final class CallPost {
                 double sum = 0; long cnt = 0; double fsum = 0; int fc = 0, fi = 0; double peak = 0;
                 try (Pcm in = new Pcm(pcm)) {
                     for (long t = 0; t < n; t++) {
-                        double y = c.step(in.next() / 32768.0, t);
+                        double y = c.step(in.next() * PRE / 32768.0, t);
                         fsum += y * y;
                         double ay = Math.abs(y); if (ay > peak) peak = ay;
                         if (++fc == F) {
@@ -110,7 +115,7 @@ final class CallPost {
                     double rmsDb = toDb(Math.sqrt(sum / cnt));
                     normGain = Math.pow(10, (P.norm - rmsDb) / 20.0);
                 } else {
-                    normGain = peak > 1e-6 ? Math.pow(10, -1 / 20.0) / peak : 1.0; // "tylko 0 dB"
+                    normGain = 1.0; // "bez wyrownania": tylko x10 + limiter
                 }
                 normGain = Math.min(normGain, 1000.0);
             }
@@ -124,7 +129,7 @@ final class CallPost {
             int outPeak = 0;
             try (Pcm in = new Pcm(pcm)) {
                 for (long t = 0; t < n + LOOK; t++) {
-                    double y = t < n ? c.step(in.next() / 32768.0, t) * normGain : 0.0;
+                    double y = t < n ? c.step(in.next() * PRE / 32768.0, t) * normGain : 0.0;
                     double o = lim.step(y);
                     if (t >= LOOK) {
                         int v = (int) Math.round(Math.max(-1.0, Math.min(1.0, o)) * 32767.0);

@@ -271,7 +271,14 @@ public class CallRecService extends AccessibilityService {
             long n = pcm.length() / 2;
             short[] buf = new short[4096];
             int bn = 0;
-            for (long t = 0; t < n; t++) { buf[bn++] = (short) in.next(); if (bn == buf.length) { out.feed(buf, bn); bn = 0; } }
+            CallPost.Limiter lim = new CallPost.Limiter();   // x10 + limiter (bez przesteru)
+            for (long t = 0; t < n + 220; t++) {
+                double y = t < n ? in.next() * CallPost.PRE / 32768.0 : 0.0;
+                double o = lim.step(y);
+                if (t < 220) continue;
+                buf[bn++] = (short) Math.round(Math.max(-1.0, Math.min(1.0, o)) * 32767.0);
+                if (bn == buf.length) { out.feed(buf, bn); bn = 0; }
+            }
             if (bn > 0) out.feed(buf, bn);
             return out.finish();
         } catch (Exception e) { return null; }
