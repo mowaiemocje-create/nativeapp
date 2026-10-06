@@ -53,6 +53,18 @@ header h1{font-size:15px;letter-spacing:2px;font-weight:900;flex:1}
 .hist .d{font-size:12px;color:var(--mu)}
 .hist .t{flex:1;font-weight:800;font-size:14px}
 .status{font-size:12px;margin-top:8px;color:var(--mu)}
+.navrow{display:flex;gap:8px;margin-top:6px}
+.nb{flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--bd);background:var(--card);color:var(--tx);font:inherit;font-weight:800;font-size:14px;cursor:pointer;touch-action:manipulation}
+.nb:disabled{opacity:.35}
+.nb.acc{border-color:var(--acc);color:var(--acc)}
+.maptoggle{display:block;width:100%;text-align:left;background:none;border:none;color:var(--mu);font:inherit;font-size:13px;font-weight:700;padding:14px 2px 4px;cursor:pointer}
+.qmap{display:grid;grid-template-columns:repeat(8,1fr);gap:5px}
+.qd{padding:8px 0;border-radius:8px;border:1.5px solid var(--bd);background:var(--card);color:var(--mu);font:inherit;font-size:12px;font-weight:800;cursor:pointer;touch-action:manipulation}
+.qd.ok{background:var(--acc);border-color:var(--acc);color:#000}
+.qd.cur{outline:2px solid var(--tx);outline-offset:1px}
+.qd.miss{border-color:var(--warn);color:var(--warn)}
+.tip{border-left:3px solid var(--acc);padding:2px 0 2px 12px;margin:10px 0}
+.tip h5{font-size:13px;font-weight:900;margin-bottom:4px}
 .status.err{color:var(--warn)}
 .status.ok{color:#2E9E5B}
 </style>
@@ -98,7 +110,7 @@ function answered() { return S.most.filter(function (x) { return x != null; }).l
 
 var view = 'home', results = [];
 function goBack() {
-  if (view === 'test' && S.step > 0) { S.step--; saveProgress(); renderTest(); return; }
+  if (view === 'test' && S.step > 0) { goTo(S.step - 1); return; }
   if (view === 'result' && STUDENT) { renderHome(); return; }
   if (view !== 'home') { renderHome(); return; }
   try { if (window.NSBridge && NSBridge.close) { NSBridge.close(); return; } } catch (e) {}
@@ -121,7 +133,7 @@ function renderHome() {
     var n = answered();
     h += '<div class="card"><div class="q" style="margin-top:0">Jaki masz styl działania i komunikacji?</div>' +
       '<div class="muted">Test ma dwie części po 24 pytania. W pierwszej wybierasz zdanie, które <b>najbardziej</b> do Ciebie pasuje, w drugiej — przymiotnik, który <b>najmniej</b> do Ciebie pasuje. Odpowiadaj szybko, pierwszym skojarzeniem. Zajmie to ok. 10 minut. Wynik zobaczy też Twój trener.</div>' +
-      (n > 0 && n < 48 ? '<button class="btn" onclick="startTest(false)">Dokończ test (' + n + '/48)</button><button class="btn ghost" onclick="startTest(true)">Zacznij od nowa</button>'
+      (n === 48 ? '<button class="btn" onclick="finishTest()">Zapisz i zobacz wynik</button><button class="btn ghost" onclick="startTest(true)">Zacznij od nowa</button>' : n > 0 ? '<button class="btn" onclick="startTest(false)">Dokończ test (' + n + '/48 · brakuje ' + (48 - n) + ')</button><button class="btn ghost" onclick="startTest(true)">Zacznij od nowa</button>'
         : '<button class="btn" onclick="startTest(true)">Rozpocznij test</button>') + '</div>';
   }
   h += '<div class="card"><div class="part">' + (STUDENT ? 'WYNIKI KURSANTA' : 'TWOJE WYNIKI') + '</div><div id="histBox" class="muted" style="margin-top:8px">⏳ Wczytuję…</div></div>';
@@ -132,7 +144,7 @@ function renderHome() {
 function loadHistory() {
   var o = {}; if (STUDENT) o.student_id = STUDENT;
   fetch(API + '/disc/results?' + q(o), { cache: 'no-store' }).then(function (r) {
-    return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'serwer nie ma jeszcze testu DISC (worker)' : 'HTTP ' + r.status)); return d; });
+    return r.json().then(function (d) { if (!r.ok) throw new Error(r.status === 404 ? 'serwer nie ma jeszcze testu DISC — wgraj nowy worker.js' : (d.error || 'HTTP ' + r.status)); return d; });
   }).then(function (d) {
     results = d.results || [];
     var box = document.getElementById('histBox'); if (!box) return;
@@ -152,31 +164,61 @@ function openResult(i) {
   renderResult(DISC.score(m, l), x.created_at, null);
 }
 
-// ── TEST: jedna grupa na ekranie ──
-function startTest(fresh) { if (fresh) clearProgress(); else loadProgress(); renderTest(); }
+// ── TEST: jedna grupa na ekranie; swobodne przechodzenie wstecz/dalej, mapa pytan, braki ──
+function ans(st) { return st < 24 ? S.most[st] : S.least[st - 24]; }
+function missingList() { var m = []; for (var i = 0; i < 48; i++) if (ans(i) == null) m.push(i); return m; }
+function qLabel(st) { return (st < 24 ? 'Cz. 1' : 'Cz. 2') + ' · ' + ((st % 24) + 1); }
+var mapOpen = false;
+function startTest(fresh) { if (fresh) clearProgress(); else { loadProgress(); var m = missingList(); if (m.length) S.step = m[0]; } renderTest(); }
+function goTo(st) { S.step = Math.max(0, Math.min(47, st)); saveProgress(); renderTest(); }
 function renderTest() {
   view = 'test';
   setHeader('TEST DISC', true);
-  var st = S.step, part = st < 24 ? 1 : 2, i = part === 1 ? st : st - 24;
+  var st = S.step, part = st < 24 ? 1 : 2, i = st % 24;
   var opts = part === 1 ? DISC.most[i] : DISC.least[i];
-  var sel = part === 1 ? S.most[i] : S.least[i];
-  $app.innerHTML = '<div class="part">CZĘŚĆ ' + part + ' · ' + (i + 1) + '/24</div>' +
-    '<div class="prog"><div style="width:' + Math.round(st / 48 * 100) + '%"></div></div>' +
+  var sel = ans(st), done = 48 - missingList().length;
+  var h = '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+      '<div class="part">CZĘŚĆ ' + part + ' · PYTANIE ' + (i + 1) + '/24</div>' +
+      '<div class="muted" style="font-size:12px"><b style="color:var(--tx)">' + done + '</b>/48 · brakuje ' + (48 - done) + '</div></div>' +
+    '<div class="prog"><div style="width:' + Math.round(done / 48 * 100) + '%"></div></div>' +
     '<div class="q">' + (part === 1 ? 'Które zdanie <u>najbardziej</u> do Ciebie pasuje?' : 'Który przymiotnik <u>najmniej</u> do Ciebie pasuje?') + '</div>' +
     opts.map(function (o, k) {
       return '<button class="opt' + (sel === k ? ' on' : '') + '" onclick="pick(' + k + ')"><b>' + esc(o[0]) + '</b><small>' + esc(o[2]) + '</small></button>';
     }).join('') +
-    '<div class="muted" style="text-align:center;margin-top:6px">Wybierz jedną odpowiedź — przejdziesz dalej automatycznie.</div>';
+    '<div class="navrow"><button class="nb" onclick="goTo(' + (st - 1) + ')"' + (st === 0 ? ' disabled' : '') + '>‹ Poprzednie</button>' +
+      (st < 47 ? '<button class="nb" onclick="goTo(' + (st + 1) + ')">Następne ›</button>' : '<button class="nb acc" onclick="renderSummary()">Podsumowanie ›</button>') + '</div>' +
+    '<button class="maptoggle" onclick="mapOpen=!mapOpen;renderTest()">' + (mapOpen ? '▾' : '▸') + ' Mapa pytań — dotknij numeru, żeby przejść</button>' +
+    (mapOpen ? mapHtml(st) : '') +
+    '<button class="btn ghost" onclick="renderSummary()">' + (done === 48 ? 'Zakończ i zobacz wynik' : 'Zakończ test (' + done + '/48)') + '</button>';
+  $app.innerHTML = h;
   window.scrollTo(0, 0);
 }
+function mapHtml(cur) {
+  var h = '';
+  [0, 24].forEach(function (base, p) {
+    h += '<div class="muted" style="font-size:11px;margin:8px 0 4px;font-weight:800">CZĘŚĆ ' + (p + 1) + (p === 0 ? ' — najbardziej pasuje' : ' — najmniej pasuje') + '</div><div class="qmap">';
+    for (var i = 0; i < 24; i++) {
+      var st = base + i, ok = ans(st) != null;
+      h += '<button class="qd' + (ok ? ' ok' : '') + (st === cur ? ' cur' : '') + '" onclick="goTo(' + st + ')">' + (i + 1) + '</button>';
+    }
+    h += '</div>';
+  });
+  return h + '<div class="legend" style="margin-top:6px"><span><b style="background:var(--acc)"></b>odpowiedziane</span><span><b style="background:var(--bd)"></b>brak odpowiedzi</span></div>';
+}
 function pick(k) {
-  var st = S.step;
+  var st = S.step, wasEmpty = ans(st) == null;
   if (st < 24) S.most[st] = k; else S.least[st - 24] = k;
-  var btns = document.querySelectorAll('.opt'); btns.forEach(function (b, j) { b.classList.toggle('on', j === k); });
+  document.querySelectorAll('.opt').forEach(function (b, j) { b.classList.toggle('on', j === k); });
   saveProgress();
+  // po NOWEJ odpowiedzi idziemy dalej sami; przy zmianie odpowiedzi zostajemy na pytaniu
+  if (!wasEmpty) { renderTest(); return; }
   setTimeout(function () {
-    if (S.step < 47) { S.step++; saveProgress(); if (S.step === 24) renderPartBreak(); else renderTest(); }
-    else finishTest();
+    var m = missingList();
+    if (!m.length) { renderSummary(); return; }
+    if (st === 23 && S.least[0] == null) { S.step = 24; saveProgress(); renderPartBreak(); return; }
+    // nastepne pytanie bez odpowiedzi (dalej w tescie), a jesli takiego nie ma — pierwsze brakujace
+    var next = m.filter(function (x) { return x > st; })[0];
+    S.step = next != null ? next : m[0]; saveProgress(); renderTest();
   }, 220);
 }
 function renderPartBreak() {
@@ -185,16 +227,36 @@ function renderPartBreak() {
     '<div class="muted">Teraz 24 grupy przymiotników. Tym razem wybieraj ten, który <b>najmniej</b> do Ciebie pasuje.</div>' +
     '<button class="btn" onclick="renderTest()">Dalej — część 2</button></div>';
 }
+// Podsumowanie: ile zrobione, czego brakuje (z przejsciem do brakujacego)
+function renderSummary() {
+  view = 'test';
+  setHeader('TEST DISC', true);
+  var m = missingList(), done = 48 - m.length;
+  var h = '<div class="card"><div class="part">PODSUMOWANIE</div>' +
+    '<div class="q" style="margin:6px 0">' + (m.length ? 'Odpowiedziano na ' + done + ' z 48 pytań' : 'Wszystkie 48 odpowiedzi gotowe! 🎉') + '</div>' +
+    '<div class="prog"><div style="width:' + Math.round(done / 48 * 100) + '%"></div></div>';
+  if (m.length) {
+    h += '<div class="muted">Brakuje <b style="color:var(--warn)">' + m.length + '</b> ' + (m.length === 1 ? 'odpowiedzi' : 'odpowiedzi') + '. Bez nich wynik nie będzie wiarygodny:</div>' +
+      '<div class="qmap" style="margin-top:8px">' + m.map(function (st) { return '<button class="qd miss" onclick="goTo(' + st + ')" title="' + qLabel(st) + '">' + (st < 24 ? '1·' : '2·') + ((st % 24) + 1) + '</button>'; }).join('') + '</div>' +
+      '<button class="btn" onclick="goTo(' + m[0] + ')">Przejdź do brakującego pytania (' + qLabel(m[0]) + ')</button>';
+  } else {
+    h += '<div class="muted">Możesz jeszcze wrócić i zmienić dowolną odpowiedź.</div><button class="btn" onclick="finishTest()">Zobacz wynik</button>';
+  }
+  h += '<button class="btn ghost" onclick="goTo(' + (m.length ? m[0] : 47) + ')">‹ Wróć do pytań</button></div>';
+  $app.innerHTML = h;
+  window.scrollTo(0, 0);
+}
 
 // ── koniec: wynik + zapis na serwerze ──
 function finishTest() {
+  if (missingList().length) { renderSummary(); return; }
   var res = DISC.score(S.most, S.least);
   renderResult(res, Math.floor(Date.now() / 1000), 'saving');
   var a = auth() || {};
   fetch(API + '/disc/results', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ns_token: a.token, ns_email: a.email, ns_server: a.server || 'new', most: S.most, least: S.least,
       scores: { most: res.most, least: res.least, diff: res.diff, pct: res.pct }, profile_code: res.profile.code, profile_title: res.profile.title }) })
-    .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'serwer nie ma jeszcze testu DISC (worker)' : 'HTTP ' + r.status)); return d; }); })
+    .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok) throw new Error(r.status === 404 ? 'serwer nie ma jeszcze testu DISC — wgraj nowy worker.js' : (d.error || 'HTTP ' + r.status)); return d; }); })
     .then(function () { clearProgress(); setStatus('✓ Wynik zapisany — zobaczy go też Twój trener.', 'ok'); })
     .catch(function (e) { setStatus('❌ Nie udało się zapisać wyniku: ' + e.message + ' — odpowiedzi zostały na telefonie, spróbuj ponownie.', 'err', true); });
 }
@@ -220,6 +282,44 @@ function chartSvg(vals) {
   return s + '</svg>';
 }
 
+
+// ── PROFIL W TRENINGU NOWEJ MOWY: praktyczne wskazowki dla kursanta (i trenera) wg glownych liter profilu ──
+var NM = {
+  D: { name: 'D — dominacja', strong: 'Lubisz wyzwania i szybko działasz — łatwiej Ci wejść w trudną sytuację mówienia (telefon do urzędu, rozmowa z obcą osobą), niż dłużej się do niej przygotowywać.',
+    watch: 'Pośpiech. Przy dużym tempie łatwo gubisz pauzy i technikę nowej mowy, a ćwiczenia „podstawowe” mogą wydawać się nudne.',
+    how: ['Stawiaj sobie liczbowe cele: np. 10 nagrań z miasta w tygodniu i tempo mowy w normie ustalonej z trenerem (pomiar sylab na wykresie).', 'Wybieraj trudniejsze zadania specjalne (sonda uliczna, negocjacja ceny, rozmowa z burmistrzem) — to Cię motywuje.', 'Na każdym nagraniu sprawdzaj pauzy i tempo na wykresie: „wygrywasz”, gdy technika zostaje także w szybkiej rozmowie.', 'Przed ważną rozmową zrób 1 minutę monologu w nowej mowie — rozgrzewka zamiast „od razu na głęboką wodę”.'],
+    trainer: 'Krótko i konkretnie: cel, termin, wynik. Doceniaj odwagę, ale wymagaj techniki — oceniaj pauzy i tempo, nie tylko to, że zadanie zostało zrobione.' },
+  I: { name: 'I — wpływ', strong: 'Jesteś towarzyski/a i chętnie rozmawiasz — kontakty z ludźmi to dla Ciebie naturalne pole do ćwiczeń, a entuzjazm pomaga przełamywać lęk.',
+    watch: 'Emocje i spontaniczność. W ożywionej rozmowie łatwo zapomnieć o technice, a przy rutynowych ćwiczeniach — stracić motywację.',
+    how: ['Ćwicz w kontakcie z ludźmi: sklepy, przechodnie, telefony do kursantów z listy, „100 kontaktów w 1 dzień”.', 'Rób krótkie nagrania kontrolne (1–2 min) w środku rozmów — szybko widać, czy technika została.', 'Zmieniaj formy: live, open mic, wystąpienie w grupie 10+ — różnorodność trzyma motywację.', 'W dzienniku zapisuj, jak się czułeś/aś — emocje to dla Ciebie ważna wskazówka, kiedy technika „ucieka”.'],
+    trainer: 'Dużo pochwał i informacji zwrotnej na bieżąco, różnorodne zadania. Pomagaj wracać do techniki przy emocjach — krótkie, częste przypomnienia działają lepiej niż długie instrukcje.' },
+  S: { name: 'S — stałość', strong: 'Jesteś systematyczny/a i cierpliwy/a — codzienna regularność nagrań i dziennika to Twoja mocna strona, a to ona najbardziej utrwala nową mowę.',
+    watch: 'Unikanie. Trudne sytuacje (telefon do obcej osoby, wystąpienie) łatwo odkładać „na później” i zostawać przy tym, co bezpieczne.',
+    how: ['Stopniuj trudność: najpierw rodzina i znajomi, potem kursanci z listy, potem telefon do miasta i obcy ludzie.', 'Stała pora ćwiczeń każdego dnia (np. rano nagranie, wieczorem dziennik) — rutyna daje Ci spokój.', 'Planuj trudne zadanie z wyprzedzeniem i zapisz je w harmonogramie — łatwiej je wykonać, gdy jest „umówione”.', 'Doceniaj małe kroki: każde nagranie z nowej sytuacji to postęp, nawet jeśli nie wyszło idealnie.'],
+    trainer: 'Jasny plan i małe, przewidywalne kroki. Dawaj czas i bezpieczeństwo, doceniaj regularność. Delikatnie, ale konsekwentnie podnoś poprzeczkę.' },
+  K: { name: 'K — kontrola', strong: 'Jesteś dokładny/a i analityczny/a — dobrze rozumiesz zasady techniki, wykresy pitch, normy i pauzy, i potrafisz świadomie poprawiać szczegóły.',
+    watch: 'Perfekcjonizm. Nadmierna kontrola mowy daje napięcie, a czekanie, aż „będzie idealnie”, opóźnia wyjście do prawdziwych sytuacji.',
+    how: ['Korzystaj z danych: wykres pitch, ocena 4F, pauzy, tempo i statystyki — dają Ci jasną informację o postępie.', 'Ustal kryterium „wystarczająco dobrze” (np. 80% sylab w normie) i po jego osiągnięciu idź dalej.', 'Dodawaj spontaniczne zadania bez przygotowania — rozmowa z przechodniem, telefon „z marszu” — żeby technika działała także w luźnej mowie.', 'Poprawki nagrań traktuj jak naukę, nie porażkę — porównaj nagranie przed i po.'],
+    trainer: 'Uzasadniaj zalecenia i dawaj konkretną, rzeczową informację zwrotną. Pomagaj odpuszczać perfekcjonizm — chwal postęp, nie tylko bezbłędność.' }
+};
+function nmLetters(p) {
+  var c = String((p && p.code) || ''), l = (c.split('/')[1] || '').toUpperCase().replace(/[^DISK]/g, '');
+  return l.split('');
+}
+function nmHtml(p) {
+  var ls = nmLetters(p); if (!ls.length) return '';
+  var m = NM[ls[0]], h = '<div class="card sec"><div class="part">🎙 TWÓJ PROFIL W TRENINGU NOWEJ MOWY</div>' +
+    '<p style="margin-top:8px">Najsilniej zaznacza się u Ciebie styl <b>' + esc(m.name) + '</b>' + (ls.length > 1 ? ', wspierany przez ' + ls.slice(1).map(function (x) { return '<b>' + esc(NM[x].name) + '</b>'; }).join(' i ') : '') + '.</p>' +
+    '<div class="tip"><h5>💪 Twoja mocna strona</h5><p>' + esc(m.strong) + '</p></div>' +
+    '<div class="tip"><h5>⚠️ Na co uważać</h5><p>' + esc(m.watch) + '</p></div>' +
+    '<div class="tip"><h5>✅ Jak ćwiczyć</h5><ul>' + m.how.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></div>';
+  ls.slice(1).forEach(function (x) {
+    h += '<div class="tip"><h5>➕ ' + esc(NM[x].name) + '</h5><p>' + esc(NM[x].watch) + ' ' + esc(NM[x].how[0]) + '</p></div>';
+  });
+  h += '<div class="tip"><h5>🎓 ' + (STUDENT ? 'Wskazówka dla Ciebie jako trenera' : 'Co warto przekazać trenerowi') + '</h5><p>' + esc(m.trainer) + '</p></div>' +
+    '<p class="muted" style="font-size:12px">Profil DISC opisuje styl działania, a nie zdolności. Wskazówki są pomocą do planowania ćwiczeń — ustal je razem z trenerem.</p></div>';
+  return h;
+}
 function renderResult(res, ts, saving) {
   view = 'result';
   setHeader(STUDENT ? 'DISC KURSANTA' : 'TWÓJ WYNIK', true);
@@ -235,6 +335,7 @@ function renderResult(res, ts, saving) {
       '<div class="chart"><h3>ZINTEGROWANY</h3>' + chartSvg(res.pct.diff) + '</div></div>' +
       '<div class="legend"><span><b style="background:var(--cD)"></b>D — dominacja</span><span><b style="background:var(--cI)"></b>I — wpływ</span><span><b style="background:var(--cS)"></b>S — stałość</span><span><b style="background:var(--cK)"></b>K — kontrola</span></div>' +
       '<div class="muted" style="margin-top:8px">Zewnętrzny — jak działasz, gdy inni patrzą. Wewnętrzny — jak reagujesz pod presją. Zintegrowany — Twój codzienny styl. Linia przerywana = 50%.</div></div>' +
+    nmHtml(p) +
     '<div class="card sec">' + secs.map(function (sc) {
       return (sc.title ? '<h4>' + esc(sc.title) + '</h4>' : '') + sc.intro.map(function (t) { return '<p>' + esc(t) + '</p>'; }).join('') +
         (sc.items.length ? '<ul>' + sc.items.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '');
