@@ -286,46 +286,62 @@ public class AudioFileLoader {
             throw new IOException("Nie udalo sie utworzyc dekodera MP3: " + e.getMessage());
         }
 
-        java.io.ByteArrayOutputStream pcmOut = new java.io.ByteArrayOutputStream();
+        // PAMIEC: dekodujemy od razu do jednej tablicy probek mono (rozmiar z dlugosci nagrania).
+        // Wczesniej szlo to przez ByteArrayOutputStream + 2 kopie — przy 15-min rozmowie to ok.
+        // 300 MB naraz i apka sie zamykala (brak pamieci).
+        int channels = Math.max(1, format.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT) ? format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT) : 1);
+        long durUs = format.containsKey(android.media.MediaFormat.KEY_DURATION) ? format.getLong(android.media.MediaFormat.KEY_DURATION) : 0L;
+        int sr = format.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE) ? format.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE) : LiveAudioData.SAMPLE_RATE;
+        int cap = (int) Math.min(Integer.MAX_VALUE - 16, Math.max(1 << 16, durUs > 0 ? durUs * sr / 1_000_000L + sr : 60L * sr));
+        short[] out = new short[cap];
+        int outN = 0;
+        byte[] tmp = new byte[0];
         android.media.MediaCodec.BufferInfo info = new android.media.MediaCodec.BufferInfo();
         boolean inputDone = false, outputDone = false;
 
         // Szybkie dekodowanie: wkladamy do dekodera wszystko, co przyjmie (bez czekania),
-        // a na wynik czekamy krotko — wczesniej kazda ramka MP3 mogla czekac po 10 ms
-        // (tysiace ramek = kilkanascie sekund przy dluzszym nagraniu).
+        // a na wynik czekamy krotko.
         while (!outputDone) {
             boolean progressed = false;
             while (!inputDone) {
                 int inIdx = codec.dequeueInputBuffer(0);
                 if (inIdx < 0) break;
                 progressed = true;
-                {
-                    java.nio.ByteBuffer inBuf = codec.getInputBuffer(inIdx);
-                    int sampleSize = inBuf != null ? extractor.readSampleData(inBuf, 0) : -1;
-                    if (sampleSize < 0) {
-                        codec.queueInputBuffer(inIdx, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                        inputDone = true;
-                    } else {
-                        codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.getSampleTime(), 0);
-                        extractor.advance();
-                    }
+                java.nio.ByteBuffer inBuf = codec.getInputBuffer(inIdx);
+                int sampleSize = inBuf != null ? extractor.readSampleData(inBuf, 0) : -1;
+                if (sampleSize < 0) {
+                    codec.queueInputBuffer(inIdx, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    inputDone = true;
+                } else {
+                    codec.queueInputBuffer(inIdx, 0, sampleSize, extractor.getSampleTime(), 0);
+                    extractor.advance();
                 }
             }
-
-            // czekamy tylko wtedy, gdy nic sie nie ruszylo (wczesniej: do 1 ms na kazda ramke MP3)
             int outIdx = codec.dequeueOutputBuffer(info, progressed ? 0 : 2000);
-            while (outIdx >= 0) {
+            while (outIdx >= 0 || outIdx == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                if (outIdx == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    try { channels = Math.max(1, codec.getOutputFormat().getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)); } catch (Exception e) { }
+                    outIdx = codec.dequeueOutputBuffer(info, 0);
+                    continue;
+                }
                 java.nio.ByteBuffer outBuf = codec.getOutputBuffer(outIdx);
                 if (outBuf != null && info.size > 0) {
-                    byte[] chunk = new byte[info.size];
-                    outBuf.get(chunk);
-                    pcmOut.write(chunk, 0, chunk.length);
+                    if (tmp.length < info.size) tmp = new byte[info.size];
+                    outBuf.position(info.offset);
+                    outBuf.get(tmp, 0, info.size);
+                    int frames = info.size / (2 * channels);
+                    if (outN + frames > out.length) out = java.util.Arrays.copyOf(out, (int) Math.min(Integer.MAX_VALUE - 16, (long) (outN + frames) * 5 / 4 + 4096));
+                    for (int i = 0; i < frames; i++) {
+                        int sum = 0;
+                        for (int c = 0; c < channels; c++) {
+                            int k = 2 * (i * channels + c);
+                            sum += (short) ((tmp[k] & 0xff) | (tmp[k + 1] << 8));
+                        }
+                        out[outN++] = (short) (sum / channels);
+                    }
                 }
                 codec.releaseOutputBuffer(outIdx, false);
-                if ((info.flags & android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                    outputDone = true;
-                    break;
-                }
+                if ((info.flags & android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) { outputDone = true; break; }
                 outIdx = codec.dequeueOutputBuffer(info, 0);
             }
         }
@@ -333,11 +349,6 @@ public class AudioFileLoader {
         codec.stop();
         codec.release();
         extractor.release();
-
-        int channels = format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT);
-        byte[] pcmBytes = pcmOut.toByteArray();
-        short[] samples = new short[pcmBytes.length / 2];
-        ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples);
-        return downmixToMono(samples, channels);
+        return outN == out.length ? out : java.util.Arrays.copyOf(out, outN);
     }
 }
