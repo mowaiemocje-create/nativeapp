@@ -63,6 +63,7 @@ header h1{font-size:15px;letter-spacing:2px;font-weight:900;flex:1}
 .qd.ok{background:var(--acc);border-color:var(--acc);color:#000}
 .qd.cur{outline:2px solid var(--tx);outline-offset:1px}
 .qd.miss{border-color:var(--warn);color:var(--warn)}
+.qd:disabled{opacity:.3;cursor:default}
 .tip{border-left:3px solid var(--acc);padding:2px 0 2px 12px;margin:10px 0}
 .tip h5{font-size:13px;font-weight:900;margin-bottom:4px}
 .status.err{color:var(--warn)}
@@ -169,8 +170,10 @@ function ans(st) { return st < 24 ? S.most[st] : S.least[st - 24]; }
 function missingList() { var m = []; for (var i = 0; i < 48; i++) if (ans(i) == null) m.push(i); return m; }
 function qLabel(st) { return (st < 24 ? 'Cz. 1' : 'Cz. 2') + ' · ' + ((st % 24) + 1); }
 var mapOpen = false;
-function startTest(fresh) { if (fresh) clearProgress(); else { loadProgress(); var m = missingList(); if (m.length) S.step = m[0]; } renderTest(); }
-function goTo(st) { S.step = Math.max(0, Math.min(47, st)); saveProgress(); renderTest(); }
+function startTest(fresh) { if (fresh) clearProgress(); else { loadProgress(); S.step = Math.min(47, firstMissing()); } renderTest(); }
+// Kolejnosc obowiazkowa: mozna wracac do odpowiedzianych, ale nie przeskoczyc pytania bez odpowiedzi
+function firstMissing() { var m = missingList(); return m.length ? m[0] : 48; }
+function goTo(st) { st = Math.max(0, Math.min(47, st, firstMissing())); S.step = st; saveProgress(); renderTest(); }
 function renderTest() {
   view = 'test';
   setHeader('TEST DISC', true);
@@ -186,10 +189,12 @@ function renderTest() {
       return '<button class="opt' + (sel === k ? ' on' : '') + '" onclick="pick(' + k + ')"><b>' + esc(o[0]) + '</b><small>' + esc(o[2]) + '</small></button>';
     }).join('') +
     '<div class="navrow"><button class="nb" onclick="goTo(' + (st - 1) + ')"' + (st === 0 ? ' disabled' : '') + '>‹ Poprzednie</button>' +
-      (st < 47 ? '<button class="nb" onclick="goTo(' + (st + 1) + ')">Następne ›</button>' : '<button class="nb acc" onclick="renderSummary()">Podsumowanie ›</button>') + '</div>' +
+      (st < 47 ? '<button class="nb" onclick="nextQ()"' + (sel == null ? ' disabled' : '') + '>Następne ›</button>'
+               : '<button class="nb acc" onclick="nextQ()"' + (done < 48 ? ' disabled' : '') + '>Zobacz wynik ›</button>') + '</div>' +
+    (sel == null ? '<div class="muted" style="text-align:center;font-size:12px;margin-top:6px">Wybierz odpowiedź, żeby przejść dalej.</div>' : '') +
     '<button class="maptoggle" onclick="mapOpen=!mapOpen;renderTest()">' + (mapOpen ? '▾' : '▸') + ' Mapa pytań — dotknij numeru, żeby przejść</button>' +
     (mapOpen ? mapHtml(st) : '') +
-    '<button class="btn ghost" onclick="renderSummary()">' + (done === 48 ? 'Zakończ i zobacz wynik' : 'Zakończ test (' + done + '/48)') + '</button>';
+    (done === 48 ? '<button class="btn" onclick="finishTest()">Zobacz wynik</button>' : '');
   $app.innerHTML = h;
   window.scrollTo(0, 0);
 }
@@ -199,11 +204,12 @@ function mapHtml(cur) {
     h += '<div class="muted" style="font-size:11px;margin:8px 0 4px;font-weight:800">CZĘŚĆ ' + (p + 1) + (p === 0 ? ' — najbardziej pasuje' : ' — najmniej pasuje') + '</div><div class="qmap">';
     for (var i = 0; i < 24; i++) {
       var st = base + i, ok = ans(st) != null;
-      h += '<button class="qd' + (ok ? ' ok' : '') + (st === cur ? ' cur' : '') + '" onclick="goTo(' + st + ')">' + (i + 1) + '</button>';
+      var lock = st > firstMissing();
+      h += '<button class="qd' + (ok ? ' ok' : '') + (st === cur ? ' cur' : '') + '" onclick="goTo(' + st + ')"' + (lock ? ' disabled' : '') + '>' + (i + 1) + '</button>';
     }
     h += '</div>';
   });
-  return h + '<div class="legend" style="margin-top:6px"><span><b style="background:var(--acc)"></b>odpowiedziane</span><span><b style="background:var(--bd)"></b>brak odpowiedzi</span></div>';
+  return h + '<div class="legend" style="margin-top:6px"><span><b style="background:var(--acc)"></b>odpowiedziane</span><span><b style="background:var(--bd)"></b>jeszcze nie</span></div><div class="muted" style="font-size:11px;margin-top:4px">Pytania idą po kolei — możesz wracać do tych, na które już odpowiedziałeś/aś.</div>';
 }
 function pick(k) {
   var st = S.step, wasEmpty = ans(st) == null;
@@ -212,14 +218,14 @@ function pick(k) {
   saveProgress();
   // po NOWEJ odpowiedzi idziemy dalej sami; przy zmianie odpowiedzi zostajemy na pytaniu
   if (!wasEmpty) { renderTest(); return; }
-  setTimeout(function () {
-    var m = missingList();
-    if (!m.length) { renderSummary(); return; }
-    if (st === 23 && S.least[0] == null) { S.step = 24; saveProgress(); renderPartBreak(); return; }
-    // nastepne pytanie bez odpowiedzi (dalej w tescie), a jesli takiego nie ma — pierwsze brakujace
-    var next = m.filter(function (x) { return x > st; })[0];
-    S.step = next != null ? next : m[0]; saveProgress(); renderTest();
-  }, 220);
+  setTimeout(nextQ, 220);
+}
+function nextQ() {
+  var st = S.step;
+  if (ans(st) == null) return;               // bez odpowiedzi nie przejdzie dalej
+  if (!missingList().length && st >= 47) { finishTest(); return; }
+  if (st === 23 && S.least[0] == null) { S.step = 24; saveProgress(); renderPartBreak(); return; }
+  goTo(st + 1);
 }
 function renderPartBreak() {
   view = 'test';
