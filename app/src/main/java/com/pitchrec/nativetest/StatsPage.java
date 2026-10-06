@@ -103,6 +103,7 @@ public class StatsPage {
             LinearLayout special = Ui.card(a);
             root.addView(special);
             fillSpecial(special);
+            root.addView(discCard());
             root.addView(Ui.spacer(a, 20));
             TrainerInbox.markRead(a, null, null, TrainerInbox.T_CALLS, TrainerInbox.T_LIST);
             return;
@@ -288,6 +289,35 @@ public class StatsPage {
     private boolean specialAll = false;
 
     private boolean specialAsked = false;
+
+    // TEST DISC — karta otwierajaca test (DiscActivity, WebView w osobnym procesie)
+    private LinearLayout discCard() {
+        LinearLayout card = Ui.card(a);
+        LinearLayout row = Ui.row(a);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView ic = Ui.text(a, "🧭", 26f, R.color.pr_text);
+        ic.setPadding(0, 0, (int) (12 * d), 0);
+        row.addView(ic);
+        LinearLayout tb = new LinearLayout(a);
+        tb.setOrientation(LinearLayout.VERTICAL);
+        TextView t = Ui.text(a, L.t("Test DISC — Twój styl działania"), 15f, R.color.pr_text);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        tb.addView(t);
+        tb.addView(Ui.text(a, L.t("48 krótkich wyborów, ok. 10 minut. Wynik zobaczy też Twój trener."), 12f, R.color.pr_muted));
+        row.addView(tb, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(Ui.text(a, "›", 22f, R.color.pr_muted));
+        card.addView(row);
+        card.setOnClickListener(v -> openDisc(a));
+        return card;
+    }
+
+    public static void openDisc(android.app.Activity act) {
+        android.content.SharedPreferences sp = act.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+        android.content.Intent i = new android.content.Intent(act, DiscActivity.class);
+        i.putExtra("token", sp.getString("ns_token", ""));
+        i.putExtra("email", sp.getString("ns_email", ""));
+        act.startActivity(i);
+    }
 
     private void fillSpecial(LinearLayout card) {
         if (!specialAsked) {

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Test DISC</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#F8F6F2;--card:#FFFFFF;--bd:#E8E4DC;--acc:#E8820C;--tx:#1A1A1A;--mu:#888880;--warn:#D93025;
+  --sel:rgba(232,130,12,.12);
+  --cD:#E5484D;--cI:#E5A50A;--cS:#2E9E5B;--cK:#3B7DD8;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#17171C;--card:#232329;--bd:#33333C;--acc:#F0973A;--tx:#EDEDF2;--mu:#9A9AA8;--warn:#FF6B5C;--sel:rgba(240,151,58,.16);
+    --cD:#FF6B6E;--cI:#F2C230;--cS:#4CC27E;--cK:#5B9BF0;}
+}
+:root[data-theme="dark"]{--bg:#17171C;--card:#232329;--bd:#33333C;--acc:#F0973A;--tx:#EDEDF2;--mu:#9A9AA8;--warn:#FF6B5C;--sel:rgba(240,151,58,.16);
+  --cD:#FF6B6E;--cI:#F2C230;--cS:#4CC27E;--cK:#5B9BF0;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{min-height:100%;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-weight:500}
+body{padding:0 16px calc(24px + env(safe-area-inset-bottom))}
+.wrap{max-width:560px;margin:0 auto}
+header{display:flex;align-items:center;gap:10px;padding:14px 0 10px;position:sticky;top:0;background:var(--bg);z-index:5}
+header h1{font-size:15px;letter-spacing:2px;font-weight:900;flex:1}
+.back{border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:12px}
+.muted{color:var(--mu);font-size:13px;line-height:1.5}
+.btn{display:block;width:100%;padding:14px;border-radius:12px;border:none;background:var(--acc);color:#000;font-size:15px;font-weight:900;cursor:pointer;margin-top:10px;touch-action:manipulation}
+.btn.ghost{background:transparent;color:var(--acc);border:1.5px solid var(--acc)}
+.btn:disabled{opacity:.5}
+.prog{height:6px;border-radius:3px;background:var(--bd);overflow:hidden;margin:4px 0 14px}
+.prog>div{height:100%;background:var(--acc);transition:width .2s}
+.part{font-size:12px;font-weight:800;color:var(--acc);letter-spacing:1px}
+.q{font-size:18px;font-weight:800;line-height:1.35;margin:6px 0 14px}
+.opt{display:block;width:100%;text-align:left;background:var(--card);border:1.5px solid var(--bd);border-radius:12px;padding:13px 14px;margin-bottom:9px;color:var(--tx);cursor:pointer;touch-action:manipulation;font:inherit}
+.opt b{display:block;font-size:16px;font-weight:800}
+.opt small{display:block;font-size:12px;color:var(--mu);margin-top:3px;font-weight:500}
+.opt.on{border-color:var(--acc);background:var(--sel)}
+.code{font-size:13px;font-weight:900;color:var(--acc);letter-spacing:1px}
+.ptitle{font-size:26px;font-weight:900;margin:2px 0 6px}
+.charts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.chart h3{font-size:11px;font-weight:800;color:var(--mu);text-align:center;letter-spacing:.5px;margin-bottom:4px}
+.chart svg{width:100%;height:auto;display:block}
+.sec h4{font-size:14px;font-weight:900;margin:14px 0 6px}
+.sec p{font-size:14px;line-height:1.55;margin-bottom:6px}
+.sec ul{padding-left:18px}
+.sec li{font-size:14px;line-height:1.5;margin-bottom:4px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--mu);margin-top:8px}
+.legend span b{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.hist{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--bd);cursor:pointer}
+.hist:first-of-type{border-top:none}
+.hist .d{font-size:12px;color:var(--mu)}
+.hist .t{flex:1;font-weight:800;font-size:14px}
+.status{font-size:12px;margin-top:8px;color:var(--mu)}
+.status.err{color:var(--warn)}
+.status.ok{color:#2E9E5B}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <button class="back" id="backBtn" onclick="goBack()" style="display:none">‹</button>
+    <h1 id="hdr">TEST DISC</h1>
+  </header>
+  <main id="app"></main>
+</div>
+<script src="disc-core.js"></script>
+<script>
+// ── TEST DISC (PitchRec / New Speech) ──
+// Logowanie: w PWA token z localStorage (ten sam co PitchRec), w aplikacji natywnej z mostka
+// window.NSBridge.auth(). Wynik zawsze przeliczany z zapisanych odpowiedzi przez disc-core.js.
+var API = 'https://newspeech-backend.mowaiemocje.workers.dev';
+var P = new URLSearchParams(location.search);
+var STUDENT = P.get('student') || '';          // tryb trenera: wyniki wskazanego kursanta
+var LS_KEY = 'disc_progress_v1';
+
+function auth() {
+  try { if (window.NSBridge && NSBridge.auth) { var a = JSON.parse(NSBridge.auth()); if (a && a.token) return a; } } catch (e) {}
+  var h = new URLSearchParams(location.hash.replace(/^#/, ''));
+  if (h.get('t')) return { token: h.get('t'), email: h.get('e') || '', server: h.get('s') || 'new' };
+  try {
+    var t = localStorage.getItem('ns_jwt');
+    if (t) return { token: t, email: localStorage.getItem('ns_email') || '', server: (localStorage.getItem('nsServerChoice') === 'standard' ? 'old' : 'new') };
+  } catch (e) {}
+  return null;
+}
+function q(o) { var a = auth() || {}; o = o || {}; o.ns_token = a.token || ''; o.ns_email = a.email || ''; o.ns_server = a.server || 'new'; return new URLSearchParams(o).toString(); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+var $app = document.getElementById('app');
+
+// ── postep testu (lokalnie, zeby po zamknieciu mozna bylo dokonczyc) ──
+var S = { most: new Array(24).fill(null), least: new Array(24).fill(null), step: 0 };
+function loadProgress() { try { var p = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); if (p && p.most && p.least) S = p; } catch (e) {} }
+function saveProgress() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {} }
+function clearProgress() { try { localStorage.removeItem(LS_KEY); } catch (e) {} S = { most: new Array(24).fill(null), least: new Array(24).fill(null), step: 0 }; }
+function answered() { return S.most.filter(function (x) { return x != null; }).length + S.least.filter(function (x) { return x != null; }).length; }
+
+var view = 'home', results = [];
+function goBack() {
+  if (view === 'test' && S.step > 0) { S.step--; saveProgress(); renderTest(); return; }
+  if (view === 'result' && STUDENT) { renderHome(); return; }
+  if (view !== 'home') { renderHome(); return; }
+  try { if (window.NSBridge && NSBridge.close) { NSBridge.close(); return; } } catch (e) {}
+  if (window.history.length > 1) window.history.back(); else location.href = 'index.html';
+}
+function setHeader(t, back) { document.getElementById('hdr').textContent = t; document.getElementById('backBtn').style.display = back ? 'block' : 'none'; }
+
+// ── START ──
+function renderHome() {
+  view = 'home';
+  var a = auth();
+  setHeader(STUDENT ? 'DISC KURSANTA' : 'TEST DISC', true);
+  if (!a) {
+    $app.innerHTML = '<div class="card"><div style="font-size:40px">🔒</div><div class="q">Test DISC jest dostępny po zalogowaniu</div>' +
+      '<div class="muted">Zaloguj się do NewSpeech w Ustawieniach aplikacji. Twój wynik zobaczy też Twój trener.</div></div>';
+    return;
+  }
+  var h = '';
+  if (!STUDENT) {
+    var n = answered();
+    h += '<div class="card"><div class="q" style="margin-top:0">Jaki masz styl działania i komunikacji?</div>' +
+      '<div class="muted">Test ma dwie części po 24 pytania. W pierwszej wybierasz zdanie, które <b>najbardziej</b> do Ciebie pasuje, w drugiej — przymiotnik, który <b>najmniej</b> do Ciebie pasuje. Odpowiadaj szybko, pierwszym skojarzeniem. Zajmie to ok. 10 minut. Wynik zobaczy też Twój trener.</div>' +
+      (n > 0 && n < 48 ? '<button class="btn" onclick="startTest(false)">Dokończ test (' + n + '/48)</button><button class="btn ghost" onclick="startTest(true)">Zacznij od nowa</button>'
+        : '<button class="btn" onclick="startTest(true)">Rozpocznij test</button>') + '</div>';
+  }
+  h += '<div class="card"><div class="part">' + (STUDENT ? 'WYNIKI KURSANTA' : 'TWOJE WYNIKI') + '</div><div id="histBox" class="muted" style="margin-top:8px">⏳ Wczytuję…</div></div>';
+  $app.innerHTML = h;
+  loadHistory();
+}
+
+function loadHistory() {
+  var o = {}; if (STUDENT) o.student_id = STUDENT;
+  fetch(API + '/disc/results?' + q(o), { cache: 'no-store' }).then(function (r) {
+    return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'serwer nie ma jeszcze testu DISC (worker)' : 'HTTP ' + r.status)); return d; });
+  }).then(function (d) {
+    results = d.results || [];
+    var box = document.getElementById('histBox'); if (!box) return;
+    if (!results.length) { box.innerHTML = STUDENT ? 'Kursant nie zrobił jeszcze testu.' : 'Nie masz jeszcze wyniku — zrób test powyżej.'; return; }
+    box.innerHTML = results.map(function (x, i) {
+      var dt = new Date((x.created_at || 0) * 1000).toLocaleDateString('pl-PL', { day: 'numeric', month: 'short', year: 'numeric' });
+      return '<div class="hist" onclick="openResult(' + i + ')"><div class="t">' + esc(x.profile_title || '') + ' <span class="code">' + esc(x.profile_code || '') + '</span></div><div class="d">' + dt + ' ›</div></div>';
+    }).join('');
+  }).catch(function (e) {
+    var box = document.getElementById('histBox'); if (box) { box.className = 'status err'; box.textContent = '❌ ' + e.message; }
+  });
+}
+function openResult(i) {
+  var x = results[i]; if (!x) return;
+  var m = typeof x.answers_most === 'string' ? JSON.parse(x.answers_most) : x.answers_most;
+  var l = typeof x.answers_least === 'string' ? JSON.parse(x.answers_least) : x.answers_least;
+  renderResult(DISC.score(m, l), x.created_at, null);
+}
+
+// ── TEST: jedna grupa na ekranie ──
+function startTest(fresh) { if (fresh) clearProgress(); else loadProgress(); renderTest(); }
+function renderTest() {
+  view = 'test';
+  setHeader('TEST DISC', true);
+  var st = S.step, part = st < 24 ? 1 : 2, i = part === 1 ? st : st - 24;
+  var opts = part === 1 ? DISC.most[i] : DISC.least[i];
+  var sel = part === 1 ? S.most[i] : S.least[i];
+  $app.innerHTML = '<div class="part">CZĘŚĆ ' + part + ' · ' + (i + 1) + '/24</div>' +
+    '<div class="prog"><div style="width:' + Math.round(st / 48 * 100) + '%"></div></div>' +
+    '<div class="q">' + (part === 1 ? 'Które zdanie <u>najbardziej</u> do Ciebie pasuje?' : 'Który przymiotnik <u>najmniej</u> do Ciebie pasuje?') + '</div>' +
+    opts.map(function (o, k) {
+      return '<button class="opt' + (sel === k ? ' on' : '') + '" onclick="pick(' + k + ')"><b>' + esc(o[0]) + '</b><small>' + esc(o[2]) + '</small></button>';
+    }).join('') +
+    '<div class="muted" style="text-align:center;margin-top:6px">Wybierz jedną odpowiedź — przejdziesz dalej automatycznie.</div>';
+  window.scrollTo(0, 0);
+}
+function pick(k) {
+  var st = S.step;
+  if (st < 24) S.most[st] = k; else S.least[st - 24] = k;
+  var btns = document.querySelectorAll('.opt'); btns.forEach(function (b, j) { b.classList.toggle('on', j === k); });
+  saveProgress();
+  setTimeout(function () {
+    if (S.step < 47) { S.step++; saveProgress(); if (S.step === 24) renderPartBreak(); else renderTest(); }
+    else finishTest();
+  }, 220);
+}
+function renderPartBreak() {
+  view = 'test';
+  $app.innerHTML = '<div class="card" style="text-align:center"><div style="font-size:40px">✅</div><div class="q">Część 1 gotowa!</div>' +
+    '<div class="muted">Teraz 24 grupy przymiotników. Tym razem wybieraj ten, który <b>najmniej</b> do Ciebie pasuje.</div>' +
+    '<button class="btn" onclick="renderTest()">Dalej — część 2</button></div>';
+}
+
+// ── koniec: wynik + zapis na serwerze ──
+function finishTest() {
+  var res = DISC.score(S.most, S.least);
+  renderResult(res, Math.floor(Date.now() / 1000), 'saving');
+  var a = auth() || {};
+  fetch(API + '/disc/results', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ns_token: a.token, ns_email: a.email, ns_server: a.server || 'new', most: S.most, least: S.least,
+      scores: { most: res.most, least: res.least, diff: res.diff, pct: res.pct }, profile_code: res.profile.code, profile_title: res.profile.title }) })
+    .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok) throw new Error(d.error || (r.status === 404 ? 'serwer nie ma jeszcze testu DISC (worker)' : 'HTTP ' + r.status)); return d; }); })
+    .then(function () { clearProgress(); setStatus('✓ Wynik zapisany — zobaczy go też Twój trener.', 'ok'); })
+    .catch(function (e) { setStatus('❌ Nie udało się zapisać wyniku: ' + e.message + ' — odpowiedzi zostały na telefonie, spróbuj ponownie.', 'err', true); });
+}
+function setStatus(t, cls, retry) {
+  var s = document.getElementById('saveStatus'); if (!s) return;
+  s.className = 'status ' + (cls || ''); s.innerHTML = esc(t) + (retry ? ' <a href="#" onclick="finishTest();return false" style="color:var(--acc)">Ponów</a>' : '');
+}
+
+function chartSvg(vals) {
+  // 4 slupki D/I/S/K (0..100 %), linia 50 %
+  var W = 120, H = 130, top = 8, bot = 22, ch = H - top - bot, bw = 20, gap = (W - 4 * bw) / 5;
+  var cols = { D: 'var(--cD)', I: 'var(--cI)', S: 'var(--cS)', K: 'var(--cK)' };
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+  s += '<rect x="0" y="' + top + '" width="' + W + '" height="' + ch + '" fill="none" stroke="var(--bd)"/>';
+  ['D', 'I', 'S', 'K'].forEach(function (k, i) {
+    var v = Math.max(0, Math.min(100, vals[k] || 0)), x = gap + i * (bw + gap), h = ch * v / 100;
+    s += '<rect x="' + x + '" y="' + (top + ch - h) + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + cols[k] + '"/>';
+    s += '<text x="' + (x + bw / 2) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="11" font-weight="800" fill="var(--tx)">' + k + '</text>';
+    s += '<text x="' + (x + bw / 2) + '" y="' + Math.max(top + 9, top + ch - h - 3) + '" text-anchor="middle" font-size="8" fill="var(--mu)">' + Math.round(v) + '</text>';
+  });
+  var y50 = top + ch / 2;
+  s += '<line x1="0" x2="' + W + '" y1="' + y50 + '" y2="' + y50 + '" stroke="var(--mu)" stroke-dasharray="3 3"/>';
+  return s + '</svg>';
+}
+
+function renderResult(res, ts, saving) {
+  view = 'result';
+  setHeader(STUDENT ? 'DISC KURSANTA' : 'TWÓJ WYNIK', true);
+  var p = res.profile || {}, dt = ts ? new Date(ts * 1000).toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  var secs = DISC.parseDescription(p.description || '');
+  $app.innerHTML =
+    '<div class="card"><div class="code">PROFIL ' + esc(p.code || '') + (dt ? ' · ' + dt : '') + '</div><div class="ptitle">' + esc(p.title || '') + '</div>' +
+    (res.partial ? '<div class="muted">Wynik niejednoznaczny — pokazujemy najbliższy profil.</div>' : '') +
+    (saving ? '<div id="saveStatus" class="status">⏳ Zapisuję wynik…</div>' : '') + '</div>' +
+    '<div class="card"><div class="charts">' +
+      '<div class="chart"><h3>ZEWNĘTRZNY</h3>' + chartSvg(res.pct.most) + '</div>' +
+      '<div class="chart"><h3>WEWNĘTRZNY</h3>' + chartSvg(res.pct.least) + '</div>' +
+      '<div class="chart"><h3>ZINTEGROWANY</h3>' + chartSvg(res.pct.diff) + '</div></div>' +
+      '<div class="legend"><span><b style="background:var(--cD)"></b>D — dominacja</span><span><b style="background:var(--cI)"></b>I — wpływ</span><span><b style="background:var(--cS)"></b>S — stałość</span><span><b style="background:var(--cK)"></b>K — kontrola</span></div>' +
+      '<div class="muted" style="margin-top:8px">Zewnętrzny — jak działasz, gdy inni patrzą. Wewnętrzny — jak reagujesz pod presją. Zintegrowany — Twój codzienny styl. Linia przerywana = 50%.</div></div>' +
+    '<div class="card sec">' + secs.map(function (sc) {
+      return (sc.title ? '<h4>' + esc(sc.title) + '</h4>' : '') + sc.intro.map(function (t) { return '<p>' + esc(t) + '</p>'; }).join('') +
+        (sc.items.length ? '<ul>' + sc.items.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '');
+    }).join('') + '</div>' +
+    (STUDENT ? '' : '<button class="btn ghost" onclick="renderHome()">Wróć</button>');
+  window.scrollTo(0, 0);
+}
+
+loadProgress();
+renderHome();
+</script>
+</body>
+</html>
