@@ -93,14 +93,16 @@ public final class CallRecUi {
         box.removeAllViews();
         boolean mic = has(a, android.Manifest.permission.RECORD_AUDIO);
         boolean notif = notifOk(a);
-        boolean acc = CallRecService.enabled(a);
+        boolean accOn = CallRecService.enabled(a);
+        boolean acc = CallRecService.alive(a);          // wlaczona I naprawde dziala
+        boolean phone = CallRecService.phoneStateOk(a);
         boolean bat = batteryFree(a);
-        int ok = (mic ? 1 : 0) + (notif ? 1 : 0) + (acc ? 1 : 0) + (bat ? 1 : 0);
-        TextView sum = Ui.text(a, ok == 4 ? "🎉 " + L.t("Wszystko gotowe — rozmowy będą się nagrywać.") : L.f("Gotowe {0} z 4. Dotknij przycisków poniżej.", ok), 14f, R.color.pr_text);
+        int ok = (mic ? 1 : 0) + (notif ? 1 : 0) + (phone ? 1 : 0) + (acc ? 1 : 0) + (bat ? 1 : 0);
+        TextView sum = Ui.text(a, ok == 5 ? "🎉 " + L.t("Wszystko gotowe — rozmowy będą się nagrywać.") : L.f("Gotowe {0} z {1}. Dotknij przycisków poniżej.", ok, 5), 14f, R.color.pr_text);
         sum.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        if (ok == 4) sum.setTextColor(0xFF00E676);
+        if (ok == 5) sum.setTextColor(0xFF00E676);
         box.addView(sum);
-        if (ok < 4) {
+        if (ok < 5) {
             Button all = Ui.button(a, "⚡ " + L.t("Ustaw automatycznie, co się da"), R.color.pr_accent, true);
             all.setOnClickListener(v -> autoFix(a));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -110,14 +112,23 @@ public final class CallRecUi {
         box.addView(Ui.spacer(a, 8));
         row(a, box, mic, "🎤 " + L.t("Mikrofon"), L.t("Zgoda na nagrywanie dźwięku."), L.t("Zezwól"), () -> askPerms(a));
         row(a, box, notif, "🔔 " + L.t("Powiadomienia"), L.t("Żeby widzieć „Nagrywam rozmowę” i móc od razu opisać nagranie."), L.t("Zezwól"), () -> askPerms(a));
+        row(a, box, phone, "📞 " + L.t("Wykrywanie rozmowy"), L.t("Zgoda „Telefon” — apka widzi tylko, że rozmowa trwa (bez numerów). Bez tego na części telefonów (np. Xiaomi) rozmowa nie zostanie wykryta."), L.t("Zezwól"), () -> askPerms(a));
         row(a, box, bat, "🔋 " + L.t("Bateria bez ograniczeń"), L.t("Bez tego telefon usypia apkę — wyłącza usługę albo urywa nagranie po wygaszeniu ekranu."), L.t("Ustaw"), () -> askBattery(a));
-        row(a, box, acc, "♿ " + L.t("Usługa nagrywania rozmów"), L.t("Ułatwienia dostępu → Zainstalowane / Pobrane aplikacje → „New Speech — nagrywanie rozmów” → Włącz."), L.t("Otwórz"), () -> openAccessibility(a));
-        if (!acc && Build.VERSION.SDK_INT >= 33)
+        row(a, box, acc, "♿ " + L.t("Usługa nagrywania rozmów"), accOn
+                ? L.t("Usługa jest zaznaczona, ale telefon ją zatrzymał i NIE działa. Wyłącz ją i włącz ponownie w Ułatwieniach dostępu, a potem ustaw poniżej ustawienia producenta.")
+                : L.t("Ułatwienia dostępu → Zainstalowane / Pobrane aplikacje → „New Speech — nagrywanie rozmów” → Włącz."), L.t("Otwórz"), () -> openAccessibility(a));
+        if (!accOn && Build.VERSION.SDK_INT >= 33)
             hint(a, box, L.t("Przełącznik jest szary („Ustawienie ograniczone”)? Informacje o aplikacji → ⋮ w prawym górnym rogu → „Zezwól na ustawienia z ograniczeniami”, potem wróć tutaj."), L.t("Informacje o aplikacji"), () -> openAppInfo(a));
         // producent: dodatkowe usypianie aplikacji (nie da sie sprawdzic stanu — tylko otworzyc)
         Intent vendor = vendorIntent(a);
         if (vendor != null)
             hint(a, box, "📱 " + vendorText(), L.t("Otwórz"), () -> { try { a.startActivity(vendor); } catch (Exception e) { openAppInfo(a); } });
+        if (isXiaomi()) {
+            Intent miBat = miuiBatteryIntent(a);
+            hint(a, box, "🔋 " + L.t("Xiaomi: Oszczędzanie baterii dla New Speech → „Bez ograniczeń” (to inne ustawienie niż bateria Androida powyżej)."), L.t("Otwórz"), () -> {
+                try { if (miBat != null) a.startActivity(miBat); else openAppInfo(a); } catch (Exception e) { openAppInfo(a); } });
+            hint(a, box, "🔒 " + L.t("Xiaomi: w ostatnich aplikacjach przytrzymaj New Speech i zablokuj kłódką — wtedy MIUI jej nie zamknie."), null, null);
+        }
         hint(a, box, "💡 " + L.t("Wygaszanie ekranu przy uchu jest normalne — nagrywanie trwa dalej. Nie używaj słuchawek Bluetooth (nie nagrywają się)."), null, null);
     }
 
@@ -159,7 +170,8 @@ public final class CallRecUi {
     static void autoFix(Activity a) {
         if (!has(a, android.Manifest.permission.RECORD_AUDIO) || !notifOk(a)) { askPerms(a); return; }
         if (!batteryFree(a)) { askBattery(a); return; }
-        if (!CallRecService.enabled(a)) { openAccessibility(a); return; }
+        if (!CallRecService.phoneStateOk(a)) { askPerms(a); return; }
+        if (!CallRecService.alive(a)) { openAccessibility(a); return; }
         refreshOpenSetup();
     }
 
@@ -167,6 +179,7 @@ public final class CallRecUi {
         java.util.List<String> need = new java.util.ArrayList<>();
         if (!has(a, android.Manifest.permission.RECORD_AUDIO)) need.add(android.Manifest.permission.RECORD_AUDIO);
         if (!notifOk(a)) need.add("android.permission.POST_NOTIFICATIONS");
+        if (!CallRecService.phoneStateOk(a)) need.add("android.permission.READ_PHONE_STATE");
         if (need.isEmpty()) { refreshOpenSetup(); return; }
         androidx.core.app.ActivityCompat.requestPermissions(a, need.toArray(new String[0]), REQ_PERMS);
     }
@@ -191,6 +204,21 @@ public final class CallRecUi {
             Intent i = new Intent().setComponent(new android.content.ComponentName(cn[0], cn[1])).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try { if (c.getPackageManager().resolveActivity(i, 0) != null) return i; } catch (Exception e) { }
         }
+        return null;
+    }
+
+    static boolean isXiaomi() {
+        String m = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(java.util.Locale.US);
+        return m.contains("xiaomi") || m.contains("redmi") || m.contains("poco");
+    }
+
+    // MIUI: osobne "Oszczedzanie baterii" dla aplikacji (Bez ograniczen)
+    static Intent miuiBatteryIntent(Context c) {
+        try {
+            Intent i = new Intent().setComponent(new android.content.ComponentName("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity"))
+                    .putExtra("package_name", c.getPackageName()).putExtra("package_label", "New Speech").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (c.getPackageManager().resolveActivity(i, 0) != null) return i;
+        } catch (Exception e) { }
         return null;
     }
 
@@ -238,6 +266,12 @@ public final class CallRecUi {
         return p.getBoolean("callrec_wanted", false) && !CallRecService.enabled(c);
     }
 
+    // zaznaczona w ustawieniach, ale system jej nie uruchomil (Xiaomi i in.) — sprawdzane w apce
+    static boolean stoppedService(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE);
+        return p.getBoolean("callrec_wanted", false) && CallRecService.enabled(c) && !CallRecService.alive(c);
+    }
+
     // W tle (alarm co ~15 min): powiadomienie raz na kazde wylaczenie
     public static void watch(Context c) {
         noteState(c);
@@ -266,11 +300,14 @@ public final class CallRecUi {
     // Przy otwarciu apki: okienko, gdy usluga zniknela (najwyzej co 10 min)
     public static void checkOnResume(Activity a) {
         noteState(a);
-        if (!lostService(a) || System.currentTimeMillis() - lastAsk < 10 * 60_000L) return;
+        boolean stopped = stoppedService(a);
+        if ((!lostService(a) && !stopped) || System.currentTimeMillis() - lastAsk < 10 * 60_000L) return;
         lastAsk = System.currentTimeMillis();
         new AlertDialog.Builder(a)
                 .setTitle("⚠️ " + L.t("Nagrywanie rozmów wyłączone"))
-                .setMessage(L.t("Telefon sam wyłączył usługę nagrywania rozmów. Włącz ją ponownie i ustaw baterię apki „Bez ograniczeń” — wtedy przestanie się wyłączać."))
+                .setMessage(stopped
+                        ? L.t("Usługa nagrywania rozmów jest zaznaczona, ale telefon ją zatrzymał — rozmowy się NIE nagrywają. Wyłącz ją i włącz ponownie w Ułatwieniach dostępu, a w kreatorze ustaw baterię i ustawienia producenta.")
+                        : L.t("Telefon sam wyłączył usługę nagrywania rozmów. Włącz ją ponownie i ustaw baterię apki „Bez ograniczeń” — wtedy przestanie się wyłączać."))
                 .setPositiveButton(L.t("Włącz ponownie"), (d, w) -> setup(a))
                 .setNeutralButton(L.t("Nie używam"), (d, w) -> a.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE).edit().putBoolean("callrec_wanted", false).apply())
                 .setNegativeButton(L.t("Później"), null)
@@ -314,10 +351,13 @@ public final class CallRecUi {
     public static void fillSettings(Activity a, LinearLayout s, Runnable rerender) {
         android.content.SharedPreferences p = a.getSharedPreferences(CallRecService.PREFS, Context.MODE_PRIVATE);
         boolean on = CallRecService.enabled(a);
-        TextView st = Ui.text(a, on ? "✅ " + L.t("Usługa włączona — rozmowy z ☎ w apce nagrywają się same.")
+        boolean alive = CallRecService.alive(a);
+        TextView st = Ui.text(a, alive ? "✅ " + L.t("Usługa włączona — rozmowy z ☎ w apce nagrywają się same.")
+                : on ? "⚠️ " + L.t("Usługa zaznaczona, ale zatrzymana przez telefon — rozmowy się NIE nagrywają. Otwórz kreator.")
                 : "⚪ " + L.t("Usługa wyłączona — rozmowy się nie nagrywają."), 13f, R.color.pr_text);
         st.setTypeface(Typeface.DEFAULT_BOLD);
-        if (on) st.setTextColor(0xFF00E676);
+        if (alive) st.setTextColor(0xFF00E676);
+        else if (on) { st.setTextColor(0xFFFFB300); st.setOnClickListener(v -> setup(a)); }
         s.addView(st);
         if (on && !batteryFree(a)) {
             TextView bw = Ui.text(a, "⚠️ " + L.t("Bateria apki ma ograniczenia — telefon może sam wyłączać nagrywanie. Dotknij, żeby zmienić."), 12f, R.color.pr_warn);
@@ -393,6 +433,14 @@ public final class CallRecUi {
             lt.setPadding(0, (int) Ui.dp(a, 8), 0, 0);
             s.addView(lt);
         }
+        // diagnostyka (do zgloszenia problemu): czy usluga dziala, ostatni stan telefonu, czym wykryto rozmowe
+        String diag = L.t("Diagnostyka") + ": " + (alive ? "usługa ✓" : on ? "usługa zatrzymana" : "usługa wył.")
+                + " · tel: " + (CallRecService.phoneStateOk(a) ? p.getString("callrec_state", "—") : L.t("brak zgody"))
+                + (p.getString("callrec_start", "").isEmpty() ? "" : " · start: " + p.getString("callrec_start", ""))
+                + " · " + Build.MANUFACTURER + " " + Build.MODEL + " A" + Build.VERSION.SDK_INT;
+        TextView dg = Ui.text(a, diag, 10f, R.color.pr_muted);
+        dg.setPadding(0, (int) Ui.dp(a, 6), 0, 0);
+        s.addView(dg);
         String err = p.getString("callrec_last_err", "");
         if (!err.isEmpty()) s.addView(Ui.text(a, "⚠️ " + err, 11f, R.color.pr_warn));
         TextView h = Ui.text(a, all

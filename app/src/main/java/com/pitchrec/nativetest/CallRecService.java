@@ -82,6 +82,10 @@ public class CallRecService extends AccessibilityService {
         return System.currentTimeMillis() < c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("callrec_until", 0L);
     }
 
+    // Usluga NAPRAWDE dziala (a nie tylko jest zaznaczona w ustawieniach). Na Xiaomi/MIUI system
+    // potrafi zatrzymac usluge, a przelacznik w Ulatwieniach dostepu dalej jest wlaczony.
+    public static boolean alive(Context c) { return enabled(c) && running != null; }
+
     public static boolean isRecording() { CallRecService s = running; return s != null && s.recording; }
 
     // Zrodlo dzwieku: auto (jak Cube ACR) albo wybrane w Ustawieniach do testow na danym telefonie
@@ -110,6 +114,44 @@ public class CallRecService extends AccessibilityService {
         super.onServiceConnected();
         running = this;
         CallRecUi.noteState(this);
+        listenCallState();
+        kick();
+    }
+
+    // ── STAN POLACZENIA z telefonu (pewniejszy niz tryb audio — np. na Xiaomi tryb bywa inny) ──
+    private volatile boolean offhook = false;
+    private Object callCb = null;
+
+    static boolean phoneStateOk(Context c) {
+        return androidx.core.content.ContextCompat.checkSelfPermission(c, "android.permission.READ_PHONE_STATE") == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    void listenCallState() {
+        if (callCb != null || !phoneStateOk(this)) return;
+        try {
+            android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm == null) return;
+            if (Build.VERSION.SDK_INT >= 31) {
+                CallStateCb cb = new CallStateCb();
+                tm.registerTelephonyCallback(getMainExecutor(), cb);
+                callCb = cb;
+            } else {
+                android.telephony.PhoneStateListener l = new android.telephony.PhoneStateListener() {
+                    @Override public void onCallStateChanged(int state, String nr) { onCallState(state); }
+                };
+                tm.listen(l, android.telephony.PhoneStateListener.LISTEN_CALL_STATE);
+                callCb = l;
+            }
+        } catch (Exception e) { callCb = null; }
+    }
+
+    private final class CallStateCb extends android.telephony.TelephonyCallback implements android.telephony.TelephonyCallback.CallStateListener {
+        @Override public void onCallStateChanged(int state) { onCallState(state); }
+    }
+
+    private void onCallState(int state) {
+        offhook = state == android.telephony.TelephonyManager.CALL_STATE_OFFHOOK;
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("callrec_state", (offhook ? "OFFHOOK" : state == 1 ? "RINGING" : "IDLE") + " " + new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date())).apply();
         kick();
     }
 
@@ -119,6 +161,14 @@ public class CallRecService extends AccessibilityService {
     @Override
     public void onDestroy() {
         h.removeCallbacksAndMessages(null);
+        try {
+            android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm != null && callCb != null) {
+                if (Build.VERSION.SDK_INT >= 31 && callCb instanceof android.telephony.TelephonyCallback) tm.unregisterTelephonyCallback((android.telephony.TelephonyCallback) callCb);
+                else if (callCb instanceof android.telephony.PhoneStateListener) tm.listen((android.telephony.PhoneStateListener) callCb, 0);
+            }
+        } catch (Exception e) { }
+        callCb = null;
         if (recording) stopRec();
         if (running == this) running = null;
         super.onDestroy();
@@ -144,18 +194,19 @@ public class CallRecService extends AccessibilityService {
     }
 
     // start nagrywania: zwykla rozmowa telefoniczna
-    private boolean inCall() { lastMode = mode(); return lastMode == AudioManager.MODE_IN_CALL; }
+    private boolean inCall() { lastMode = mode(); return offhook || lastMode == AudioManager.MODE_IN_CALL; }
 
     // w trakcie nagrywania rozmowa "trwa" takze w trybach, w ktore niektore telefony przelaczaja sie
     // w czasie polaczenia (VoLTE / Wi-Fi calling = IN_COMMUNICATION, filtrowanie polaczen itp.)
     private boolean stillInCall() {
         lastMode = mode();
-        return lastMode == 2 || lastMode == 3 || lastMode == 4 || lastMode == 5 || lastMode == 6;
+        return offhook || lastMode == 2 || lastMode == 3 || lastMode == 4 || lastMode == 5 || lastMode == 6;
     }
 
     // Co sekunde sprawdzamy, czy trwa rozmowa (tryb audio telefonu) — bez uprawnien do stanu telefonu
     private final Runnable tick = new Runnable() {
         @Override public void run() {
+            if (callCb == null) listenCallState(); // zgoda na stan telefonu mogla dojsc pozniej
             boolean call = recording ? stillInCall() : inCall();
             boolean want = armed(CallRecService.this) || allOn(CallRecService.this);
             if (!recording && call && want) startRec();
@@ -193,6 +244,7 @@ public class CallRecService extends AccessibilityService {
         notCallTicks = 0;
         stopReason = "";
         holdAwake(true);
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("callrec_start", (offhook ? "stan telefonu" : "tryb audio " + lastMode)).apply();
         recFromList = armed(this);
         recLabel = recFromList ? p.getString("callrec_label", "") : "";
         disarm(this);

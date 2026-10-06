@@ -3186,7 +3186,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);
         CallRecUi.refreshOpenSetup(); // powrot z ustawien systemu — odswiez ✅/⚠️ w kreatorze
-        new Handler(Looper.getMainLooper()).postDelayed(() -> { if (!isFinishing() && prefs().getString("callrec_pending", null) == null) CallRecUi.checkOnResume(this); }, 900);
+        new Handler(Looper.getMainLooper()).postDelayed(() -> { if (!isFinishing() && prefs().getString("callrec_pending", null) == null) CallRecUi.checkOnResume(this); }, 4000); // 4 s: system zdazy podpiac usluge po starcie apki
         // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
         if ("recs".equals(currentPage) && isLoggedIn())
             NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
