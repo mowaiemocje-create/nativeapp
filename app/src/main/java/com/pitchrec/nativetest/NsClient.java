@@ -425,6 +425,26 @@ public class NsClient {
         out.writeBytes("\r\n");
     }
 
+    // DLUGOSC calego multipart (do Content-Length) — liczona dokladnie tak, jak pisza writeFilePart/writeField
+    private static long filePartLen(String boundary, String field, File f, String mime) {
+        return ("--" + boundary + "\r\n").length()
+                + ("Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + f.getName() + "\"\r\n").getBytes(StandardCharsets.UTF_8).length
+                + ("Content-Type: " + mime + "\r\n\r\n").length() + f.length() + 2;
+    }
+
+    private static long fieldLen(String boundary, String name, String value) {
+        return ("--" + boundary + "\r\n").length() + ("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n").length()
+                + value.getBytes(StandardCharsets.UTF_8).length + 2;
+    }
+
+    // Wysylka duzego pliku: znana dlugosc (serwery i proxy lepiej to znosza niz "chunked") i dlugi
+    // czas oczekiwania na odpowiedz — serwer po odebraniu dlugiego nagrania potrzebuje chwili.
+    private static void prepUpload(HttpURLConnection c, long len) {
+        c.setDoOutput(true);
+        c.setFixedLengthStreamingMode(len);
+        c.setReadTimeout(10 * 60 * 1000);
+    }
+
     private static void writeField(DataOutputStream out, String boundary, String name, String value) throws Exception {
         out.writeBytes("--" + boundary + "\r\n");
         out.writeBytes("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n");
@@ -441,13 +461,16 @@ public class NsClient {
         runAsync(() -> {
             String boundary = "----PitchRec" + System.currentTimeMillis();
             HttpURLConnection c = open("/records", "POST", token, email);
-            c.setDoOutput(true);
-            c.setChunkedStreamingMode(64 * 1024);
+            String day = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+            String cat = categoryId == null ? "" : categoryId;
+            long len = filePartLen(boundary, "record_file", file, mimeOf(file)) + fieldLen(boundary, "record_category_id", cat)
+                    + fieldLen(boundary, "date", day) + ("--" + boundary + "--\r\n").length();
+            prepUpload(c, len);
             c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
             try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
                 writeFilePart(out, boundary, "record_file", file, mimeOf(file));
-                writeField(out, boundary, "record_category_id", categoryId);
-                writeField(out, boundary, "date", new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date()));
+                writeField(out, boundary, "record_category_id", cat);
+                writeField(out, boundary, "date", day);
                 out.writeBytes("--" + boundary + "--\r\n");
             }
             return finish(c);
@@ -459,12 +482,14 @@ public class NsClient {
         runAsync(() -> {
             String boundary = "----PitchRec" + System.currentTimeMillis();
             HttpURLConnection c = open("/records/" + recordId, "PUT", token, email);
-            c.setDoOutput(true);
-            c.setChunkedStreamingMode(64 * 1024);
+            String cat = categoryId == null ? "" : categoryId;
+            long len = fieldLen(boundary, "id", recordId) + fieldLen(boundary, "record_category_id", cat) + fieldLen(boundary, "Content-Type", mimeOf(file))
+                    + filePartLen(boundary, "record_file", file, mimeOf(file)) + ("--" + boundary + "--\r\n").length();
+            prepUpload(c, len);
             c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
             try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
                 writeField(out, boundary, "id", recordId);
-                writeField(out, boundary, "record_category_id", categoryId == null ? "" : categoryId);
+                writeField(out, boundary, "record_category_id", cat);
                 writeField(out, boundary, "Content-Type", mimeOf(file));
                 writeFilePart(out, boundary, "record_file", file, mimeOf(file));
                 out.writeBytes("--" + boundary + "--\r\n");
