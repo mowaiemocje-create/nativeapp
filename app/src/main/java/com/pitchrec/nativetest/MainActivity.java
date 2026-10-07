@@ -1059,6 +1059,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             }
             if ("recs".equals(currentPage)) renderRecsPage();
         };
+        if (UploadShrink.needed(file)) setStatus(L.t("☁ Długie nagranie — zmniejszam plik przed wysłaniem (to może potrwać kilka minut)…"));
         if (isFix) NsClient.correctRecording(nsToken(), nsEmail(), file, meta.fixRecordId, catId, cb);
         else NsClient.uploadRecording(nsToken(), nsEmail(), file, catId, cb);
     }
@@ -1133,6 +1134,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 if ("recs".equals(currentPage)) renderRecsPage();
             }
         };
+        if (UploadShrink.needed(f)) setStatus(L.t("☁ Wysyłanie ") + (idx + 1) + "/" + todo.size() + L.t(" — zmniejszam długie nagranie…"));
         if (!fm.fixRecordId.isEmpty()) NsClient.correctRecording(nsToken(), nsEmail(), f, fm.fixRecordId, catId, cb);
         else NsClient.uploadRecording(nsToken(), nsEmail(), f, catId, cb);
     }

@@ -137,6 +137,7 @@ public class NsClient {
             String msg = null;
             try { JSONObject eo = new JSONObject(r.body); msg = eo.optString("message", ""); if (msg.isEmpty()) msg = eo.optString("error", ""); } catch (Exception e) { }
             r.err = (msg != null && !msg.isEmpty()) ? msg : (L.t("Błąd ") + r.status);
+            if (r.status == 413) r.err = L.t("Nagranie jest za duże dla serwera NewSpeech");
         }
         return r;
     }
@@ -459,42 +460,50 @@ public class NsClient {
     // POST /records — NOWE nagranie (podlega dziennemu limitowi).
     public static void uploadRecording(String token, String email, File file, String categoryId, Callback cb) {
         runAsync(() -> {
-            String boundary = "----PitchRec" + System.currentTimeMillis();
-            HttpURLConnection c = open("/records", "POST", token, email);
-            String day = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
-            String cat = categoryId == null ? "" : categoryId;
-            long len = filePartLen(boundary, "record_file", file, mimeOf(file)) + fieldLen(boundary, "record_category_id", cat)
-                    + fieldLen(boundary, "date", day) + ("--" + boundary + "--\r\n").length();
-            prepUpload(c, len);
-            c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-            try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
-                writeFilePart(out, boundary, "record_file", file, mimeOf(file));
-                writeField(out, boundary, "record_category_id", cat);
-                writeField(out, boundary, "date", day);
-                out.writeBytes("--" + boundary + "--\r\n");
-            }
-            return finish(c);
+            // dlugie nagranie → mniejsza kopia (limit wielkosci pliku na serwerze NS)
+            File up = UploadShrink.forUpload(file);
+            try {
+                String boundary = "----PitchRec" + System.currentTimeMillis();
+                HttpURLConnection c = open("/records", "POST", token, email);
+                String day = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+                String cat = categoryId == null ? "" : categoryId;
+                long len = filePartLen(boundary, "record_file", up, mimeOf(up)) + fieldLen(boundary, "record_category_id", cat)
+                        + fieldLen(boundary, "date", day) + ("--" + boundary + "--\r\n").length();
+                prepUpload(c, len);
+                c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
+                    writeFilePart(out, boundary, "record_file", up, mimeOf(up));
+                    writeField(out, boundary, "record_category_id", cat);
+                    writeField(out, boundary, "date", day);
+                    out.writeBytes("--" + boundary + "--\r\n");
+                }
+                return finish(c);
+            } finally { UploadShrink.cleanup(file, up); }
         }, cb);
     }
 
     // PUT /records/{id} — POPRAWKA istniejącego nagrania (bez dziennego limitu).
     public static void correctRecording(String token, String email, File file, String recordId, String categoryId, Callback cb) {
         runAsync(() -> {
-            String boundary = "----PitchRec" + System.currentTimeMillis();
-            HttpURLConnection c = open("/records/" + recordId, "PUT", token, email);
-            String cat = categoryId == null ? "" : categoryId;
-            long len = fieldLen(boundary, "id", recordId) + fieldLen(boundary, "record_category_id", cat) + fieldLen(boundary, "Content-Type", mimeOf(file))
-                    + filePartLen(boundary, "record_file", file, mimeOf(file)) + ("--" + boundary + "--\r\n").length();
-            prepUpload(c, len);
-            c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-            try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
-                writeField(out, boundary, "id", recordId);
-                writeField(out, boundary, "record_category_id", cat);
-                writeField(out, boundary, "Content-Type", mimeOf(file));
-                writeFilePart(out, boundary, "record_file", file, mimeOf(file));
-                out.writeBytes("--" + boundary + "--\r\n");
-            }
-            return finish(c);
+            // dlugie nagranie → mniejsza kopia (limit wielkosci pliku na serwerze NS)
+            File up = UploadShrink.forUpload(file);
+            try {
+                String boundary = "----PitchRec" + System.currentTimeMillis();
+                HttpURLConnection c = open("/records/" + recordId, "PUT", token, email);
+                String cat = categoryId == null ? "" : categoryId;
+                long len = fieldLen(boundary, "id", recordId) + fieldLen(boundary, "record_category_id", cat) + fieldLen(boundary, "Content-Type", mimeOf(up))
+                        + filePartLen(boundary, "record_file", up, mimeOf(up)) + ("--" + boundary + "--\r\n").length();
+                prepUpload(c, len);
+                c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
+                    writeField(out, boundary, "id", recordId);
+                    writeField(out, boundary, "record_category_id", cat);
+                    writeField(out, boundary, "Content-Type", mimeOf(up));
+                    writeFilePart(out, boundary, "record_file", up, mimeOf(up));
+                    out.writeBytes("--" + boundary + "--\r\n");
+                }
+                return finish(c);
+            } finally { UploadShrink.cleanup(file, up); }
         }, cb);
     }
 }
