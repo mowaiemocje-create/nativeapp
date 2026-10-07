@@ -1007,6 +1007,48 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private boolean limitOverride = false;
     private final java.util.Set<String> sendingNow = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
+    // ── POSTEP WYSYLKI na przycisku "Wyślij NS": wypelnia sie na pomaranczowo od lewej (0–100%) ──
+    private final java.util.Map<String, Button> sendButtons = new java.util.HashMap<>();
+    private final android.os.Handler sendTick = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean sendTicking = false;
+
+    private void startSendTicker() {
+        if (sendTicking) return;
+        sendTicking = true;
+        sendTick.postDelayed(new Runnable() {
+            @Override public void run() {
+                for (java.util.Map.Entry<String, Button> e : sendButtons.entrySet()) {
+                    if (sendingNow.contains(e.getKey())) paintSendProgress(e.getKey(), e.getValue());
+                }
+                if (sendingNow.isEmpty()) { sendTicking = false; return; }
+                sendTick.postDelayed(this, 400);
+            }
+        }, 400);
+    }
+
+    private void paintSendProgress(String name, Button b) {
+        float[] p = NsClient.PROGRESS.get(name);
+        float all = p == null ? 0f : p[0];
+        int stage = p == null ? 1 : (int) p[1];
+        int pct = Math.round((p == null ? 0f : p[2]) * 100);
+        String txt = stage == 0 ? L.t("⏳ Zmniejszanie") + " " + pct + "%"
+                : stage == 2 ? L.t("⏳ Serwer przetwarza…")
+                : L.t("⏳ Wysyłanie") + " " + pct + "%";
+        if (!txt.contentEquals(b.getText())) b.setText(txt);
+        android.graphics.drawable.Drawable bg = b.getBackground();
+        android.graphics.drawable.ClipDrawable clip;
+        if (bg instanceof android.graphics.drawable.LayerDrawable && ((android.graphics.drawable.LayerDrawable) bg).getNumberOfLayers() == 2
+                && ((android.graphics.drawable.LayerDrawable) bg).getDrawable(1) instanceof android.graphics.drawable.ClipDrawable) {
+            clip = (android.graphics.drawable.ClipDrawable) ((android.graphics.drawable.LayerDrawable) bg).getDrawable(1);
+        } else {
+            float r = 9 * getResources().getDisplayMetrics().density;
+            int orange = (Ui.col(this, R.color.pr_accent) & 0x00FFFFFF) | 0xA0000000;
+            clip = new android.graphics.drawable.ClipDrawable(Ui.rounded(orange, 0, 0, r), android.view.Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL);
+            b.setBackground(new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{bg, clip}));
+        }
+        clip.setLevel(Math.round(all * 10000));
+    }
+
     private void sendToNs(File file) {
         if (!isLoggedIn()) { promptLogin(L.t("Aby wysłać nagranie do NewSpeech, zaloguj się.")); return; }
         RecMeta meta = RecMeta.load(this, file.getName());
@@ -1025,9 +1067,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             return;
         }
         if (!sendingNow.add(file.getName())) { Toast.makeText(this, L.t("⏳ Wysyłanie już trwa…"), Toast.LENGTH_SHORT).show(); return; }
+        startSendTicker();
         if ("recs".equals(currentPage)) renderRecsPage();
         String catId = NsClient.categoryId(meta.cat);
-        if (catId == null) { Toast.makeText(this, L.t("Nieznana kategoria: ") + meta.cat, Toast.LENGTH_LONG).show(); return; }
+        if (catId == null) { sendingNow.remove(file.getName()); Toast.makeText(this, L.t("Nieznana kategoria: ") + meta.cat, Toast.LENGTH_LONG).show(); return; }
         boolean isFix = !meta.fixRecordId.isEmpty();
         setStatus(isFix ? L.t("☁ Wysyłanie poprawki…") : L.t("☁ Wysyłanie do NS…"));
         NsClient.Callback cb = r -> {
@@ -1120,7 +1163,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String catId = NsClient.categoryId(fm.cat);
         if (catId == null) { sendNext(todo, idx + 1, okCount); return; }
         setStatus(L.t("☁ Wysyłanie ") + (idx + 1) + "/" + todo.size() + "…");
+        sendingNow.add(f.getName());
+        startSendTicker();
+        if ("recs".equals(currentPage)) renderRecsPage();
         NsClient.Callback cb = r -> {
+            sendingNow.remove(f.getName());
             if (r.ok) {
                 markNs(f, "sent");
                 rememberNsId(f, r.body);
@@ -3088,6 +3135,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         android.widget.LinearLayout c = findViewById(R.id.recsContent);
         if (c == null) return;
         c.removeAllViews();
+        sendButtons.clear();
         float d = getResources().getDisplayMetrics().density;
         File[] files = getFilesDir().listFiles((dir, name) -> name.endsWith(".wav") || name.endsWith(".mp3"));
         if (files == null) files = new File[0];
@@ -3282,6 +3330,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             Button send = Ui.button(this, busy ? L.t("⏳ Wysyłanie…") : L.t("☁ Wyślij NS"), R.color.pr_purple, false);
             send.setEnabled(!busy);
             send.setOnClickListener(v -> sendToNs(file));
+            sendButtons.put(file.getName(), send);
+            if (busy) { paintSendProgress(file.getName(), send); startSendTicker(); }
             btns.addView(send, Ui.weight(1.3f, 6 * d));
         }
         Button daw = Ui.button(this, L.t("▶ DAW"), R.color.pr_purple, false);

@@ -23,11 +23,15 @@ public final class UploadShrink {
 
     private UploadShrink() { }
 
+    public interface Prog { void at(double f); }
+
     public static boolean needed(File f) { return f != null && f.length() > LIMIT; }
 
     // Plik do wyslania: oryginal, jesli jest maly; inaczej przekodowana kopia (ta sama nazwa,
     // rozszerzenie .mp3) w katalogu tymczasowym. Przy bledzie przekodowania zwraca oryginal.
-    public static File forUpload(File f) {
+    public static File forUpload(File f) { return forUpload(f, null); }
+
+    public static File forUpload(File f, Prog p) {
         if (!needed(f)) return f;
         File dir = new File(System.getProperty("java.io.tmpdir", "/data/local/tmp"), "ns_upload");
         dir.mkdirs();
@@ -35,8 +39,8 @@ public final class UploadShrink {
         int dot = name.lastIndexOf('.');
         File out = new File(dir, (dot > 0 ? name.substring(0, dot) : name) + ".mp3");
         try {
-            if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".wav")) wavToMp3(f, out);
-            else mp3ToMp3(f, out);
+            if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".wav")) wavToMp3(f, out, p);
+            else mp3ToMp3(f, out, p);
             if (out.length() > 0 && out.length() < f.length()) return out;
         } catch (Throwable e) { /* np. brak pamieci / zly plik — wysylamy oryginal */ }
         out.delete();
@@ -89,7 +93,7 @@ public final class UploadShrink {
     }
 
     // WAV (16-bit PCM) → MP3
-    static void wavToMp3(File in, File out) throws Exception {
+    static void wavToMp3(File in, File out, Prog p) throws Exception {
         int ch, sr, dataOff = 44;
         long dataLen;
         try (RandomAccessFile r = new RandomAccessFile(in, "r")) {
@@ -107,12 +111,15 @@ public final class UploadShrink {
             while (skipped < dataOff) { long k = is.skip(dataOff - skipped); if (k <= 0) break; skipped += k; }
             byte[] b = new byte[ch * 2 * 4096];
             int have = 0, k;
+            long read = 0;
             while ((k = is.read(b, have, b.length - have)) > 0) {
                 have += k;
+                read += k;
+                if (p != null) p.at(read / (double) Math.max(1, dataLen));
                 int frames = have / (2 * ch);
                 for (int i = 0; i < frames; i++) {
                     int sum = 0;
-                    for (int c = 0; c < ch; c++) { int p = 2 * (i * ch + c); sum += (short) ((b[p] & 0xff) | (b[p + 1] << 8)); }
+                    for (int c = 0; c < ch; c++) { int q = 2 * (i * ch + c); sum += (short) ((b[q] & 0xff) | (b[q + 1] << 8)); }
                     enc.put((short) (sum / ch));
                 }
                 int used = frames * 2 * ch;
@@ -123,7 +130,7 @@ public final class UploadShrink {
     }
 
     // MP3 (lub inny plik audio czytany przez Androida) → MP3 o nizszym bitrate
-    static void mp3ToMp3(File in, File out) throws Exception {
+    static void mp3ToMp3(File in, File out, Prog p) throws Exception {
         android.media.MediaExtractor ex = new android.media.MediaExtractor();
         android.media.MediaCodec codec = null;
         Enc enc = null;
@@ -158,7 +165,12 @@ public final class UploadShrink {
                     java.nio.ByteBuffer ib = codec.getInputBuffer(ii);
                     int sz = ib != null ? ex.readSampleData(ib, 0) : -1;
                     if (sz < 0) { codec.queueInputBuffer(ii, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM); inDone = true; }
-                    else { codec.queueInputBuffer(ii, 0, sz, ex.getSampleTime(), 0); ex.advance(); }
+                    else {
+                        long t = ex.getSampleTime();
+                        codec.queueInputBuffer(ii, 0, sz, t, 0);
+                        ex.advance();
+                        if (p != null && durUs > 0) p.at(t / (double) durUs);
+                    }
                 }
                 int oi = codec.dequeueOutputBuffer(info, progressed ? 0 : 2000);
                 while (oi >= 0 || oi == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -175,7 +187,7 @@ public final class UploadShrink {
                         int frames = info.size / (2 * ch);
                         for (int i = 0; i < frames; i++) {
                             int sum = 0;
-                            for (int c = 0; c < ch; c++) { int p = 2 * (i * ch + c); sum += (short) ((tmp[p] & 0xff) | (tmp[p + 1] << 8)); }
+                            for (int c = 0; c < ch; c++) { int q = 2 * (i * ch + c); sum += (short) ((tmp[q] & 0xff) | (tmp[q + 1] << 8)); }
                             enc.put((short) (sum / ch));
                         }
                     }

@@ -91,6 +91,19 @@ public class NsClient {
     private static final ExecutorService NET = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
+    // POSTEP WYSYLKI nagrania (klucz: nazwa oryginalnego pliku) — dla przycisku "Wysyłanie…".
+    // {calosc 0..1, etap (0 = zmniejszanie, 1 = wysylanie, 2 = serwer przetwarza), postep etapu 0..1}
+    public static final java.util.concurrent.ConcurrentHashMap<String, float[]> PROGRESS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void prog(String key, int stage, double f, boolean shrunk) {
+        float pf = (float) Math.max(0, Math.min(1, f));
+        float all;
+        if (stage == 0) all = 0.5f * pf;
+        else if (stage == 1) all = shrunk ? 0.5f + 0.5f * pf : pf;
+        else all = 1f;
+        PROGRESS.put(key, new float[]{all, stage, pf});
+    }
+
     private static void runAsync(java.util.concurrent.Callable<Result> job, Callback cb) {
         NET.execute(() -> {
             Result r;
@@ -415,13 +428,22 @@ public class NsClient {
     }
 
     private static void writeFilePart(DataOutputStream out, String boundary, String field, File f, String mime) throws Exception {
+        writeFilePart(out, boundary, field, f, mime, null);
+    }
+
+    private static void writeFilePart(DataOutputStream out, String boundary, String field, File f, String mime, UploadShrink.Prog p) throws Exception {
         out.writeBytes("--" + boundary + "\r\n");
         out.write(("Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + f.getName() + "\"\r\n").getBytes(StandardCharsets.UTF_8));
         out.writeBytes("Content-Type: " + mime + "\r\n\r\n");
         try (FileInputStream in = new FileInputStream(f)) {
             byte[] buf = new byte[16384];
             int n;
-            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            long done = 0, total = Math.max(1, f.length());
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+                done += n;
+                if (p != null) p.at(done / (double) total);
+            }
         }
         out.writeBytes("\r\n");
     }
@@ -461,7 +483,11 @@ public class NsClient {
     public static void uploadRecording(String token, String email, File file, String categoryId, Callback cb) {
         runAsync(() -> {
             // dlugie nagranie → mniejsza kopia (limit wielkosci pliku na serwerze NS)
-            File up = UploadShrink.forUpload(file);
+            final String key = file.getName();
+            final boolean shrink = UploadShrink.needed(file);
+            File up = UploadShrink.forUpload(file, f -> prog(key, 0, f, true));
+            UploadShrink.Prog sendP = f -> prog(key, 1, f, shrink);
+            sendP.at(0);
             try {
                 String boundary = "----PitchRec" + System.currentTimeMillis();
                 HttpURLConnection c = open("/records", "POST", token, email);
@@ -472,13 +498,14 @@ public class NsClient {
                 prepUpload(c, len);
                 c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
                 try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
-                    writeFilePart(out, boundary, "record_file", up, mimeOf(up));
+                    writeFilePart(out, boundary, "record_file", up, mimeOf(up), sendP);
                     writeField(out, boundary, "record_category_id", cat);
                     writeField(out, boundary, "date", day);
                     out.writeBytes("--" + boundary + "--\r\n");
                 }
+                prog(key, 2, 1, shrink); // wyslane — czekamy na odpowiedz serwera
                 return finish(c);
-            } finally { UploadShrink.cleanup(file, up); }
+            } finally { UploadShrink.cleanup(file, up); PROGRESS.remove(key); }
         }, cb);
     }
 
@@ -486,7 +513,11 @@ public class NsClient {
     public static void correctRecording(String token, String email, File file, String recordId, String categoryId, Callback cb) {
         runAsync(() -> {
             // dlugie nagranie → mniejsza kopia (limit wielkosci pliku na serwerze NS)
-            File up = UploadShrink.forUpload(file);
+            final String key = file.getName();
+            final boolean shrink = UploadShrink.needed(file);
+            File up = UploadShrink.forUpload(file, f -> prog(key, 0, f, true));
+            UploadShrink.Prog sendP = f -> prog(key, 1, f, shrink);
+            sendP.at(0);
             try {
                 String boundary = "----PitchRec" + System.currentTimeMillis();
                 HttpURLConnection c = open("/records/" + recordId, "PUT", token, email);
@@ -499,11 +530,12 @@ public class NsClient {
                     writeField(out, boundary, "id", recordId);
                     writeField(out, boundary, "record_category_id", cat);
                     writeField(out, boundary, "Content-Type", mimeOf(up));
-                    writeFilePart(out, boundary, "record_file", up, mimeOf(up));
+                    writeFilePart(out, boundary, "record_file", up, mimeOf(up), sendP);
                     out.writeBytes("--" + boundary + "--\r\n");
                 }
+                prog(key, 2, 1, shrink); // wyslane — czekamy na odpowiedz serwera
                 return finish(c);
-            } finally { UploadShrink.cleanup(file, up); }
+            } finally { UploadShrink.cleanup(file, up); PROGRESS.remove(key); }
         }, cb);
     }
 }
