@@ -25,6 +25,8 @@ public class PitchWaveView extends View {
     private static final int RULER_HEIGHT_DP = 26;
 
     private final Paint bgPaint = new Paint();
+    private final android.graphics.Rect stripSrc = new android.graphics.Rect();
+    private final android.graphics.RectF stripDst = new android.graphics.RectF();
     private final Paint envelopePaint = new Paint();
     private final Paint midlinePaint = new Paint();
     private final Paint pitchPaint = new Paint();
@@ -340,6 +342,16 @@ public class PitchWaveView extends View {
                 float pxPerMs = w / (lastVisibleSeconds * 1000f);
                 offsetX = -(elapsedMs * pxPerMs);
             }
+        }
+        // Przesuniecie w lewo odslania z prawej pasek szerokosci |offsetX|, ktorego bitmapa nie
+        // przykrywa — przez niego przeswitywalo biale tlo okna ("migajaca biala linia" z prawej
+        // przy kazdej przebudowie siatki). Pasek wypelniamy prawym brzegiem tej samej bitmapy
+        // (tam jest tlo i poziome linie siatki — przy nagrywaniu prawa polowa to "przyszlosc").
+        if (offsetX < 0f) {
+            int strip = (int) Math.ceil(-offsetX) + 1;
+            stripSrc.set(w - strip, 0, w, fullH);
+            stripDst.set(w - strip, 0, w, fullH);
+            canvas.drawBitmap(cacheBitmap, stripSrc, stripDst, null);
         }
         canvas.drawBitmap(cacheBitmap, offsetX, 0, null);
 
