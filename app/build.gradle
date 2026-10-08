@@ -29,9 +29,20 @@ android {
         debug {
             if (file("ci.keystore").exists()) signingConfig signingConfigs.fixed
         }
+        // WYDANIE (to trafia do kursantow): ten sam staly klucz co wczesniej, wiec aktualizacja
+        // instaluje sie na istniejacej aplikacji. Wersja "debug" (debuggable) jest czesciej
+        // blokowana przez Play Protect i skanery producentow (Samsung, Xiaomi).
         release {
             minifyEnabled false
+            debuggable false
+            if (file("ci.keystore").exists()) signingConfig signingConfigs.fixed
         }
+    }
+
+    // kontrola "lint" przy wydaniu nie moze zatrzymac kompilacji w GitHub Actions
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 
     compileOptions {

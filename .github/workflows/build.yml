@@ -42,11 +42,11 @@ jobs:
           if [ -n "$KS" ]; then echo "$KS" | base64 -d > app/ci.keystore; echo "HAS_KS=true" >> $GITHUB_ENV; else echo "HAS_KS=false" >> $GITHUB_ENV; fi
 
       - name: Build APK
-        run: gradle assembleDebug --no-daemon -PbuildNo=${{ github.run_number }}
+        run: gradle assembleRelease --no-daemon -PbuildNo=${{ github.run_number }}
 
       # Plik gotowy do wrzucenia na https://nowamowa.com/apka.apk (aplikacje same go pobiora)
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk apka.apk
+        run: cp app/build/outputs/apk/release/app-release.apk apka.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
