@@ -84,9 +84,15 @@ public final class CallRecUi {
         return androidx.core.content.ContextCompat.checkSelfPermission(c, perm) == android.content.pm.PackageManager.PERMISSION_GRANTED;
     }
 
+    // Zgoda (Android 13+) ORAZ powiadomienia niezablokowane w ustawieniach telefonu (np. MIUI
+    // potrafi je wylaczyc aplikacjom spoza sklepu)
     static boolean notifOk(Context c) {
-        if (Build.VERSION.SDK_INT < 33) return true;
-        return has(c, "android.permission.POST_NOTIFICATIONS");
+        if (Build.VERSION.SDK_INT >= 33 && !has(c, "android.permission.POST_NOTIFICATIONS")) return false;
+        try {
+            android.app.NotificationManager nm = (android.app.NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null && !nm.areNotificationsEnabled()) return false;
+        } catch (Exception e) { }
+        return true;
     }
 
     private static void fillWizard(Activity a, LinearLayout box) {

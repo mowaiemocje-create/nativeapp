@@ -542,12 +542,58 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         showPage("daw");
     }
 
+    // Android 13+: bez tej zgody NIE dochodzi zadne powiadomienie (przypomnienia, oceny trenera,
+    // "Chcę porozmawiać"). Wczesniej pytalismy tylko raz w zyciu aplikacji — kto wtedy odmowil
+    // albo zamknal okienko, nie dostawal nic. Teraz: ponownie co 3 dni, dopoki nie ma zgody.
     private void askNotificationPermissionOnce() {
-        if (android.os.Build.VERSION.SDK_INT < 33 || !ReminderReceiver.enabled(this)) return;
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
         if (ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) return;
-        if (prefs().getBoolean("notif_asked", false)) return;
-        prefs().edit().putBoolean("notif_asked", true).apply();
+        long last = prefs().getLong("notif_asked_at", 0L);
+        if (System.currentTimeMillis() - last < 3L * 24 * 60 * 60 * 1000) return;
+        prefs().edit().putLong("notif_asked_at", System.currentTimeMillis()).apply();
         ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
+    }
+
+    private void openNotificationSettings() {
+        try {
+            startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
+        } catch (Exception e) { CallRecUi.openAppInfo(this); }
+    }
+
+    // Stan powiadomien w Ustawieniach: pokazuje TYLKO to, co blokuje powiadomienia, z przyciskiem naprawy
+    private void addNotificationHealth(android.widget.LinearLayout box) {
+        boolean notif = CallRecUi.notifOk(this);
+        boolean bat = CallRecUi.batteryFree(this);
+        if (notif && bat) {
+            box.addView(hint("✅ " + L.t("Powiadomienia działają.")));
+            return;
+        }
+        if (!notif) {
+            box.addView(hint("⚠️ " + L.t("Powiadomienia są WYŁĄCZONE w telefonie — nie dotrze żadne przypomnienie ani wiadomość „Chcę porozmawiać”.")));
+            Button b = Ui.button(this, "🔔 " + L.t("Włącz powiadomienia"), R.color.pr_accent, true);
+            b.setOnClickListener(v -> {
+                if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
+                        && System.currentTimeMillis() - prefs().getLong("notif_btn_at", 0L) > 60000L) {
+                    prefs().edit().putLong("notif_btn_at", System.currentTimeMillis()).apply();
+                    ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
+                } else openNotificationSettings();
+            });
+            box.addView(b);
+        }
+        if (!bat) {
+            box.addView(hint("⚠️ " + L.t("Telefon usypia aplikację w tle — powiadomienia mogą przychodzić z opóźnieniem albo wcale.")));
+            Button b = Ui.button(this, "🔋 " + L.t("Pozwól działać w tle"), R.color.pr_accent, false);
+            b.setOnClickListener(v -> CallRecUi.askBattery(this));
+            box.addView(b);
+            Intent vendor = CallRecUi.vendorIntent(this);
+            if (vendor != null) {
+                box.addView(hint("📱 " + CallRecUi.vendorText()));
+                Button vb = Ui.button(this, L.t("Otwórz"), R.color.pr_muted, false);
+                vb.setOnClickListener(v -> { try { startActivity(vendor); } catch (Exception e) { CallRecUi.openAppInfo(this); } });
+                box.addView(vb);
+            }
+        }
     }
 
     private void showPage(String page) {
@@ -1332,12 +1378,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // force = po swiezym zalogowaniu nadpisujemy imie danymi z konta.
     private void loadMapNameFromNs() { loadProfileFromNs(false); }
 
-    private void loadProfileFromNs(boolean force) {
-        if (!isLoggedIn()) return;
+    private void loadProfileFromNs(boolean force) { loadProfileFromNs(force, null); }
+
+    private void loadProfileFromNs(boolean force, Runnable done) {
+        if (!isLoggedIn()) { if (done != null) done.run(); return; }
         String uid = nsUserId();
         String path = uid.isEmpty() ? "/users/me" : "/users/" + uid;
         NsClient.request("GET", path, nsToken(), nsEmail(), null, null, r -> {
-            if (!r.ok) return;
+            if (!r.ok) { if (done != null) done.run(); return; }
             try {
                 org.json.JSONObject d = new org.json.JSONObject(r.body);
                 if (d.optJSONObject("user") != null) d = d.optJSONObject("user");
@@ -1357,24 +1405,99 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 if (!phone.isEmpty() && (force || prefs().getString("map_phone", "").isEmpty())) e.putString("map_phone", phone);
                 if (!city.isEmpty()) e.putString("ns_city", city);
                 e.apply();
-                if ("set".equals(currentPage)) renderSettingsPage();
+                if ("set".equals(currentPage) && done == null) renderSettingsPage();
             } catch (Exception ex) { }
+            if (done != null) done.run();
         });
     }
 
-    // ── DOSTEPNY DO ROZMOWY (mapa) — jak "Chętnie porozmawiam" w PitchRec, wylacza sie po 2 h ──
+    // ── "CHCĘ POROZMAWIAĆ" — jeden przycisk (Ustawienia i mapa). Imie, telefon i miejscowosc
+    //    pobieraja sie same z konta NewSpeech (gdy brak telefonu — jedno pytanie o numer),
+    //    pozycja z GPS (zaokraglona do ok. 1 km). Inni kursanci dostaja powiadomienie.
+    //    Wylacza sie samo po 2 h.
+    private static final long AVAIL_MS = 2 * 60 * 60 * 1000L;
+
+    private boolean availOn() {
+        return prefs().getBoolean("map_avail", false) && System.currentTimeMillis() < prefs().getLong("map_avail_until", 0L);
+    }
+
+    private String availUntilText() {
+        return new java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(new java.util.Date(prefs().getLong("map_avail_until", 0L)));
+    }
+
+    private void wantTalk(Runnable after) {
+        if (!isLoggedIn()) { promptLogin(L.t("„Chcę porozmawiać” wymaga zalogowania do NewSpeech.")); return; }
+        if (availOn()) {
+            setAvailability(false, prefs().getString("map_phone", ""));
+            Toast.makeText(this, L.t("📞 Wyłączono „Chcę porozmawiać”"), Toast.LENGTH_SHORT).show();
+            if (after != null) after.run();
+            return;
+        }
+        Toast.makeText(this, L.t("⏳ Pobieram dane z konta…"), Toast.LENGTH_SHORT).show();
+        loadProfileFromNs(false, () -> {
+            if (prefs().getString("map_phone", "").replaceAll("\\D", "").length() < 6) askPhone(true, after);
+            else goAvail(after);
+        });
+    }
+
+    private void askPhone(boolean thenAvail, Runnable after) {
+        android.widget.EditText e = new android.widget.EditText(this);
+        e.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+        e.setHint("+48 600 000 000");
+        e.setText(prefs().getString("map_phone", ""));
+        android.widget.FrameLayout wrap = new android.widget.FrameLayout(this);
+        int pd = (int) (20 * getResources().getDisplayMetrics().density);
+        wrap.setPadding(pd, pd / 2, pd, 0);
+        wrap.addView(e);
+        new AlertDialog.Builder(this)
+                .setTitle("📞 " + L.t("Twój numer telefonu"))
+                .setMessage(thenAvail ? L.t("Na Twoim koncie NewSpeech nie ma numeru telefonu. Podaj numer, pod który inni kursanci mogą zadzwonić:")
+                        : L.t("Numer, pod który inni kursanci mogą zadzwonić:"))
+                .setView(wrap)
+                .setPositiveButton(thenAvail ? L.t("Chcę porozmawiać") : L.t("Zapisz"), (d, w) -> {
+                    String ph = e.getText().toString().trim();
+                    if (ph.replaceAll("\\D", "").length() < 6) { Toast.makeText(this, L.t("To nie wygląda na numer telefonu"), Toast.LENGTH_LONG).show(); return; }
+                    prefs().edit().putString("map_phone", ph).apply();
+                    if (thenAvail) goAvail(after);
+                    else { if (availOn()) postAvail(true); if (after != null) after.run(); }
+                })
+                .setNegativeButton(getString(R.string.btn_cancel), null)
+                .show();
+    }
+
+    private void goAvail(Runnable after) {
+        prefs().edit().putLong("notif_asked_at", 0L).apply();
+        askNotificationPermissionOnce(); // zeby samemu tez dostawac powiadomienia od innych
+        setAvailability(true, prefs().getString("map_phone", ""));
+        Toast.makeText(this, L.f("✅ Inni kursanci dostali powiadomienie. Dostępny do {0}.", availUntilText()), Toast.LENGTH_LONG).show();
+        // pozycja na mape — gdy jeszcze jej nie ma, dosylamy, gdy GPS ja znajdzie
+        if (GpsHelper.lastFix == null && GpsHelper.hasPermission(this))
+            GpsHelper.requestFix(this, loc -> { if (loc != null && availOn()) postAvail(true); });
+        if (after != null) after.run();
+    }
+
     private void setAvailability(boolean on, String phone) {
-        long until = on ? System.currentTimeMillis() + 2 * 60 * 60 * 1000L : 0L;
+        long until = on ? System.currentTimeMillis() + AVAIL_MS : 0L;
         prefs().edit().putBoolean("map_avail", on).putLong("map_avail_until", until).putString("map_phone", phone == null ? "" : phone).apply();
+        postAvail(on);
+    }
+
+    private void postAvail(boolean on) {
         try {
             org.json.JSONObject b = new org.json.JSONObject();
             String name = mapName(prefs().getString("student_name", ""));
             prefs().edit().putString("map_self_name", name).apply();
+            String phone = prefs().getString("map_phone", "");
             b.put("userId", nsUserId().isEmpty() ? (nsEmail().isEmpty() ? name : nsEmail()) : nsUserId());
             b.put("name", name);
-            b.put("phone", phone == null || phone.isEmpty() ? org.json.JSONObject.NULL : phone);
+            b.put("phone", phone.isEmpty() ? org.json.JSONObject.NULL : phone);
             b.put("available", on);
-            b.put("city", "");
+            b.put("city", prefs().getString("ns_city", ""));
+            android.location.Location loc = GpsHelper.lastFix;
+            if (on && loc != null) {
+                b.put("lat", Math.round(loc.getLatitude() * 100) / 100.0);
+                b.put("lon", Math.round(loc.getLongitude() * 100) / 100.0);
+            }
             NsClient.request("POST", "/map/avail", null, null, "application/json", b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> {
                 if (!r.ok) Toast.makeText(this, L.t("Nie udało się zmienić dostępności: ") + r.err, Toast.LENGTH_LONG).show();
             });
@@ -1394,7 +1517,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         i.putExtra("email", nsEmail());
         i.putExtra("userId", nsUserId());
         i.putExtra("name", mapName(prefs().getString("student_name", "")));
-        startActivity(i);
+        i.putExtra("phone", prefs().getString("map_phone", ""));
+        i.putExtra("city", prefs().getString("ns_city", ""));
+        i.putExtra("availUntil", availOn() ? prefs().getLong("map_avail_until", 0L) : 0L);
+        startActivityForResult(i, REQ_MAP);
     }
 
     // Tytul okienka z logo "new speech" (jak w naglowku apki)
@@ -1639,6 +1765,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             rem.addView(paused);
         }
         rem.setOrientation(android.widget.LinearLayout.VERTICAL);
+        addNotificationHealth(rem);
         rem.addView(toggleRow("🔔 " + L.t("Przypomnienie o 20:00"), ReminderReceiver.enabled(this), on -> {
             prefs().edit().putBoolean("reminder_on", on).apply();
             ReminderReceiver.schedule(this);
@@ -1652,11 +1779,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             TrainerWatch.schedule(this);
         }));
         rem.addView(hint(L.t("Gdy trener zaliczy nagranie, poprosi o poprawkę albo odpowie na dziennik — dostaniesz powiadomienie.")));
-        rem.addView(toggleRow("📞 " + L.t("Powiadomienia „Chętnie porozmawiam”"), AvailWatch.enabled(this), on -> {
-            prefs().edit().putBoolean("avail_notif", on).apply();
-            AvailWatch.schedule(this);
-        }));
-        rem.addView(hint(L.t("Gdy inny kursant włączy „Chętnie porozmawiam”, dostaniesz powiadomienie z jego imieniem, miastem i telefonem (bez powiadomień w nocy).")));
+        rem.addView(hint("📞 " + L.t("Gdy inny kursant dotknie „Chcę porozmawiać”, dostaniesz powiadomienie z jego imieniem, miejscowością i telefonem (bez powiadomień w nocy).")));
         rem.addView(toggleRow("📅 " + L.t("Dni telefonu do trenera"), prefs().getBoolean("call_days_notif", true), on -> {
             prefs().edit().putBoolean("call_days_notif", on).apply();
             AvailWatch.schedule(this);
@@ -1734,21 +1857,27 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         mp.addView(hint(L.t("Po zapisaniu nagrania w kategorii Sklepy, Przechodzień, Special albo Miasto – inne inni kursanci widzą Cię na mapie przez ok. 20 min: imię, miasto, system mowy i kategorię.")));
         mp.addView(hint(L.t("Na mapie jako:") + " " + mapName(prefs().getString("student_name", ""))));
         mp.addView(divider());
-        android.widget.EditText phone = new android.widget.EditText(this);
-        phone.setHint(L.t("Telefon (opcjonalnie, widoczny dla kursantów)"));
-        phone.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
-        phone.setText(prefs().getString("map_phone", ""));
-        phone.setTextSize(14f);
-        mp.addView(phone);
-        boolean avail = prefs().getBoolean("map_avail", false) && System.currentTimeMillis() < prefs().getLong("map_avail_until", 0L);
-        Button av = Ui.button(this, "📞 " + L.t("Chętnie porozmawiam") + ": " + (avail ? L.t("WŁ") : L.t("WYŁ")), avail ? R.color.pr_accent : R.color.pr_muted, avail);
-        av.setOnClickListener(v -> {
-            if (!isLoggedIn()) { promptLogin(L.t("Dostępność do rozmowy wymaga zalogowania do NewSpeech.")); return; }
-            setAvailability(!avail, phone.getText().toString().trim());
-            renderSettingsPage();
-        });
+        addWantTalk(mp);
+    }
+
+    // Jeden przycisk "Chcę porozmawiać" + co zobacza inni
+    private void addWantTalk(android.widget.LinearLayout mp) {
+        boolean avail = availOn();
+        Button av = Ui.button(this, avail ? "✅ " + L.t("Chcę porozmawiać") + " · " + L.f("do {0}", availUntilText()) : "📞 " + L.t("Chcę porozmawiać"),
+                avail ? R.color.pr_warn : R.color.pr_accent, true);
+        av.setTextSize(15f);
+        av.setOnClickListener(v -> wantTalk(this::renderSettingsPage));
         mp.addView(av, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
-        mp.addView(hint(avail ? L.t("Widoczny na mapie jako dostępny do rozmowy — wyłączy się sam po 2 godzinach.") : L.t("Włącz, gdy możesz porozmawiać przez telefon z innym kursantem (wyłącza się po 2 h).")));
+        mp.addView(hint(avail ? L.f("Inni kursanci dostali powiadomienie i widzą Cię na mapie. Dotknij, żeby wyłączyć (wyłączy się samo o {0}).", availUntilText())
+                : L.t("Jedno dotknięcie: inni kursanci dostaną powiadomienie z Twoim imieniem, miejscowością i telefonem i zobaczą Cię na mapie. Wyłącza się samo po 2 godzinach.")));
+        String phone = prefs().getString("map_phone", "");
+        if (!phone.isEmpty()) {
+            String city = prefs().getString("ns_city", "");
+            mp.addView(hint(L.t("Inni zobaczą:") + " " + mapName(prefs().getString("student_name", "")) + (city.isEmpty() ? "" : " · " + city) + " · ☎ " + phone));
+            Button ch = Ui.button(this, L.t("Zmień numer"), R.color.pr_muted, false);
+            ch.setOnClickListener(v -> askPhone(false, this::renderSettingsPage));
+            mp.addView(ch);
+        }
     }
 
     private void renderLangAndAbout(android.widget.LinearLayout c, float d) {
@@ -3659,9 +3788,21 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         startActivityForResult(intent, REQUEST_IMPORT_FILE);
     }
 
+    private static final int REQ_MAP = 4401;
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_MAP && data != null && data.hasExtra("availUntil")) {
+            // "Chcę porozmawiać" przelaczone na mapie — ten sam stan w aplikacji
+            long until = data.getLongExtra("availUntil", 0L);
+            android.content.SharedPreferences.Editor e = prefs().edit().putBoolean("map_avail", until > System.currentTimeMillis()).putLong("map_avail_until", until);
+            String ph = data.getStringExtra("phone");
+            if (ph != null && !ph.isEmpty()) e.putString("map_phone", ph);
+            e.apply();
+            if ("set".equals(currentPage)) renderSettingsPage();
+            return;
+        }
         if (requestCode == REQUEST_SAVE_FILE) {
             File src = pendingSaveFile;
             pendingSaveFile = null;

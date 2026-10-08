@@ -43,8 +43,11 @@ public final class TrainerWatch {
         if (am == null) return;
         PendingIntent p = pi(c);
         if (!enabled(c) || prefs(c).getString("ns_token", null) == null) { am.cancel(p); return; }
-        // RTC (bez budzenia telefonu) — sprawdzenie przy najblizszym uzyciu telefonu, oszczedza baterie
-        am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis() + 20 * 60 * 1000L, 2 * 60 * 60 * 1000L, p);
+        // Jednorazowy budzik co ok. 2 h, dzialajacy tez w uspieniu (Doze); kolejny ustawia odbiornik.
+        // Wczesniejszy RTC bez budzenia na czesci telefonow nie przychodzil wcale.
+        long next = System.currentTimeMillis() + 2 * 60 * 60 * 1000L;
+        try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, p); }
+        catch (Exception e) { am.set(AlarmManager.RTC_WAKEUP, next, p); }
     }
 
     // done: wolane po zakonczeniu (moze byc null)

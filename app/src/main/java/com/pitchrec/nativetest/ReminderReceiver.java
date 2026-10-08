@@ -76,11 +76,13 @@ public class ReminderReceiver extends BroadcastReceiver {
         }
         if (AvailWatch.ACTION.equals(act)) {
             CallRecUi.watch(c); // usluga nagrywania rozmow wylaczona przez telefon?
+            AvailWatch.schedule(c); // nastepne sprawdzenie (budzik jednorazowy, dziala tez w uspieniu)
             final PendingResult pr = goAsync();
             AvailWatch.check(c, () -> CallDays.check(c, () -> { try { pr.finish(); } catch (Exception e) { } }));
             return;
         }
         if (TrainerWatch.ACTION.equals(act)) {
+            TrainerWatch.schedule(c); // nastepne sprawdzenie
             final PendingResult pr = goAsync();
             TrainerWatch.check(c, () -> { try { pr.finish(); } catch (Exception e) { } });
             return;

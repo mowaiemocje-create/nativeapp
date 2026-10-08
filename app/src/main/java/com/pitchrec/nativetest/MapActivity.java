@@ -27,7 +27,15 @@ public class MapActivity extends Activity {
         super.onCreate(b);
         FrameLayout root = new FrameLayout(this);
         root.setFitsSystemWindows(true);
-        web = new WebView(this);
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            try { WebView.setDataDirectorySuffix("map"); } catch (Throwable e) { } // osobno od testu DISC
+        }
+        try { web = new WebView(this); }
+        catch (Throwable e) {
+            android.widget.Toast.makeText(this, "Mapa wymaga aktualnego „Android System WebView” (Sklep Play).", android.widget.Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         // Strona pomocnicza (do wpisania logowania) nie moze byc widoczna — pokazujemy dopiero mape
         web.setVisibility(android.view.View.INVISIBLE);
         android.widget.TextView loading = new android.widget.TextView(this);
@@ -64,6 +72,9 @@ public class MapActivity extends Activity {
         final String email = getIntent().getStringExtra("email");
         final String userId = getIntent().getStringExtra("userId");
         final String name = getIntent().getStringExtra("name");
+        final String phone = getIntent().getStringExtra("phone");
+        final String city = getIntent().getStringExtra("city");
+        final long availUntil = getIntent().getLongExtra("availUntil", 0L);
 
         web.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -74,6 +85,20 @@ public class MapActivity extends Activity {
         // "← Wróć" na mapie (history.back / index.html) = zamkniecie mapy i powrot do aplikacji
         web.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface public void close() { runOnUiThread(() -> finish()); }
+            // "Chcę porozmawiać" przelaczone na mapie -> wynik dla aplikacji (inny proces, wiec przez Intent)
+            @android.webkit.JavascriptInterface public void setAvail(boolean on, String until) {
+                long u = 0L;
+                try { u = on ? Long.parseLong(until) : 0L; } catch (Exception e) { }
+                final long fu = u;
+                runOnUiThread(() -> {
+                    android.content.Intent res = new android.content.Intent().putExtra("availUntil", fu);
+                    setResult(RESULT_OK, res);
+                    if (on && web != null) web.evaluateJavascript("localStorage.getItem('pitchrec_map_phone')||''", v -> {
+                        String p = v == null ? "" : v.replace("\"", "");
+                        if (!p.isEmpty() && !"null".equals(p)) setResult(RESULT_OK, new android.content.Intent().putExtra("availUntil", fu).putExtra("phone", p));
+                    });
+                });
+            }
         }, "PitchRecApp");
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -108,6 +133,10 @@ public class MapActivity extends Activity {
                             + "localStorage.setItem('ns_email'," + q(email) + ");"
                             + "localStorage.setItem('ns_user_id'," + q(userId) + ");"
                             + "localStorage.setItem('pitchrec_map_name'," + q(name) + ");"
+                            + (phone != null && !phone.isEmpty() ? "localStorage.setItem('pitchrec_map_phone'," + q(phone) + ");" : "")
+                            + (city != null && !city.isEmpty() ? "localStorage.setItem('ns_city'," + q(city) + ");" : "")
+                            + "localStorage.setItem('pitchrec_map_avail','" + (availUntil > System.currentTimeMillis() ? "1" : "0") + "');"
+                            + "localStorage.setItem('pitchrec_map_avail_until','" + availUntil + "');"
                             + "localStorage.setItem('pitchrec_ns_server','test');}catch(e){}";
                     view.evaluateJavascript(js, v -> view.loadUrl(PWA_BASE + "/map.html"));
                     // Zabezpieczenie: gdyby strona nie zglosila konca ladowania, pokaz po 8 s

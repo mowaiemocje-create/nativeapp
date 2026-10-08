@@ -316,7 +316,8 @@ public class StatsPage {
         android.content.Intent i = new android.content.Intent(act, DiscActivity.class);
         i.putExtra("token", sp.getString("ns_token", ""));
         i.putExtra("email", sp.getString("ns_email", ""));
-        act.startActivity(i);
+        try { act.startActivity(i); }
+        catch (Exception e) { android.widget.Toast.makeText(act, L.t("Nie udało się otworzyć testu DISC — zaktualizuj aplikację."), android.widget.Toast.LENGTH_LONG).show(); }
     }
 
     private void fillSpecial(LinearLayout card) {

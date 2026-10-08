@@ -18,9 +18,21 @@ public class DiscActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        // Android 9+: dwa procesy aplikacji z WebView (mapa ":map" i test ":disc") NIE moga uzywac
+        // tego samego katalogu danych WebView — gdy mapa byla wczesniej otwarta (jej proces dalej
+        // zyje), otwarcie testu konczylo sie zamknieciem aplikacji. Osobny katalog dla testu.
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            try { WebView.setDataDirectorySuffix("disc"); } catch (Throwable e) { }
+        }
         FrameLayout root = new FrameLayout(this);
         root.setFitsSystemWindows(true);
-        web = new WebView(this);
+        try { web = new WebView(this); }
+        catch (Throwable e) {
+            // brak / wylaczony / aktualizowany "Android System WebView" na telefonie
+            android.widget.Toast.makeText(this, L.t("Test DISC wymaga aktualnego „Android System WebView” (Sklep Play)."), android.widget.Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
         if (android.os.Build.VERSION.SDK_INT >= 33)

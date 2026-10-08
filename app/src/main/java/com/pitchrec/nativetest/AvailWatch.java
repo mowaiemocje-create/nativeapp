@@ -23,32 +23,43 @@ import java.util.Set;
 public final class AvailWatch {
 
     static final String ACTION = "com.pitchrec.nativetest.AVAIL_CHECK";
-    private static final String CHANNEL = "avail_talk";
+    private static final String CHANNEL = "avail_talk2"; // nowy kanal: WAZNE (wyskakuje na ekranie)
     private static final long AVAIL_TTL = 2 * 60 * 60 * 1000L;   // dostepnosc trwa 2 h
-    private static final long FRESH = 45 * 60 * 1000L;           // powiadamiamy tylko o swiezych wlaczeniach
     private static volatile boolean running = false;
 
     private AvailWatch() { }
 
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences("app_settings", Context.MODE_PRIVATE); }
 
-    public static boolean enabled(Context c) { return prefs(c).getBoolean("avail_notif", true); }
+    // Zawsze wlaczone (bez przelacznika w Ustawieniach) — jedyny wyjatek: koniec harmonogramu
+    public static boolean enabled(Context c) { return true; }
 
     private static PendingIntent pi(Context c) {
         Intent i = new Intent(c, ReminderReceiver.class).setAction(ACTION);
         return PendingIntent.getBroadcast(c, 2201, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    // Budzik co ok. 15 min. setAndAllowWhileIdle dziala tez w trybie uspienia (Doze) — wczesniejszy
+    // "nieprecyzyjny powtarzalny" budzik RTC na wielu telefonach (Xiaomi, Samsung) przychodzil
+    // dopiero po odblokowaniu ekranu albo wcale. Kazde wywolanie ustawia NASTEPNY budzik;
+    // w nocy (22–7) kolejne sprawdzenie dopiero o 7:00.
     public static void schedule(Context c) {
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
         PendingIntent p = pi(c);
-        // budzik sluzy tez dniom telefonu do trenera — dziala, gdy wlaczone jest cokolwiek z tych dwoch
-        boolean any = enabled(c) || prefs(c).getBoolean("call_days_notif", true);
         boolean callRec = prefs(c).getBoolean("callrec_wanted", false); // pilnowanie uslugi nagrywania rozmow
-        if (!callRec && (!any || prefs(c).getString("ns_token", null) == null)) { am.cancel(p); return; }
-        // co ok. 15 min, bez budzenia telefonu (oszczedza baterie) — system moze to nieco przesunac
-        am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis() + 60 * 1000L, 15 * 60 * 1000L, p);
+        if (!callRec && prefs(c).getString("ns_token", null) == null) { am.cancel(p); return; }
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        long next = System.currentTimeMillis() + 15 * 60 * 1000L;
+        int h = cal.get(java.util.Calendar.HOUR_OF_DAY);
+        if (!callRec && (h >= 22 || h < 7)) {
+            java.util.Calendar m = java.util.Calendar.getInstance();
+            if (h >= 22) m.add(java.util.Calendar.DAY_OF_YEAR, 1);
+            m.set(java.util.Calendar.HOUR_OF_DAY, 7); m.set(java.util.Calendar.MINUTE, 0); m.set(java.util.Calendar.SECOND, 0);
+            next = m.getTimeInMillis();
+        }
+        try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, p); }
+        catch (Exception e) { am.set(AlarmManager.RTC_WAKEUP, next, p); }
     }
 
     public static void check(Context c, Runnable done) {
@@ -81,8 +92,16 @@ public final class AvailWatch {
 
     private static void handle(Context c, JSONArray list) {
         SharedPreferences p = prefs(c);
+        // seen: "osoba|ts" — osoba = uid (nowy proxy) albo imie. Ta sama osoba z nowszym ts w ciagu
+        // 2 h (np. dosłana pozycja GPS) NIE daje drugiego powiadomienia.
         Set<String> seen = new HashSet<>(p.getStringSet("avail_seen", new HashSet<>()));
+        java.util.Map<String, Long> seenTs = new java.util.HashMap<>();
+        for (String k : seen) {
+            int i = k.lastIndexOf('|');
+            if (i > 0) try { seenTs.put(k.substring(0, i), Long.parseLong(k.substring(i + 1))); } catch (Exception e) { }
+        }
         String me = p.getString("map_self_name", "").trim();
+        String myUid = p.getString("ns_user_id", "").toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-zA-Z0-9_-]", "_");
         String myPhone = p.getString("map_phone", "").replaceAll("\\D", "");
         long now = System.currentTimeMillis();
         int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
@@ -95,40 +114,48 @@ public final class AvailWatch {
             long ts = o.optLong("ts", 0L);
             if (name.isEmpty() || ts <= 0 || now - ts > AVAIL_TTL) continue;
             String phone = o.isNull("phone") ? "" : o.optString("phone", "").trim();
-            if (!me.isEmpty() && me.equalsIgnoreCase(name)) continue;                 // to ja
+            String uid = o.optString("uid", "");
+            if (!myUid.isEmpty() && myUid.equals(uid)) continue;                       // to ja
+            if (!me.isEmpty() && me.equalsIgnoreCase(name)) continue;
             if (!myPhone.isEmpty() && myPhone.equals(phone.replaceAll("\\D", ""))) continue;
-            String key = name + "|" + ts;
-            keep.add(key);
-            if (seen.contains(key)) continue;
-            if (night || now - ts > FRESH) { seen.add(key); continue; } // bez nocnych i starych powiadomien
-            seen.add(key);
-            notifyAvail(c, name, o.optString("city", "").trim(), phone, Math.abs(key.hashCode() % 10000) + 3000);
+            String who = uid.isEmpty() ? name : uid;
+            Long prev = seenTs.get(who);
+            boolean known = prev != null && ts - prev < AVAIL_TTL;
+            long keyTs = known ? prev : ts;
+            keep.add(who + "|" + keyTs);
+            if (known) continue;
+            seenTs.put(who, ts);
+            if (night) continue; // bez nocnych powiadomien (osoba zostaje "widziana")
+            notifyAvail(c, name, o.optString("city", "").trim(), phone, ts, Math.abs(who.hashCode() % 10000) + 3000);
         }
-        seen.retainAll(keep); // zostaja tylko osoby nadal dostepne — lista nie rosnie
-        p.edit().putStringSet("avail_seen", seen).apply();
+        p.edit().putStringSet("avail_seen", keep).apply(); // zostaja tylko osoby nadal dostepne
     }
 
-    private static void notifyAvail(Context c, String name, String city, String phone, int id) {
+    private static void notifyAvail(Context c, String name, String city, String phone, long ts, int id) {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
-        NotificationChannel ch = new NotificationChannel(CHANNEL, L.t("Chętnie porozmawiam"), NotificationManager.IMPORTANCE_DEFAULT);
+        try { nm.deleteNotificationChannel("avail_talk"); } catch (Exception e) { } // stary, cichy kanal
+        NotificationChannel ch = new NotificationChannel(CHANNEL, L.t("Chcę porozmawiać"), NotificationManager.IMPORTANCE_HIGH);
         ch.setDescription(L.t("Kursanci, którzy właśnie chcą porozmawiać przez telefon"));
         nm.createNotificationChannel(ch);
         Intent open = new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         open.putExtra("open_page", "map");
         PendingIntent cp = PendingIntent.getActivity(c, id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        String title = "📞 " + L.f("{0} chętnie porozmawia", name);
+        String title = "📞 " + L.f("{0} chce porozmawiać", name);
         StringBuilder text = new StringBuilder();
         if (!city.isEmpty()) text.append("📍 ").append(city);
         if (!phone.isEmpty()) { if (text.length() > 0) text.append("  ·  "); text.append("☎ ").append(phone); }
         if (text.length() > 0) text.append("\n");
-        text.append(L.t("Zadzwoń i poćwicz rozmowę nową mową — dostępność trwa do 2 godzin."));
+        String until = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(new java.util.Date(ts + AVAIL_TTL));
+        text.append(L.f("Zadzwoń i poćwicz rozmowę nową mową — dostępny do {0}.", until));
         Notification.Builder b = new Notification.Builder(c, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_call)
                 .setContentTitle(title)
                 .setContentText(text.toString())
                 .setStyle(new Notification.BigTextStyle().bigText(text.toString()))
                 .setContentIntent(cp)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .setTimeoutAfter(Math.max(60000L, ts + AVAIL_TTL - System.currentTimeMillis())) // znika, gdy dostepnosc minie
                 .setAutoCancel(true);
         if (!phone.isEmpty()) {
             Intent dial = new Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + phone.replaceAll("[^0-9+]", "")))
