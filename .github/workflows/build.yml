@@ -1,4 +1,4 @@
-name: Build Native Test APK
+name: Build APK (kursanci) + AAB (Google Play)
 
 on:
   push:
@@ -41,15 +41,25 @@ jobs:
         run: |
           if [ -n "$KS" ]; then echo "$KS" | base64 -d > app/ci.keystore; echo "HAS_KS=true" >> $GITHUB_ENV; else echo "HAS_KS=false" >> $GITHUB_ENV; fi
 
-      - name: Build APK
-        run: gradle assembleRelease --no-daemon -PbuildNo=${{ github.run_number }}
+      # Dwie aplikacje naraz: APK dla kursantow + AAB do Sklepu Google Play
+      - name: Build APK (kursanci) + AAB (Google Play)
+        run: gradle assembleStudentsRelease bundlePlayRelease --no-daemon -PbuildNo=${{ github.run_number }}
 
       # Plik gotowy do wrzucenia na https://nowamowa.com/apka.apk (aplikacje same go pobiora)
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk apka.apk
+      - name: Rename APK + AAB
+        run: |
+          cp app/build/outputs/apk/students/release/app-students-release.apk apka.apk
+          cp app/build/outputs/bundle/playRelease/app-play-release.aab new-speech-play.aab
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: apka-1.${{ github.run_number }}
           path: apka.apk
+
+      # Do wgrania w Play Console (Testy -> Testy wewnetrzne -> Utworz wersje)
+      - name: Upload AAB (Google Play)
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-aab-1.${{ github.run_number }}
+          path: new-speech-play.aab

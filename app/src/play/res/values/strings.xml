@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nazwa pod ikona — wersja Google Play. Nazwa w sklepie ("New Speech Mp3 - DAW&Pitch")
+     ustawia sie w Play Console, nie tutaj. -->
+<resources>
+    <string name="app_name" translatable="false">New Speech</string>
+</resources>

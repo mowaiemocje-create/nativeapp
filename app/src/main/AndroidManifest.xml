@@ -9,13 +9,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <!-- wykrywanie rozmowy (nagrywanie rozmow) — tylko stan: dzwoni / trwa / koniec, bez numerow -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Zgody i usluga nagrywania rozmow + samoaktualizacja: TYLKO wersja kursantow
+         (app/src/students/AndroidManifest.xml). Wersja Google Play ich nie ma. -->
 
     <application
         android:allowBackup="true"
@@ -68,24 +66,9 @@
             </intent-filter>
         </receiver>
 
-        <!-- NAGRYWANIE ROZMOW (jak Cube ACR): usluga ulatwien dostepu pozwala nagrywac w czasie rozmowy -->
-        <service
-            android:name=".CallRecService"
-            android:label="@string/callrec_service_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:foregroundServiceType="microphone"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/callrec_accessibility" />
-        </service>
-
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.pitchrec.nativetest.fileprovider"
+            android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

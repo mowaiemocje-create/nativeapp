@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">New Speech Mp3 REC</string>
 
     <string name="status_ready">Bereit</string>
     <string name="status_recording">Aufnahme… (Bildschirm kann gesperrt werden)</string>

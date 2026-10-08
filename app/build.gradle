@@ -14,6 +14,30 @@ android {
         versionName (project.hasProperty('buildNo') ? "1." + project.property('buildNo') : "0.1-test")
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
+    // DWIE APLIKACJE z jednego kodu:
+    //  - students: wersja dla kursantow (APK z nowamowa.com) — nagrywanie rozmow + samoaktualizacja.
+    //    applicationId BEZ ZMIAN, wiec aktualizacje dalej instaluja sie na istniejacej aplikacji.
+    //  - play: wersja do Sklepu Google Play (.aab) — bez nagrywania rozmow i bez samoaktualizacji
+    //    (zasady Google Play). Inny applicationId, wiec obie moga byc na jednym telefonie.
+    // Kod tylko dla jednej wersji: app/src/students/... albo app/src/play/...
+    flavorDimensions = ["dist"]
+    productFlavors {
+        students {
+            dimension "dist"
+            applicationId "com.pitchrec.nativetest"
+            buildConfigField "boolean", "PLAY", "false"
+        }
+        play {
+            dimension "dist"
+            applicationId "com.nowamowa.newspeech"
+            buildConfigField "boolean", "PLAY", "true"
+        }
+    }
+
     // STALY klucz podpisu (sekret APP_KEYSTORE_B64 w GitHub). Bez stalego klucza kazda kompilacja
     // ma inny podpis i Android nie pozwala zainstalowac aktualizacji na istniejacej aplikacji.
     signingConfigs {
@@ -29,7 +53,9 @@ android {
         debug {
             if (file("ci.keystore").exists()) signingConfig signingConfigs.fixed
         }
-        // WYDANIE (to trafia do kursantow): ten sam staly klucz co wczesniej, wiec aktualizacja
+        // WYDANIE: kursanci (APK) — ten sam staly klucz co wczesniej. Play (.aab) jest podpisany tym samym
+        // kluczem, ktory w Google Play sluzy jako "klucz przesylania" (Google podpisuje apke wlasnym kluczem).
+        // Kursanci: ten sam staly klucz co wczesniej, wiec aktualizacja
         // instaluje sie na istniejacej aplikacji. Wersja "debug" (debuggable) jest czesciej
         // blokowana przez Play Protect i skanery producentow (Samsung, Xiaomi).
         release {

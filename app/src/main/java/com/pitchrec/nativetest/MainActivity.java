@@ -558,13 +558,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         try {
             startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                     .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
-        } catch (Exception e) { CallRecUi.openAppInfo(this); }
+        } catch (Exception e) { PhoneHelp.openAppInfo(this); }
     }
 
     // Stan powiadomien w Ustawieniach: pokazuje TYLKO to, co blokuje powiadomienia, z przyciskiem naprawy
     private void addNotificationHealth(android.widget.LinearLayout box) {
-        boolean notif = CallRecUi.notifOk(this);
-        boolean bat = CallRecUi.batteryFree(this);
+        boolean notif = PhoneHelp.notifOk(this);
+        boolean bat = PhoneHelp.batteryFree(this);
         if (notif && bat) {
             box.addView(hint("✅ " + L.t("Powiadomienia działają.")));
             return;
@@ -584,13 +584,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!bat) {
             box.addView(hint("⚠️ " + L.t("Telefon usypia aplikację w tle — powiadomienia mogą przychodzić z opóźnieniem albo wcale.")));
             Button b = Ui.button(this, "🔋 " + L.t("Pozwól działać w tle"), R.color.pr_accent, false);
-            b.setOnClickListener(v -> CallRecUi.askBattery(this));
+            b.setOnClickListener(v -> PhoneHelp.askBattery(this));
             box.addView(b);
-            Intent vendor = CallRecUi.vendorIntent(this);
+            Intent vendor = PhoneHelp.vendorIntent(this);
             if (vendor != null) {
-                box.addView(hint("📱 " + CallRecUi.vendorText()));
+                box.addView(hint("📱 " + PhoneHelp.vendorText()));
                 Button vb = Ui.button(this, L.t("Otwórz"), R.color.pr_muted, false);
-                vb.setOnClickListener(v -> { try { startActivity(vendor); } catch (Exception e) { CallRecUi.openAppInfo(this); } });
+                vb.setOnClickListener(v -> { try { startActivity(vendor); } catch (Exception e) { PhoneHelp.openAppInfo(this); } });
                 box.addView(vb);
             }
         }
@@ -1839,13 +1839,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (logged) addMapSettings(mp); // mapa i "Chętnie porozmawiam" — tylko dla zalogowanych
 
         // 7) Jezyk
-        android.widget.LinearLayout upd = section(c, "upd", "⬆  " + L.t("AKTUALIZACJE") + "  ·  " + UpdateChecker.currentName(this));
-        upd.addView(toggleRow("⬆ " + L.t("Automatycznie pobieraj nowe wersje"), UpdateChecker.enabled(this), on -> prefs().edit().putBoolean("auto_update", on).apply()));
-        upd.addView(hint(L.t("Nowa wersja pobiera się sama w tle; zostaniesz zapytany o instalację. Nagrania i ustawienia zostają.")));
-        android.widget.Button updBtn = Ui.button(this, L.t("Sprawdź teraz"), R.color.pr_accent, false);
-        updBtn.setOnClickListener(v -> { Toast.makeText(this, L.t("Sprawdzanie…"), Toast.LENGTH_SHORT).show(); UpdateChecker.check(this, true); });
-        upd.addView(updBtn);
-        if (logged) { // nagrywanie rozmow — tylko dla kursantow
+        if (!BuildConfig.PLAY) { // samoaktualizacja — tylko wersja kursantow (w Google Play aktualizuje sklep)
+            android.widget.LinearLayout upd = section(c, "upd", "⬆  " + L.t("AKTUALIZACJE") + "  ·  " + UpdateChecker.currentName(this));
+            upd.addView(toggleRow("⬆ " + L.t("Automatycznie pobieraj nowe wersje"), UpdateChecker.enabled(this), on -> prefs().edit().putBoolean("auto_update", on).apply()));
+            upd.addView(hint(L.t("Nowa wersja pobiera się sama w tle; zostaniesz zapytany o instalację. Nagrania i ustawienia zostają.")));
+            android.widget.Button updBtn = Ui.button(this, L.t("Sprawdź teraz"), R.color.pr_accent, false);
+            updBtn.setOnClickListener(v -> { Toast.makeText(this, L.t("Sprawdzanie…"), Toast.LENGTH_SHORT).show(); UpdateChecker.check(this, true); });
+            upd.addView(updBtn);
+        }
+        if (logged && !BuildConfig.PLAY) { // nagrywanie rozmow — tylko dla kursantow (nie ma go w wersji Google Play)
             android.widget.LinearLayout crs = section(c, "callrec", "📞  " + L.t("NAGRYWANIE ROZMÓW") + "  ·  " + (CallRecService.enabled(this) ? L.t("WŁ") : L.t("WYŁ")));
             CallRecUi.fillSettings(this, crs, this::renderSettingsPage);
         }
@@ -3873,7 +3875,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             java.util.ArrayList<android.net.Uri> uris = new java.util.ArrayList<>();
             for (File f : files) {
                 uris.add(androidx.core.content.FileProvider.getUriForFile(
-                        this, "com.pitchrec.nativetest.fileprovider", f));
+                        this, getPackageName() + ".fileprovider", f));
             }
             Intent shareIntent = new Intent(Intent.ACTION_SEND_MULTIPLE);
             shareIntent.setType("audio/*");
@@ -3933,7 +3935,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private void shareRecording(File file) {
         try {
             android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
-                    this, "com.pitchrec.nativetest.fileprovider", file);
+                    this, getPackageName() + ".fileprovider", file);
             Intent shareIntent = new Intent(Intent.ACTION_SEND);
             shareIntent.setType(file.getName().endsWith(".mp3") ? "audio/mpeg" : "audio/wav");
             shareIntent.putExtra(Intent.EXTRA_STREAM, uri);

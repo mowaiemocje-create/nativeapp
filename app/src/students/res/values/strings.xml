@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nazwa pod ikona — wersja kursantow (APK). Wersja Play: app/src/play/res/values/strings.xml -->
+<resources>
+    <string name="app_name" translatable="false">New Speech Mp3 REC</string>
+</resources>

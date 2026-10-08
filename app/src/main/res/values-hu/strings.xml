@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">New Speech Mp3 REC</string>
 
     <string name="status_ready">Kész</string>
     <string name="status_recording">Felvétel… (lezárhatod a képernyőt)</string>
