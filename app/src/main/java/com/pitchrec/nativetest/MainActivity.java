@@ -986,6 +986,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             Button logout = makeOutlinedButton(L.t("Wyloguj"), R.color.pr_warn, density);
             logout.setOnClickListener(v -> doLogout());
             accountSection.addView(logout);
+            accountSection.addView(divider());
+            addWantTalk(accountSection); // "Chcę porozmawiać" — od razu pod "Wyloguj"
         } else {
             boolean expired = "expired".equals(nsAuthState) || prefs().getBoolean("ns_session_expired", false);
             status.setText(expired ? L.t("⚠ Sesja wygasła — zaloguj się ponownie") : L.t("Nie jesteś zalogowany"));
@@ -1860,8 +1862,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         mp.addView(toggleRow("📡 " + L.t("Pokazuj mnie na mapie na żywo"), prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
         mp.addView(hint(L.t("Po zapisaniu nagrania w kategorii Sklepy, Przechodzień, Special albo Miasto – inne inni kursanci widzą Cię na mapie przez ok. 20 min: imię, miasto, system mowy i kategorię.")));
         mp.addView(hint(L.t("Na mapie jako:") + " " + mapName(prefs().getString("student_name", ""))));
-        mp.addView(divider());
-        addWantTalk(mp);
     }
 
     // Jeden przycisk "Chcę porozmawiać" + co zobacza inni
