@@ -1471,7 +1471,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         setAvailability(true, prefs().getString("map_phone", ""));
         Toast.makeText(this, L.f("✅ Inni kursanci dostali powiadomienie. Dostępny do {0}.", availUntilText()), Toast.LENGTH_LONG).show();
         // pozycja na mape — gdy jeszcze jej nie ma, dosylamy, gdy GPS ja znajdzie
-        if (GpsHelper.lastFix == null && GpsHelper.hasPermission(this))
+        // pozycja na mape: zawsze swieza (stara pozycja z innego miejsca dawala punkt "w losowym miejscu")
+        if (GpsHelper.hasPermission(this))
             GpsHelper.requestFix(this, loc -> { if (loc != null && availOn()) postAvail(true); });
         if (after != null) after.run();
     }
@@ -1493,10 +1494,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             b.put("phone", phone.isEmpty() ? org.json.JSONObject.NULL : phone);
             b.put("available", on);
             b.put("city", prefs().getString("ns_city", ""));
+            // tylko swieza pozycja (do 10 min) — z dokladnoscia ok. 100 m
             android.location.Location loc = GpsHelper.lastFix;
-            if (on && loc != null) {
-                b.put("lat", Math.round(loc.getLatitude() * 100) / 100.0);
-                b.put("lon", Math.round(loc.getLongitude() * 100) / 100.0);
+            if (on && loc != null && System.currentTimeMillis() - loc.getTime() < 10 * 60 * 1000L) {
+                b.put("lat", Math.round(loc.getLatitude() * 1000) / 1000.0);
+                b.put("lon", Math.round(loc.getLongitude() * 1000) / 1000.0);
             }
             NsClient.request("POST", "/map/avail", null, null, "application/json", b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), r -> {
                 if (!r.ok) Toast.makeText(this, L.t("Nie udało się zmienić dostępności: ") + r.err, Toast.LENGTH_LONG).show();

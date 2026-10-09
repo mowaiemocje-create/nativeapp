@@ -26,7 +26,10 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation">
+            <!-- Obrot telefonu NIE tworzy ekranu od nowa: nagrywanie, czarny ekran i stan przyciskow
+                 zostaja (wczesniej po obroceniu telefonu z czarnym ekranem nagrywanie sie urywalo) -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
