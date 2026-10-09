@@ -149,6 +149,8 @@ public class SpecialTasks {
     }
 
     public static String state(Context c, Task t) {
+        // Wersja Play bez konta: nie ma trenera — wykonane = nagranie z tym zadaniem na telefonie
+        if (Access.localMode(c)) return done(c).containsKey(t.name) ? "ok" : "";
         if (approved(c).contains(t.name)) return "ok";
         synchronized (NS_STATE) { String s = NS_STATE.get(t.name); if (s != null) return s; }
         return done(c).containsKey(t.name) ? "pending" : "";
@@ -204,6 +206,62 @@ public class SpecialTasks {
             }
             if (done != null) done.run();
         });
+    }
+
+    // ═════ WERSJA PLAY BEZ KONTA: zadania odblokowywane nagraniami ═════
+    // Na start 3 zadania, potem kolejne co 10 opisanych nagran. Kolejnosc: od najlatwiejszych
+    // (wg najnizszego systemu Nowej Mowy, dla ktorego jest zadanie). Bez zadan typowo kursowych.
+    static final int LOCAL_START = 3, LOCAL_EVERY = 10;
+    private static final String[] SYS_ORDER = {"Basic", "U1", "U1K", "FIX", "K1", "K2", "Full"};
+
+    private static int level(Task t) {
+        if (t.systems.length == 0) return 3; // "dla kazdego" — w srodku drabinki
+        int best = SYS_ORDER.length;
+        for (String sy : t.systems) for (int i = 0; i < SYS_ORDER.length; i++) if (SYS_ORDER[i].equalsIgnoreCase(sy)) best = Math.min(best, i);
+        return best;
+    }
+
+    private static boolean courseOnly(Task t) {
+        String n = t.name.toLowerCase(java.util.Locale.ROOT);
+        return n.contains("kursant") || n.contains("esbs");
+    }
+
+    public static java.util.List<Task> localOrder() {
+        java.util.List<Task> l = new java.util.ArrayList<>();
+        for (Task t : ALL) if (!courseOnly(t)) l.add(t);
+        java.util.Collections.sort(l, (x, y) -> Integer.compare(level(x), level(y))); // sort stabilny — w poziomie kolejnosc z listy
+        return l;
+    }
+
+    // ile opisanych nagran (z kategoria) jest na telefonie
+    public static int describedCount(Context c) {
+        int n = 0;
+        File[] files = c.getFilesDir().listFiles((dir, x) -> x.endsWith(".wav") || x.endsWith(".mp3"));
+        if (files != null) for (File f : files) { String cat = RecMeta.load(c, f.getName()).cat; if (cat != null && !cat.isEmpty()) n++; }
+        return n;
+    }
+
+    public static java.util.List<Task> localUnlocked(Context c) {
+        java.util.List<Task> all = localOrder();
+        int k = Math.min(all.size(), LOCAL_START + describedCount(c) / LOCAL_EVERY);
+        return new java.util.ArrayList<>(all.subList(0, k));
+    }
+
+    // za ile nagran kolejne zadanie (0 = wszystkie odblokowane)
+    public static int localNextIn(Context c) {
+        int n = describedCount(c);
+        if (LOCAL_START + n / LOCAL_EVERY >= localOrder().size()) return 0;
+        return LOCAL_EVERY - n % LOCAL_EVERY;
+    }
+
+    // Nowo odblokowane zadanie od ostatniego sprawdzenia (pierwsze sprawdzenie tylko zapamietuje)
+    public static Task newlyUnlocked(Context c) {
+        java.util.List<Task> un = localUnlocked(c);
+        android.content.SharedPreferences p = prefs(c);
+        int prev = p.getInt("special_unlocked_n", -1);
+        p.edit().putInt("special_unlocked_n", un.size()).apply();
+        if (prev < 0 || un.size() <= prev || un.isEmpty()) return null;
+        return un.get(un.size() - 1);
     }
 
     public static Task find(String name) {

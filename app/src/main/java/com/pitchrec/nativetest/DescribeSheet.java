@@ -39,6 +39,9 @@ public class DescribeSheet {
     // banner = np. "Nagrywasz poprawkę dla: Sklepy" (tryb poprawki); onClose = "Zamknij" bez opisu
     public static void show(Activity a, RecMeta initial, boolean newRecording, String title, String banner, OnSave onSave, Runnable onClose) {
         final RecMeta m = initial != null ? initial : new RecMeta();
+        // Wersja Google Play bez konta (pelna wersja, sam na telefonie): bez imienia kursanta,
+        // systemu Nowej Mowy i GPS; tylko kategorie spoza kursu; zadania specjalne odblokowywane nagraniami
+        final boolean local = Access.localMode(a);
         final ViewGroup root = a.findViewById(android.R.id.content);
 
         FrameLayout overlay = new FrameLayout(a);
@@ -93,11 +96,14 @@ public class DescribeSheet {
         }
 
         // IMIE KURSANTA (zapamietywane jak w PWA)
-        body.addView(Ui.label(a, L.t("IMIĘ KURSANTA")));
+        TextView nameLbl = Ui.label(a, L.t("IMIĘ KURSANTA"));
+        body.addView(nameLbl);
+        if (local) nameLbl.setVisibility(View.GONE);
         EditText nameInput = input(a, L.t("np. Anna K."));
         String savedName = m.name != null && !m.name.isEmpty() ? m.name : prefs.getString("student_name", "");
         nameInput.setText(savedName);
         body.addView(nameInput);
+        if (local) nameInput.setVisibility(View.GONE);
         body.addView(Ui.spacer(a, 12));
 
         // KATEGORIA
@@ -126,8 +132,19 @@ public class DescribeSheet {
             // zadania zaliczone przez trenera znikaja z listy (sa juz na stale w Statystykach)
             List<SpecialTasks.Task> order = new ArrayList<>();
             int okN = 0;
-            for (SpecialTasks.Task tk : SpecialTasks.ALL) { if ("ok".equals(SpecialTasks.state(a, tk))) { okN++; continue; } if (tk.forSystem(mySys)) order.add(tk); }
-            for (SpecialTasks.Task tk : SpecialTasks.ALL) if (!"ok".equals(SpecialTasks.state(a, tk)) && !tk.forSystem(mySys)) order.add(tk);
+            if (local) {
+                // odblokowane zadania (wykonane tez — mozna je powtarzac); kolejne co 10 opisanych nagran
+                order.addAll(SpecialTasks.localUnlocked(a));
+                int left = SpecialTasks.localNextIn(a);
+                if (left > 0) {
+                    TextView nx = Ui.text(a, "🔒 " + L.f("Kolejne zadanie odblokujesz za {0} nagrań.", left), 11f, R.color.pr_muted);
+                    nx.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
+                    specialBox.addView(nx);
+                }
+            } else {
+                for (SpecialTasks.Task tk : SpecialTasks.ALL) { if ("ok".equals(SpecialTasks.state(a, tk))) { okN++; continue; } if (tk.forSystem(mySys)) order.add(tk); }
+                for (SpecialTasks.Task tk : SpecialTasks.ALL) if (!"ok".equals(SpecialTasks.state(a, tk)) && !tk.forSystem(mySys)) order.add(tk);
+            }
             if (okN > 0) {
                 TextView okInfo = Ui.text(a, "✓ " + L.f("{0} zadań zaliczonych — nie ma ich już na liście", okN), 11f, R.color.pr_accent);
                 okInfo.setPadding(0, 0, 0, (int) Ui.dp(a, 6));
@@ -146,7 +163,8 @@ public class DescribeSheet {
                 ic.setBackground(Ui.rounded(tk.color, 0, 0, Ui.dp(a, 8)));
                 int icS = (int) Ui.dp(a, 36);
                 row.addView(ic, new LinearLayout.LayoutParams(icS, icS));
-                String sub = "pending".equals(stt) ? "  ⏳ " + L.t("czeka na ocenę")
+                String sub = local ? ("ok".equals(stt) ? "  ✓ " + L.t("wykonane") : "")
+                        : "pending".equals(stt) ? "  ⏳ " + L.t("czeka na ocenę")
                         : "rejected".equals(stt) ? "  ↺ " + L.t("do poprawy")
                         : (tk.forSystem(mySys) ? "" : "  · " + android.text.TextUtils.join("/", tk.systems));
                 LinearLayout txBox = new LinearLayout(a);
@@ -154,7 +172,7 @@ public class DescribeSheet {
                 txBox.setPadding((int) Ui.dp(a, 10), 0, 0, 0);
                 TextView tx = Ui.text(a, tk.shortNameL() + sub, 12f, R.color.pr_text);
                 if (on) tx.setTypeface(Typeface.DEFAULT_BOLD);
-                tx.setAlpha(tk.forSystem(mySys) || on ? 1f : 0.55f);
+                tx.setAlpha(local || tk.forSystem(mySys) || on ? 1f : 0.55f);
                 txBox.addView(tx);
                 // Po dotknieciu: pelny opis zadania (co dokladnie nagrac) + dla jakich systemow
                 if (on) {
@@ -164,9 +182,11 @@ public class DescribeSheet {
                         ds.setPadding(0, (int) Ui.dp(a, 4), 0, 0);
                         txBox.addView(ds);
                     }
-                    TextView sy = Ui.text(a, tk.systems.length == 0 ? L.t("Dla każdego systemu") : L.t("Systemy: ") + android.text.TextUtils.join(", ", tk.systems), 10f, R.color.pr_muted);
-                    sy.setPadding(0, (int) Ui.dp(a, 3), 0, 0);
-                    txBox.addView(sy);
+                    if (!local) {
+                        TextView sy = Ui.text(a, tk.systems.length == 0 ? L.t("Dla każdego systemu") : L.t("Systemy: ") + android.text.TextUtils.join(", ", tk.systems), 10f, R.color.pr_muted);
+                        sy.setPadding(0, (int) Ui.dp(a, 3), 0, 0);
+                        txBox.addView(sy);
+                    }
                 }
                 row.addView(txBox, Ui.weight(1f, 0));
                 row.setOnClickListener(v -> { selSpecial[0] = tk.name.equals(selSpecial[0]) ? "" : tk.name; buildSpecial[0].run(); });
@@ -259,12 +279,14 @@ public class DescribeSheet {
                 SpecialTasks.refreshFromNs(a, () -> buildSpecial[0].run()); // swiezy stan z NewSpeech
             }
         };
-        buildGrid(a, catGrid, NsClient.CATEGORIES, catBtns, selCat, onCat);
+        buildGrid(a, catGrid, local ? localCategories() : NsClient.CATEGORIES, catBtns, selCat, onCat);
         onCat.run();
         body.addView(Ui.spacer(a, 12));
 
         // SYSTEM NOWEJ MOWY (ostatni wybor zapamietany)
-        body.addView(Ui.label(a, L.t("SYSTEM NOWEJ MOWY")));
+        TextView sysLbl = Ui.label(a, L.t("SYSTEM NOWEJ MOWY"));
+        body.addView(sysLbl);
+        if (local) sysLbl.setVisibility(View.GONE);
         final String lockedSys = m.fixSys != null ? m.fixSys : "";
         final String[] selSys = {!lockedSys.isEmpty() ? lockedSys : m.sys != null && !m.sys.isEmpty() ? m.sys : prefs.getString("last_sys", "")};
         if (!m.fixRecordId.isEmpty()) {
@@ -291,10 +313,12 @@ public class DescribeSheet {
             }
         }
         body.addView(sysGrid);
+        if (local) sysGrid.setVisibility(View.GONE);
         body.addView(Ui.spacer(a, 12));
 
         // LOKALIZACJA GPS
-        body.addView(Ui.label(a, L.t("LOKALIZACJA GPS")));
+        TextView gpsLbl = Ui.label(a, L.t("LOKALIZACJA GPS"));
+        body.addView(gpsLbl);
         TextView gpsBox = Ui.text(a, "", 11f, R.color.pr_muted);
         gpsBox.setTypeface(Typeface.DEFAULT_BOLD);
         int gp = (int) Ui.dp(a, 10);
@@ -326,7 +350,8 @@ public class DescribeSheet {
             });
         };
         gpsBox.setOnClickListener(fetchGps);
-        if (gps[0] == null) fetchGps.onClick(gpsBox);
+        if (local) { gpsLbl.setVisibility(View.GONE); gpsBox.setVisibility(View.GONE); }
+        else if (gps[0] == null) fetchGps.onClick(gpsBox);
         body.addView(Ui.spacer(a, 12));
 
         // EMOCJE W TEJ SYTUACJI
@@ -377,10 +402,10 @@ public class DescribeSheet {
             if (selCat[0].isEmpty()) missing.add(L.t("• Kategoria"));
             if (!m.fixRecordId.isEmpty() && lockedSys.isEmpty() && selSys[0].isEmpty()) missing.add(L.t("• System nowej mowy (taki sam jak w nagraniu z błędem)"));
             if (newRecording) {
-                if (name.isEmpty()) missing.add(L.t("• Imię kursanta"));
+                if (name.isEmpty() && !local) missing.add(L.t("• Imię kursanta"));
                 if (emo[0] == 0) missing.add(L.t("• Emocje (gwiazdki 1-5)"));
                 // GPS wymagany jak w PWA — chyba ze uzytkownik nie dal zgody na lokalizacje
-                if (gps[0] == null && GpsHelper.hasPermission(a)) missing.add(L.t("• GPS — poczekaj lub kliknij pole GPS"));
+                if (gps[0] == null && GpsHelper.hasPermission(a) && !local) missing.add(L.t("• GPS — poczekaj lub kliknij pole GPS"));
             }
             if (!missing.isEmpty()) {
                 new AlertDialog.Builder(a).setTitle(L.t("Wymagane"))
@@ -390,7 +415,7 @@ public class DescribeSheet {
             }
             m.name = name;
             m.cat = selCat[0];
-            m.sys = !lockedSys.isEmpty() ? lockedSys : selSys[0];
+            m.sys = local ? "" : !lockedSys.isEmpty() ? lockedSys : selSys[0];
             m.emotion = emo[0];
             m.note = noteInput.getText().toString().trim();
             m.special = "Special".equals(selCat[0]) ? selSpecial[0] : "";
@@ -398,13 +423,20 @@ public class DescribeSheet {
             if (st != null && !m.note.contains(st.shortName())) m.note = "🎬 " + st.shortName() + (m.note.isEmpty() ? "" : " — " + m.note);
             if (ContactList.CATEGORY.equals(selCat[0]) && !selContact[0].isEmpty() && !m.note.contains(selContact[0]))
                 m.note = "📞 " + selContact[0] + (m.note.isEmpty() ? "" : " — " + m.note);
-            if (gps[0] != null) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); }
+            if (gps[0] != null && !local) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); }
             prefs.edit().putString("student_name", name).putString("last_sys", selSys[0]).apply();
             dismiss.run();
             if (onSave != null) onSave.onSave(m);
         });
 
         root.addView(overlay);
+    }
+
+    // Kategorie dla osob spoza kursu (bez "Zerówka" i "Phone do Kursanta/Trenera")
+    static String[] localCategories() {
+        List<String> l = new ArrayList<>();
+        for (String c : NsClient.CATEGORIES) if (!"Zerówka".equals(c) && !ContactList.CATEGORY.equals(c)) l.add(c);
+        return l.toArray(new String[0]);
     }
 
     private static EditText input(Context c, String hint) {

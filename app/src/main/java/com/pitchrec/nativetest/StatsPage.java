@@ -45,7 +45,7 @@ public class StatsPage {
         this.d = a.getResources().getDisplayMetrics().density;
     }
 
-    private static class Rec { long time; String cat; }
+    private static class Rec { long time; String cat; int emo; }
 
     public void render() {
         root.removeAllViews();
@@ -59,9 +59,13 @@ public class StatsPage {
         File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
         String todayKey = dayKey(System.currentTimeMillis());
         if (files != null) for (File f : files) {
-            Rec r = new Rec(); r.time = f.lastModified(); r.cat = RecMeta.load(a, f.getName()).cat; local.add(r);
+            RecMeta mm = RecMeta.load(a, f.getName());
+            Rec r = new Rec(); r.time = f.lastModified(); r.cat = mm.cat; r.emo = mm.emotion; local.add(r);
             if (dayKey(r.time).equals(todayKey)) todayCount++;
         }
+
+        // Wersja Google Play bez konta (pelna wersja): wszystko z nagran na telefonie, bez trenera
+        if (Access.localMode(a)) { renderLocal(local); return; }
 
         // ZAKLADKI: 📅 PLAN (od trenera, harmonogram, telefony, zadania) | 📊 STATYSTYKI (liczby, osiagniecia)
         android.content.SharedPreferences sp = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
@@ -164,6 +168,196 @@ public class StatsPage {
                 if (ov != null) fillReview(review, ov.optInt("reviewed", 0), ov.optInt("correct", 0));
             } catch (Exception e) { /* zostaja dane lokalne */ }
         });
+    }
+
+    // ═════════════ STATYSTYKI Z TELEFONU (wersja Play, pelna wersja bez konta) ═════════════
+    private void renderLocal(List<Rec> all) {
+        List<Rec> local = new ArrayList<>();
+        for (Rec r : all) if (r.cat != null && !r.cat.isEmpty()) local.add(r); // tylko opisane nagrania
+        java.util.Collections.sort(local, (x, y) -> Long.compare(x.time, y.time));
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (Rec r : local) counts.put(r.cat, counts.getOrDefault(r.cat, 0) + 1);
+
+        if (a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getBoolean("show_insp", true)) {
+            LinearLayout insp = Ui.card(a);
+            root.addView(insp);
+            buildInspirations(insp);
+        }
+        LinearLayout summary = Ui.card(a);
+        root.addView(summary);
+        fillSummary(summary, local, -1);
+        LinearLayout stress = Ui.card(a);
+        root.addView(stress);
+        fillStress(stress, local);
+        LinearLayout act = Ui.card(a);
+        root.addView(act);
+        fillActivity(act, local);
+        LinearLayout cats = Ui.card(a);
+        root.addView(cats);
+        fillCats(cats, counts, null, L.t("z nagrań na tym telefonie"));
+        LinearLayout special = Ui.card(a);
+        root.addView(special);
+        fillSpecialLocal(special);
+        LinearLayout miles = Ui.card(a);
+        root.addView(miles);
+        fillMilestones(miles, counts, local.size());
+        root.addView(Ui.spacer(a, 20));
+    }
+
+    // JAK SIE CZUJESZ — postep z gwiazdek (1 = luz … 5 = stres). Nizej = lepiej.
+    private static final int[] EMO_COL = {0, 0xFF00E5A0, 0xFF88CC44, 0xFFE5D200, 0xFFFF8C00, 0xFFFF4444};
+
+    private static int emoColor(double avg) { return EMO_COL[Math.max(1, Math.min(5, (int) Math.round(avg)))]; }
+
+    private static String f1(double v) { return String.format(Locale.getDefault(), "%.1f", v); }
+
+    private static double avgEmo(List<Rec> l, int from, int to) {
+        double s = 0; int n = 0;
+        for (int i = Math.max(0, from); i < Math.min(l.size(), to); i++) { s += l.get(i).emo; n++; }
+        return n == 0 ? 0 : s / n;
+    }
+
+    private void fillStress(LinearLayout card, List<Rec> local) {
+        card.removeAllViews();
+        card.addView(Ui.label(a, "💚 " + L.t("JAK SIĘ CZUJESZ — POSTĘP")));
+        List<Rec> st = new ArrayList<>();
+        for (Rec r : local) if (r.emo >= 1 && r.emo <= 5) st.add(r);
+        if (st.size() < 4) {
+            card.addView(Ui.text(a, L.t("Po każdym nagraniu zaznacz gwiazdkami, jak się czułeś (1 = luz, 5 = stres). Po kilku nagraniach zobaczysz tu, jak zmienia się Twój stres."), 12f, R.color.pr_muted));
+            return;
+        }
+        // calosc: pierwsze nagrania vs ostatnie
+        int k = Math.min(10, st.size() / 2);
+        double first = avgEmo(st, 0, k), last = avgEmo(st, st.size() - k, st.size());
+        double diff = last - first;
+        String verdict = diff <= -0.3 ? "📉 " + L.t("Stres spada — świetnie!") : diff >= 0.3 ? "📈 " + L.t("Ostatnio trudniej — to normalne, gdy wchodzisz w nowe sytuacje.") : "➡ " + L.t("Stres na podobnym poziomie.");
+        LinearLayout row = Ui.row(a);
+        row.addView(bigStatColor(f1(first), L.t("na początku"), emoColor(first)), Ui.weight(1f, 0));
+        row.addView(bigStatColor("→", "", Ui.col(a, R.color.pr_muted)), Ui.weight(0.5f, 0));
+        row.addView(bigStatColor(f1(last), L.t("ostatnio"), emoColor(last)), Ui.weight(1f, 0));
+        card.addView(row);
+        TextView v = Ui.text(a, verdict, 13f, R.color.pr_text);
+        v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setGravity(Gravity.CENTER);
+        v.setPadding(0, (int) (8 * d), 0, (int) (4 * d));
+        card.addView(v);
+        TextView sc = Ui.text(a, L.f("Średnia z {0} pierwszych i {0} ostatnich nagrań · 1 = luz, 5 = stres", k), 10f, R.color.pr_muted);
+        sc.setGravity(Gravity.CENTER);
+        card.addView(sc);
+
+        // per kategoria: pierwsze 3 vs ostatnie 3 (min. 4 nagrania z gwiazdkami)
+        Map<String, List<Rec>> by = new LinkedHashMap<>();
+        for (Rec r : st) { List<Rec> l = by.get(r.cat); if (l == null) { l = new ArrayList<>(); by.put(r.cat, l); } l.add(r); }
+        List<String> easy = new ArrayList<>(), hard = new ArrayList<>();
+        List<Object[]> rows = new ArrayList<>();
+        for (Map.Entry<String, List<Rec>> e : by.entrySet()) {
+            List<Rec> l = e.getValue();
+            double lastAvg = avgEmo(l, l.size() - 3, l.size());
+            if (l.size() >= 3 && lastAvg <= 2.0) easy.add(L.cat(e.getKey()));
+            if (l.size() >= 3 && lastAvg >= 4.0) hard.add(L.cat(e.getKey()));
+            if (l.size() < 4) continue;
+            int kk = Math.min(3, l.size() / 2);
+            rows.add(new Object[]{e.getKey(), avgEmo(l, 0, kk), avgEmo(l, l.size() - kk, l.size())});
+        }
+        java.util.Collections.sort(rows, (x, y) -> Double.compare(((double) x[2] - (double) x[1]), ((double) y[2] - (double) y[1])));
+        if (!rows.isEmpty()) {
+            TextView h = Ui.text(a, L.t("W kategoriach (początek → ostatnio)"), 11f, R.color.pr_muted);
+            h.setTypeface(Typeface.DEFAULT_BOLD);
+            h.setPadding(0, (int) (12 * d), 0, (int) (4 * d));
+            card.addView(h);
+            for (Object[] r : rows) {
+                double f = (double) r[1], l = (double) r[2];
+                LinearLayout cr = Ui.row(a);
+                cr.setPadding(0, (int) (3 * d), 0, (int) (3 * d));
+                cr.addView(Ui.text(a, L.cat((String) r[0]), 12f, R.color.pr_text), Ui.weight(1f, 6 * d));
+                TextView fv = Ui.text(a, f1(f), 12f, R.color.pr_text); fv.setTextColor(emoColor(f)); cr.addView(fv);
+                cr.addView(Ui.text(a, "  →  ", 12f, R.color.pr_muted));
+                TextView lv = Ui.text(a, f1(l), 12f, R.color.pr_text); lv.setTextColor(emoColor(l)); lv.setTypeface(Typeface.DEFAULT_BOLD); cr.addView(lv);
+                cr.addView(Ui.text(a, l <= f - 0.3 ? "  ↓" : l >= f + 0.3 ? "  ↑" : "  =", 12f, l <= f - 0.3 ? R.color.pr_accent : R.color.pr_muted));
+                card.addView(cr);
+            }
+        }
+        if (!easy.isEmpty()) {
+            TextView t = Ui.text(a, "✅ " + L.t("Oswojone") + ": " + android.text.TextUtils.join(", ", easy), 12f, R.color.pr_accent);
+            t.setPadding(0, (int) (10 * d), 0, 0);
+            card.addView(t);
+        }
+        if (!hard.isEmpty()) {
+            TextView t = Ui.text(a, "🎯 " + L.t("Jeszcze trudne — warto ćwiczyć") + ": " + android.text.TextUtils.join(", ", hard), 12f, R.color.pr_warn);
+            t.setPadding(0, (int) (6 * d), 0, 0);
+            card.addView(t);
+        }
+    }
+
+    private View bigStatColor(String val, String label, int color) {
+        LinearLayout l = new LinearLayout(a);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setGravity(Gravity.CENTER);
+        TextView v = Ui.text(a, val, 26f, R.color.pr_text);
+        v.setTextColor(color);
+        v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setGravity(Gravity.CENTER);
+        l.addView(v);
+        if (!label.isEmpty()) {
+            TextView lb = Ui.text(a, label, 10f, R.color.pr_muted);
+            lb.setGravity(Gravity.CENTER);
+            l.addView(lb);
+        }
+        return l;
+    }
+
+    // ZADANIA SPECJALNE bez trenera: odblokowane nagraniami, wykonane = nagranie z tym zadaniem
+    private void fillSpecialLocal(LinearLayout card) {
+        card.removeAllViews();
+        List<SpecialTasks.Task> all = SpecialTasks.localOrder();
+        List<SpecialTasks.Task> un = SpecialTasks.localUnlocked(a);
+        Map<String, Long> doneMap = SpecialTasks.done(a);
+        int doneN = 0;
+        for (SpecialTasks.Task t : all) if (doneMap.containsKey(t.name)) doneN++;
+        LinearLayout head = Ui.row(a);
+        head.addView(Ui.label(a, "🎬 " + L.t("ZADANIA SPECJALNE")), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView cnt = Ui.text(a, L.t("wykonane") + " " + doneN + "/" + all.size(), 12f, R.color.pr_accent);
+        cnt.setTypeface(Typeface.DEFAULT_BOLD);
+        head.addView(cnt);
+        card.addView(head);
+        int left = SpecialTasks.localNextIn(a);
+        TextView info = Ui.text(a, L.t("Wyzwania na kolejny poziom. Wykonaj zadanie, nagraj je w kategorii „Special” i wybierz je z listy.")
+                + (left > 0 ? "\n🔒 " + L.f("Kolejne zadanie odblokujesz za {0} nagrań.", left) : ""), 11f, R.color.pr_muted);
+        info.setPadding(0, (int) (2 * d), 0, (int) (8 * d));
+        card.addView(info);
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("dd.MM.yyyy", Locale.getDefault());
+        for (SpecialTasks.Task t : un) {
+            Long at = doneMap.get(t.name);
+            boolean ok = at != null;
+            LinearLayout row = Ui.row(a);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            int pd = (int) (8 * d);
+            row.setPadding(pd, pd, pd, pd);
+            row.setBackground(Ui.rounded(ok ? 0x2600E5A0 : 0x00000000, ok ? 0xFF00E5A0 : 0x22FFFFFF, ok ? 2 * d : d, 8 * d));
+            TextView ic = Ui.text(a, t.icon, 18f, R.color.pr_text);
+            ic.setGravity(Gravity.CENTER);
+            ic.setBackground(Ui.rounded(t.color, 0, 0, 8 * d));
+            row.addView(ic, new LinearLayout.LayoutParams((int) (34 * d), (int) (34 * d)));
+            LinearLayout colL = new LinearLayout(a);
+            colL.setOrientation(LinearLayout.VERTICAL);
+            colL.setPadding((int) (10 * d), 0, 0, 0);
+            TextView nm = Ui.text(a, t.shortNameL(), 13f, R.color.pr_text);
+            if (ok) nm.setTypeface(Typeface.DEFAULT_BOLD);
+            colL.addView(nm);
+            colL.addView(Ui.text(a, ok ? "✓ " + L.t("wykonane") + " " + df.format(new java.util.Date(at)) : L.t("dotknij, żeby zobaczyć opis"), 10f, ok ? R.color.pr_accent : R.color.pr_muted));
+            row.addView(colL, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            final String full = t.displayName();
+            row.setOnClickListener(v -> new android.app.AlertDialog.Builder(a).setTitle(t.icon + " " + t.shortNameL()).setMessage(full).setPositiveButton("OK", null).show());
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = (int) (5 * d);
+            card.addView(row, lp);
+        }
+        int locked = all.size() - un.size();
+        if (locked > 0) {
+            TextView lk = Ui.text(a, "🔒 " + L.f("+{0} zadań do odblokowania", locked), 12f, R.color.pr_muted);
+            lk.setPadding(0, (int) (6 * d), 0, 0);
+            card.addView(lk);
+        }
     }
 
     // ═════════════ GDZIE DZIS POTRENOWAC ═════════════
@@ -758,7 +952,7 @@ public class StatsPage {
         hero.addView(heroTxt, Ui.weight(1f, 0));
         card.addView(hero);
         card.addView(bar(pct / 100f, pct >= 100 ? 0xFF00C853 : 0xFFE8820C, 10));
-        if (!active) { // harmonogram sie skonczyl — mozna zamowic kolejna analize mowy
+        if (!active && !BuildConfig.PLAY) { // harmonogram sie skonczyl — mozna zamowic kolejna analize mowy (nie w Google Play: zasady platnosci)
             card.addView(Ui.spacer(a, 10));
             card.addView(AnalysisOffer.card(a, true));
         }

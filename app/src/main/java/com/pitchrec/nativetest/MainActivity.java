@@ -164,6 +164,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         loadDawSettings();
         updateNavForLogin();
+        if (BuildConfig.PLAY) Premium.refresh(this, this::onPremiumChanged); // pelna wersja (zakup w Google Play)
         if (isLoggedIn()) {
             NsClient.loadCategories(nsToken(), nsEmail());
             verifySession(null);
@@ -272,7 +273,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         TrainerWatch.check(this, null); // oceny trenera od ostatniego otwarcia
         AvailWatch.schedule(this);
         AvailWatch.check(this, null);   // kto teraz chetnie porozmawia
-        Push.register(this);            // powiadomienia push "Chcę porozmawiać" (od razu)
         ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
         CallDays.check(this, null);             // dni telefonu do trenera (powiadomienia)
         askNotificationPermissionOnce();
@@ -428,9 +428,31 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             View b = findViewById(id);
             if (b != null) b.setVisibility(vis);
         }
+        // Wersja Google Play: STATS zawsze widoczne — pelna wersja: statystyki z telefonu,
+        // podstawowa: okienko z oferta pelnej wersji
+        View st = findViewById(R.id.navStats);
+        if (st != null && BuildConfig.PLAY) st.setVisibility(View.VISIBLE);
         if (!logged && !"expired".equals(nsAuthState)) nsAuthState = "none";
-        // Bez logowania nie mozna zostac na stronie sekcji NS
-        if (!logged && ("fix".equals(currentPage) || "diary".equals(currentPage) || "stats".equals(currentPage))) showPage("daw");
+        // Bez logowania nie mozna zostac na stronie sekcji NS (wyjatek: statystyki z telefonu w pelnej wersji Play)
+        boolean localStats = "stats".equals(currentPage) && BuildConfig.PLAY && Access.full(this);
+        if (!logged && !localStats && ("fix".equals(currentPage) || "diary".equals(currentPage) || "stats".equals(currentPage))) showPage("daw");
+    }
+
+    // Zmiana stanu pelnej wersji (zakup / przywrocenie / zwrot) — odswiez, co trzeba
+    private void onPremiumChanged() {
+        if (isFinishing()) return;
+        updateNavForLogin();
+        if ("set".equals(currentPage)) renderSettingsPage();
+        if ("recs".equals(currentPage)) renderRecsPage();
+    }
+
+    // Statystyki z nagran na telefonie (pelna wersja Play bez konta NewSpeech)
+    private StatsPage.Host localStatsHost() {
+        return new StatsPage.Host() {
+            public String token() { return null; }
+            public String email() { return ""; }
+            public boolean isCurrent() { return "stats".equals(currentPage); }
+        };
     }
 
     // ── KROPKI NA DOLNYM MENU: nieprzeczytane od trenera (Nagrania, Dziennik, Plan) i liczba poprawek (Korekta) ──
@@ -718,6 +740,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Wejscie do sekcji wymagajacej konta: najpierw sprawdzamy sesje (jak w PWA) —
     // wygasla sesja = czytelny komunikat i przejscie do logowania, nie pusty ekran.
     private void openLoginOnlySection(String page, String title) {
+        if (!isLoggedIn() && BuildConfig.PLAY && "stats".equals(page)) {
+            if (!Access.full(this)) { PremiumUi.offer(this, L.t("Statystyki są w pełnej wersji."), this::onPremiumChanged); return; }
+            showPage(page);
+            android.widget.LinearLayout c = findViewById(R.id.nsContent);
+            c.removeAllViews();
+            new StatsPage(this, c, localStatsHost()).render();
+            return;
+        }
         if (!isLoggedIn()) { promptLogin(L.t("Aby otworzyć sekcję ") + title + L.t(", zaloguj się do NewSpeech.")); return; }
         showPage(page);
         android.widget.LinearLayout c = findViewById(R.id.nsContent);
@@ -835,14 +865,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void promptLogin(String message) {
-        new AlertDialog.Builder(this)
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
                 .setTitle(L.t("Wymagane logowanie"))
                 .setMessage(message)
                 .setPositiveButton(L.t("Przejdź do logowania"), (d, w) -> showPage("set"))
-                .setNegativeButton(getString(R.string.btn_cancel), null)
-                // nie jestes jeszcze kursantem? — od razu oferta analizy mowy
-                .setNeutralButton("🎯 " + L.t("Analiza mowy"), (d, w) -> AnalysisOffer.dialog(this))
-                .show();
+                .setNegativeButton(getString(R.string.btn_cancel), null);
+        // nie jestes jeszcze kursantem? — od razu oferta analizy mowy (nie w Google Play: zasady platnosci)
+        if (!BuildConfig.PLAY) b.setNeutralButton("🎯 " + L.t("Analiza mowy"), (d, w) -> AnalysisOffer.dialog(this));
+        b.show();
     }
 
     public interface AuthStateCallback { void onState(String state); }
@@ -898,7 +928,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 nsAuthCheckedAt = System.currentTimeMillis();
                 NsClient.loadCategories(r.token, r.email);
                 prefs().edit().remove("map_name").apply();
-                loadProfileFromNs(true, () -> { Push.register(this); if ("set".equals(currentPage)) renderSettingsPage(); });
+                loadProfileFromNs(true);
                 TrainerWatch.schedule(this);
                 AvailWatch.schedule(this);
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
@@ -912,7 +942,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void doLogout() {
-        Push.unregister(this); // przed usunieciem danych konta (potrzebny identyfikator)
         prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").remove("special_credit").remove("special_credit_init").remove("harmo_cache").putBoolean("ns_session_expired", false).apply();
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
@@ -988,8 +1017,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             Button logout = makeOutlinedButton(L.t("Wyloguj"), R.color.pr_warn, density);
             logout.setOnClickListener(v -> doLogout());
             accountSection.addView(logout);
-            accountSection.addView(divider());
-            addWantTalk(accountSection); // "Chcę porozmawiać" — od razu pod "Wyloguj"
         } else {
             boolean expired = "expired".equals(nsAuthState) || prefs().getBoolean("ns_session_expired", false);
             status.setText(expired ? L.t("⚠ Sesja wygasła — zaloguj się ponownie") : L.t("Nie jesteś zalogowany"));
@@ -1244,6 +1271,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Po STOP: nowe nagranie -> pelny opis (wymagane: imie, kategoria, emocje, GPS),
     // potem zmiana nazwy pliku jak w PitchRec i pytanie o wyslanie do NS.
     private void describeNewRecording(File file) {
+        if (!Access.full(this)) {
+            // WERSJA PODSTAWOWA (Play, bez zakupu): nagranie zapisane do pliku, bez opisu
+            callRecLabel = null;
+            diaryMonologue = false;
+            exportToFolder(file);
+            setStatus(L.t("💾 Zapisano"));
+            nudgePremium();
+            return;
+        }
         String[] fix = loadFixTarget();
         RecMeta init = new RecMeta();
         String banner = null;
@@ -1279,6 +1315,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             File renamed = RecMeta.renameWithMeta(this, file, meta);
             if (file.getAbsolutePath().equals(loadedFilePath)) loadedFilePath = renamed.getAbsolutePath();
             afterDescribed(meta, file.lastModified());
+            afterLocalDescribed();
             if (file.getAbsolutePath().equals(lastSavedFilePath)) lastSavedFilePath = renamed.getAbsolutePath();
             exportToFolder(renamed);
             if (isFix) {
@@ -1296,13 +1333,39 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         });
     }
 
+    // Wersja podstawowa: co 5. nagranie krotka informacja o pelnej wersji (bez natretnych okienek)
+    private void nudgePremium() {
+        int n = prefs().getInt("basic_saved", 0) + 1;
+        prefs().edit().putInt("basic_saved", n).apply();
+        if (n % 5 == 0) Toast.makeText(this, "⭐ " + L.t("Kategorie, statystyki i odznaki — w pełnej wersji (Ustawienia)."), Toast.LENGTH_LONG).show();
+    }
+
+    // Pelna wersja bez konta: odznaki i zadania specjalne liczone z opisanych nagran na telefonie
+    private void afterLocalDescribed() {
+        if (!Access.localMode(this)) return;
+        java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+        int total = 0;
+        File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files != null) for (File f : files) {
+            String cat = RecMeta.load(this, f.getName()).cat;
+            if (cat == null || cat.isEmpty()) continue;
+            counts.put(cat, counts.getOrDefault(cat, 0) + 1);
+            total++;
+        }
+        Achievements.celebrate(this, Achievements.newlyEarned(this, counts, total));
+        SpecialTasks.Task un = SpecialTasks.newlyUnlocked(this);
+        if (un != null) Toast.makeText(this, "🎬 " + L.t("Nowe zadanie specjalne") + ": " + un.icon + " " + un.shortNameL(), Toast.LENGTH_LONG).show();
+    }
+
     // Opisywanie istniejacego pliku z listy (przycisk "📝 Opisz") — wymagana tylko kategoria.
     private void describeExisting(File file, boolean sendAfter) {
+        if (!Access.full(this)) { PremiumUi.offer(this, L.t("Opisywanie nagrań (kategoria, gwiazdki) jest w pełnej wersji."), this::onPremiumChanged); return; }
         RecMeta existing = RecMeta.load(this, file.getName());
         DescribeSheet.show(this, existing, false, L.t("OPISZ NAGRANIE"), meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
             if (file.getAbsolutePath().equals(loadedFilePath)) loadedFilePath = renamed.getAbsolutePath();
             afterDescribed(meta, file.lastModified());
+            afterLocalDescribed();
             if ("recs".equals(currentPage)) renderRecsPage();
             if (sendAfter && isLoggedIn()) sendToNs(renamed);
         });
@@ -1311,6 +1374,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Po opisaniu nagrania — jak w PitchRec: kwestionariusz (Google Forms) + punkt na MAPIE
     // (historia zawsze, gdy jest GPS; "na zywo" dla Sklepow i Przechodniow, gdy wlaczone).
     private void afterDescribed(RecMeta m, long timeMs) {
+        // Wersja Play bez konta: opis zostaje TYLKO na telefonie (bez formularza kursu i mapy)
+        if (Access.localMode(this)) return;
         try {
             java.text.SimpleDateFormat hf = new java.text.SimpleDateFormat("d.M.yyyy HH:mm", Locale.US);
             StringBuilder f = new StringBuilder();
@@ -1406,7 +1471,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     e.putString("map_name", full);
                     if (force || prefs().getString("student_name", "").isEmpty()) e.putString("student_name", full);
                 }
-                if (!phone.isEmpty()) e.putString("map_phone", phone); // telefon ZAWSZE z profilu kursanta w NS
+                if (!phone.isEmpty() && (force || prefs().getString("map_phone", "").isEmpty())) e.putString("map_phone", phone);
                 if (!city.isEmpty()) e.putString("ns_city", city);
                 e.apply();
                 if ("set".equals(currentPage) && done == null) renderSettingsPage();
@@ -1647,7 +1712,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         c.addView(acc);
         refreshAccountSection();
         if (isLoggedIn()) verifySession(null);
-        else c.addView(AnalysisOffer.card(this, false)); // niezalogowany: mozna wykupic analize mowy
+        if (BuildConfig.PLAY) c.addView(PremiumUi.card(this, this::onPremiumChanged)); // pelna wersja (zakup w Google Play)
+        else if (!isLoggedIn()) c.addView(AnalysisOffer.card(this, false)); // niezalogowany: mozna wykupic analize mowy
 
         // 2) MAPA NAGRAN — duzy przycisk od razu pod logowaniem, obok NORMY
         final boolean logged = isLoggedIn();
@@ -1864,6 +1930,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         mp.addView(toggleRow("📡 " + L.t("Pokazuj mnie na mapie na żywo"), prefs().getBoolean("map_share", true), on -> prefs().edit().putBoolean("map_share", on).apply()));
         mp.addView(hint(L.t("Po zapisaniu nagrania w kategorii Sklepy, Przechodzień, Special albo Miasto – inne inni kursanci widzą Cię na mapie przez ok. 20 min: imię, miasto, system mowy i kategorię.")));
         mp.addView(hint(L.t("Na mapie jako:") + " " + mapName(prefs().getString("student_name", ""))));
+        mp.addView(divider());
+        addWantTalk(mp);
     }
 
     // Jeden przycisk "Chcę porozmawiać" + co zobacza inni
@@ -1880,6 +1948,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!phone.isEmpty()) {
             String city = prefs().getString("ns_city", "");
             mp.addView(hint(L.t("Inni zobaczą:") + " " + mapName(prefs().getString("student_name", "")) + (city.isEmpty() ? "" : " · " + city) + " · ☎ " + phone));
+            Button ch = Ui.button(this, L.t("Zmień numer"), R.color.pr_muted, false);
+            ch.setOnClickListener(v -> askPhone(false, this::renderSettingsPage));
+            mp.addView(ch);
         }
     }
 
