@@ -272,6 +272,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         TrainerWatch.check(this, null); // oceny trenera od ostatniego otwarcia
         AvailWatch.schedule(this);
         AvailWatch.check(this, null);   // kto teraz chetnie porozmawia
+        Push.register(this);            // powiadomienia push "Chcę porozmawiać" (od razu)
         ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
         CallDays.check(this, null);             // dni telefonu do trenera (powiadomienia)
         askNotificationPermissionOnce();
@@ -897,7 +898,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 nsAuthCheckedAt = System.currentTimeMillis();
                 NsClient.loadCategories(r.token, r.email);
                 prefs().edit().remove("map_name").apply();
-                loadProfileFromNs(true);
+                loadProfileFromNs(true, () -> { Push.register(this); if ("set".equals(currentPage)) renderSettingsPage(); });
                 TrainerWatch.schedule(this);
                 AvailWatch.schedule(this);
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
@@ -911,6 +912,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void doLogout() {
+        Push.unregister(this); // przed usunieciem danych konta (potrzebny identyfikator)
         prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").remove("special_credit").remove("special_credit_init").remove("harmo_cache").putBoolean("ns_session_expired", false).apply();
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
@@ -1404,7 +1406,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     e.putString("map_name", full);
                     if (force || prefs().getString("student_name", "").isEmpty()) e.putString("student_name", full);
                 }
-                if (!phone.isEmpty() && (force || prefs().getString("map_phone", "").isEmpty())) e.putString("map_phone", phone);
+                if (!phone.isEmpty()) e.putString("map_phone", phone); // telefon ZAWSZE z profilu kursanta w NS
                 if (!city.isEmpty()) e.putString("ns_city", city);
                 e.apply();
                 if ("set".equals(currentPage) && done == null) renderSettingsPage();
@@ -1878,9 +1880,6 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (!phone.isEmpty()) {
             String city = prefs().getString("ns_city", "");
             mp.addView(hint(L.t("Inni zobaczą:") + " " + mapName(prefs().getString("student_name", "")) + (city.isEmpty() ? "" : " · " + city) + " · ☎ " + phone));
-            Button ch = Ui.button(this, L.t("Zmień numer"), R.color.pr_muted, false);
-            ch.setOnClickListener(v -> askPhone(false, this::renderSettingsPage));
-            mp.addView(ch);
         }
     }
 

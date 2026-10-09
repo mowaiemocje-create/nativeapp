@@ -26,6 +26,7 @@ public final class AvailWatch {
     private static final String CHANNEL = "avail_talk2"; // nowy kanal: WAZNE (wyskakuje na ekranie)
     private static final long AVAIL_TTL = 2 * 60 * 60 * 1000L;   // dostepnosc trwa 2 h
     private static volatile boolean running = false;
+    private static volatile long runningSince = 0L;
 
     private AvailWatch() { }
 
@@ -65,15 +66,22 @@ public final class AvailWatch {
     public static void check(Context c, Runnable done) {
         final Context ctx = c.getApplicationContext() != null ? c.getApplicationContext() : c;
         String token = prefs(ctx).getString("ns_token", null);
+        // "running" zawieszone (zerwane polaczenie / blad w trakcie) blokowalo sprawdzanie az do
+        // zamkniecia aplikacji przez system — po minucie odblokowujemy
+        if (running && System.currentTimeMillis() - runningSince > 60000L) running = false;
         if (!enabled(ctx) || token == null || running) { if (done != null) done.run(); return; }
         running = true;
+        runningSince = System.currentTimeMillis();
         String email = prefs(ctx).getString("ns_email", "");
         // lekki GET /map/avail (nowszy proxy); gdy go nie ma — pelne /map/points
         NsClient.request("GET", "/map/avail", token, email, null, null, r -> {
             JSONArray list = r.ok ? parse(r.body) : null;
-            if (list != null) { handle(ctx, list); running = false; if (done != null) done.run(); return; }
+            if (list != null) {
+                try { handle(ctx, list, false); } catch (Exception e) { }
+                running = false; if (done != null) done.run(); return;
+            }
             NsClient.request("GET", "/map/points", token, email, null, null, r2 -> {
-                try { if (r2.ok) { JSONArray l2 = parse(r2.body); if (l2 != null) handle(ctx, l2); } } catch (Exception e) { }
+                try { if (r2.ok) { JSONArray l2 = parse(r2.body); if (l2 != null) handle(ctx, l2, false); } } catch (Exception e) { }
                 running = false;
                 if (done != null) done.run();
             });
@@ -90,7 +98,24 @@ public final class AvailWatch {
         } catch (Exception e) { return null; }
     }
 
-    private static void handle(Context c, JSONArray list) {
+    // Powiadomienie PUSH (PushService) — jedna osoba, od razu. Te same zasady co przy sprawdzaniu.
+    public static void fromPush(Context c, java.util.Map<String, String> d) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("uid", d.get("uid") == null ? "" : d.get("uid"));
+            o.put("name", d.get("name") == null ? "" : d.get("name"));
+            o.put("city", d.get("city") == null ? "" : d.get("city"));
+            String ph = d.get("phone");
+            o.put("phone", ph == null || ph.isEmpty() ? JSONObject.NULL : ph);
+            long ts = 0L;
+            try { ts = Long.parseLong(d.get("ts")); } catch (Exception e) { }
+            o.put("ts", ts > 0 ? ts : System.currentTimeMillis());
+            handle(c, new JSONArray().put(o), true);
+        } catch (Exception e) { }
+    }
+
+    // partial = lista niepelna (jedna osoba z push) — nie kasujemy z "widzianych" pozostalych osob
+    private static void handle(Context c, JSONArray list, boolean partial) {
         SharedPreferences p = prefs(c);
         // seen: "osoba|ts" — osoba = uid (nowy proxy) albo imie. Ta sama osoba z nowszym ts w ciagu
         // 2 h (np. dosłana pozycja GPS) NIE daje drugiego powiadomienia.
@@ -128,7 +153,11 @@ public final class AvailWatch {
             if (night) continue; // bez nocnych powiadomien (osoba zostaje "widziana")
             notifyAvail(c, name, o.optString("city", "").trim(), phone, ts, Math.abs(who.hashCode() % 10000) + 3000);
         }
-        p.edit().putStringSet("avail_seen", keep).apply(); // zostaja tylko osoby nadal dostepne
+        if (partial) {
+            Set<String> merged = new HashSet<>(p.getStringSet("avail_seen", new HashSet<>()));
+            merged.addAll(keep);
+            p.edit().putStringSet("avail_seen", merged).apply();
+        } else p.edit().putStringSet("avail_seen", keep).apply(); // zostaja tylko osoby nadal dostepne
     }
 
     private static void notifyAvail(Context c, String name, String city, String phone, long ts, int id) {

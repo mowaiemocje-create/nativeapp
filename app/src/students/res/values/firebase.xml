@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Firebase (projekt pitchrec-map) — to samo, co wygenerowalby plugin google-services z pliku
+     google-services.json. Tylko wersja kursantow (powiadomienia push "Chcę porozmawiać"). -->
+<resources>
+    <string name="google_app_id" translatable="false">1:1095303148591:android:47c1f1da7f125d154202da</string>
+    <string name="gcm_defaultSenderId" translatable="false">1095303148591</string>
+    <string name="google_api_key" translatable="false">AIzaSyDKmCdybEpn5dE55TaCIGyPEgXQrKXMIZA</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyDKmCdybEpn5dE55TaCIGyPEgXQrKXMIZA</string>
+    <string name="project_id" translatable="false">pitchrec-map</string>
+    <string name="firebase_database_url" translatable="false">https://pitchrec-map-default-rtdb.europe-west1.firebasedatabase.app</string>
+    <string name="google_storage_bucket" translatable="false">pitchrec-map.firebasestorage.app</string>
+</resources>
