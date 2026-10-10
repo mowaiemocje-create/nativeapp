@@ -277,6 +277,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
         CallDays.check(this, null);             // dni telefonu do trenera (powiadomienia)
         askNotificationPermissionOnce();
+        // wersja kursantow: zgoda na lokalizacje od razu przy pierwszym uruchomieniu (bez niej nie ma nagrywania)
+        if (!BuildConfig.PLAY && !GpsHelper.hasPermission(this) && !prefs().getBoolean("location_asked", false)) {
+            prefs().edit().putBoolean("location_asked", true).apply();
+            requestLocationPermission(this);
+        }
         UpdateChecker.check(this, false);      // nowa wersja aplikacji (GitHub Releases)
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
@@ -2712,6 +2717,52 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         ActivityCompat.requestPermissions(a, new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_LOCATION_PERMISSION);
     }
 
+    private boolean recAfterLocation = false; // po udzieleniu zgody na lokalizacje — od razu nagrywamy
+
+    private boolean locationServiceOn() {
+        try {
+            android.location.LocationManager lm = (android.location.LocationManager) getSystemService(LOCATION_SERVICE);
+            if (lm == null) return true;
+            if (Build.VERSION.SDK_INT >= 28) return lm.isLocationEnabled();
+            return lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER);
+        } catch (Exception e) { return true; }
+    }
+
+    // true = mozna nagrywac; false = pokazane okienko (zgoda / wlaczenie lokalizacji)
+    private boolean gpsReadyForRecording() {
+        if (BuildConfig.PLAY) return true; // wersja Google Play: lokalizacja nieobowiazkowa
+        if (!GpsHelper.hasPermission(this)) {
+            boolean askedBefore = prefs().getBoolean("location_asked", false);
+            boolean canAsk = !askedBefore || ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION);
+            new AlertDialog.Builder(this)
+                    .setTitle("📍 " + L.t("Nagrywanie wymaga lokalizacji"))
+                    .setMessage(L.t("Każde nagranie zapisuje miejsce, w którym powstało (mapa, opis dla trenera). Bez zgody na lokalizację nie można nagrywać.")
+                            + (canAsk ? "" : "\n\n" + L.t("Zgoda została wcześniej odrzucona — włącz ją w ustawieniach aplikacji: Uprawnienia → Lokalizacja → Zezwalaj podczas używania.")))
+                    .setPositiveButton(canAsk ? L.t("Zezwól") : L.t("Otwórz ustawienia"), (d, w) -> {
+                        if (canAsk) {
+                            prefs().edit().putBoolean("location_asked", true).apply();
+                            recAfterLocation = true;
+                            requestLocationPermission(this);
+                        } else PhoneHelp.openAppInfo(this);
+                    })
+                    .setNegativeButton(getString(R.string.btn_cancel), null)
+                    .show();
+            return false;
+        }
+        if (!locationServiceOn()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("📍 " + L.t("Włącz lokalizację"))
+                    .setMessage(L.t("Lokalizacja w telefonie jest wyłączona. Włącz ją, żeby nagrywać — miejsce nagrania zapisuje się razem z nagraniem."))
+                    .setPositiveButton(L.t("Włącz"), (d, w) -> {
+                        try { startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)); } catch (Exception e) { PhoneHelp.openAppInfo(this); }
+                    })
+                    .setNegativeButton(getString(R.string.btn_cancel), null)
+                    .show();
+            return false;
+        }
+        return true;
+    }
+
     // Buduje jeden, estetyczny wiersz "Etykieta: [kwadrat koloru]" — zamiast etykiety i
     // kwadratu na osobnych, pelnej-szerokosci wierszach (co wygladalo niechlujnie, z
     // duza iloscia pustej przestrzeni). Kwadrat ma zaokraglone rogi + obramowanie.
@@ -2761,6 +2812,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                     new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
             return;
         }
+
+        // WERSJA KURSANTOW: bez zgody na lokalizacje i wlaczonej lokalizacji nie nagrywamy —
+        // pozycja z czasu nagrania jest czescia nagrania (opis, mapa, etykieta dom/teren dla trenera)
+        if (!gpsReadyForRecording()) return;
 
         // GPS jak w PitchRec: pozycja z czasu NAGRYWANIA (zapisywana w opisie i nazwie pliku)
         GpsHelper.recordingFix = null;
@@ -2912,6 +2967,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_LOCATION_PERMISSION) {
             if (GpsHelper.hasPermission(this)) GpsHelper.requestFix(this, null);
+            boolean go = recAfterLocation && GpsHelper.hasPermission(this) && !isRecording;
+            recAfterLocation = false;
+            if (go) startRecordingFlow(); // zgoda dana z przycisku REC — nagrywamy od razu
             if ("set".equals(currentPage)) renderSettingsPage();
             return;
         }
