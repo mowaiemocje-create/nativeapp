@@ -41,7 +41,11 @@ public final class UploadShrink {
         try {
             if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".wav")) wavToMp3(f, out, p);
             else mp3ToMp3(f, out, p);
-            if (out.length() > 0 && out.length() < f.length()) return out;
+            if (out.length() > 0 && out.length() < f.length()) {
+                double[] g = GpsTag.find(f); // pozycja z oryginalu przechodzi do mniejszej kopii
+                if (g != null) GpsTag.write(out, g[0], g[1]);
+                return out;
+            }
         } catch (Throwable e) { /* np. brak pamieci / zly plik — wysylamy oryginal */ }
         out.delete();
         return f;
@@ -71,6 +75,7 @@ public final class UploadShrink {
             pcm = new byte[chunk];
             mp3 = new byte[Math.max(lame.getPCMBufferSize(), 16384) * 2];
             os = new FileOutputStream(out);
+            if (out.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".mp3")) os.write(GpsTag.placeholder());
         }
         void put(short s) throws IOException {
             pcm[n++] = (byte) (s & 0xff);

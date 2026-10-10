@@ -29,6 +29,8 @@ public final class Mp3Stream {
         pcmMax = Math.max(1024, enc.getPCMBufferSize()) & ~1;
         obuf = new byte[Math.max(enc.getPCMBufferSize(), 16384) * 2];
         out = new FileOutputStream(file);
+        // znacznik ID3 z miejscem na pozycje GPS z czasu nagrania (uzupelniany po nagraniu)
+        out.write(com.pitchrec.nativetest.GpsTag.placeholder());
     }
 
     public void feed(short[] s, int n) {

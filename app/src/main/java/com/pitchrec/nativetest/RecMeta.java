@@ -91,6 +91,9 @@ public class RecMeta {
     private static final String[] MONTHS = {"styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec",
             "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"};
 
+    // etykieta miejsca w nazwie (ustawiana przy zmianie nazwy): "_dom", "_teren-1.2km", "_bezGPS"
+    public transient String placeWord = "";
+
     public String buildFileName(long timeMs, String ext) {
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(timeMs);
@@ -104,13 +107,20 @@ public class RecMeta {
         String gpsWord = hasGps() ? String.format(Locale.US, "_GPS%.5f_%.5f", lat, lon) : "";
         String spWord = "Special".equals(cat) ? SpecialTasks.codeTag(special) : "";
         return catPart + "_" + datePart + (sysWord.isEmpty() ? "" : "-" + sysWord)
-                + (emoWord.isEmpty() ? "" : "-" + emoWord) + (spWord.isEmpty() ? "" : "-" + spWord) + gpsWord + ext;
+                + (emoWord.isEmpty() ? "" : "-" + emoWord) + (spWord.isEmpty() ? "" : "-" + spWord) + gpsWord
+                + (placeWord == null ? "" : placeWord) + ext;
     }
 
     // Zmienia nazwe pliku na nowa (wg opisu) i przenosi opis. Zwraca nowy plik (albo stary,
     // jesli zmiana nazwy sie nie udala).
     public static File renameWithMeta(Context c, File f, RecMeta m) {
         String ext = f.getName().toLowerCase(Locale.ROOT).endsWith(".mp3") ? ".mp3" : ".wav";
+        // GPS z czasu nagrania do metadanych pliku + etykieta miejsca w nazwie (dla trenera)
+        if (m.hasGps()) {
+            GpsTag.write(f, m.lat, m.lon);
+            int d = HomeGps.distance(c, m.lat, m.lon);
+            m.placeWord = d < 0 ? "" : d < HomeGps.RADIUS_M ? "_dom" : String.format(Locale.US, "_teren-%.1fkm", d / 1000.0);
+        } else m.placeWord = "_bezGPS";
         String base = m.buildFileName(f.lastModified(), "");
         File dest = new File(f.getParentFile(), base + ext);
         int n = 1;

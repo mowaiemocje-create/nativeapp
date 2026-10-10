@@ -1283,6 +1283,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (rf != null) {
             RecMeta pg = RecMeta.load(this, file.getName());
             if (!pg.hasGps()) { pg.lat = rf.getLatitude(); pg.lon = rf.getLongitude(); pg.save(this, file.getName()); }
+            GpsTag.write(file, rf.getLatitude(), rf.getLongitude()); // pozycja w metadanych pliku MP3
         }
         if (!Access.full(this)) {
             // WERSJA PODSTAWOWA (Play, bez zakupu): nagranie zapisane do pliku, bez opisu
@@ -1375,6 +1376,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private void describeExisting(File file, boolean sendAfter) {
         if (!Access.full(this)) { PremiumUi.offer(this, L.t("Opisywanie nagrań (kategoria, gwiazdki) jest w pełnej wersji."), this::onPremiumChanged); return; }
         RecMeta existing = RecMeta.load(this, file.getName());
+        // brak pozycji w opisie -> z metadanych pliku albo z nazwy (np. nagranie wczytane z innego telefonu)
+        if (!existing.hasGps()) {
+            double[] g = GpsTag.find(file);
+            if (g != null) { existing.lat = g[0]; existing.lon = g[1]; }
+        }
         DescribeSheet.show(this, existing, false, L.t("OPISZ NAGRANIE"), meta -> {
             File renamed = RecMeta.renameWithMeta(this, file, meta);
             if (file.getAbsolutePath().equals(loadedFilePath)) loadedFilePath = renamed.getAbsolutePath();

@@ -19,6 +19,15 @@ public final class HomeGps {
 
     private static boolean in(String[] a, String cat) { for (String s : a) if (s.equals(cat)) return true; return false; }
 
+    // Odleglosc od zapamietanego domu w metrach albo -1 (dom jeszcze nieznany)
+    public static int distance(Context c, double lat, double lon) {
+        SharedPreferences p = prefs(c);
+        if (p.getInt("home_n", 0) == 0 || Double.isNaN(lat) || Double.isNaN(lon)) return -1;
+        double hl = Double.longBitsToDouble(p.getLong("home_lat", 0L)), ho = Double.longBitsToDouble(p.getLong("home_lon", 0L));
+        double dLat = (lat - hl) * 111000, dLon = (lon - ho) * 111000 * Math.cos(Math.toRadians(lat));
+        return (int) Math.round(Math.sqrt(dLat * dLat + dLon * dLon));
+    }
+
     // Zwraca odleglosc od domu w metrach, gdy nagranie terenowe jest "z domu"; inaczej -1.
     public static int onRecording(Context c, String cat, double lat, double lon) {
         if (cat == null || Double.isNaN(lat) || Double.isNaN(lon)) return -1;
