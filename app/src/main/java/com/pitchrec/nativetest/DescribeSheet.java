@@ -332,10 +332,13 @@ public class DescribeSheet {
             gps[0] = l;
         } else if (GpsHelper.recordingFix != null && newRecording) {
             gps[0] = GpsHelper.recordingFix;
-        } else if (GpsHelper.lastFix != null) {
+        } else if (GpsHelper.lastFix != null && newRecording) {
             gps[0] = GpsHelper.lastFix;
         }
-        Runnable refreshGps = () -> showGps(a, gpsBox, gps[0], null);
+        // Starsze nagranie bez zapisanej pozycji: NIE bierzemy obecnej lokalizacji sama z siebie —
+        // kursant czesto opisuje w domu nagrania z miasta. Pozycje z teraz tylko po dotknieciu.
+        final boolean noOldGps = !newRecording && gps[0] == null;
+        Runnable refreshGps = () -> showGps(a, gpsBox, gps[0], noOldGps && gps[0] == null ? L.t("Brak GPS z nagrania — dotknij, aby wpisać obecną lokalizację") : null);
         refreshGps.run();
         View.OnClickListener fetchGps = v -> {
             if (!GpsHelper.hasPermission(a)) {
@@ -351,7 +354,7 @@ public class DescribeSheet {
         };
         gpsBox.setOnClickListener(fetchGps);
         if (local) { gpsLbl.setVisibility(View.GONE); gpsBox.setVisibility(View.GONE); }
-        else if (gps[0] == null) fetchGps.onClick(gpsBox);
+        else if (gps[0] == null && newRecording) fetchGps.onClick(gpsBox);
         body.addView(Ui.spacer(a, 12));
 
         // EMOCJE W TEJ SYTUACJI

@@ -1275,6 +1275,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Po STOP: nowe nagranie -> pelny opis (wymagane: imie, kategoria, emocje, GPS),
     // potem zmiana nazwy pliku jak w PitchRec i pytanie o wyslanie do NS.
     private void describeNewRecording(File file) {
+        // GPS Z CZASU NAGRANIA zapisujemy od razu przy pliku — opis moze byc pozniej, np. w domu
+        android.location.Location rf = GpsHelper.recordingFix;
+        // tylko pozycja z TEGO nagrania (nie np. z poprzedniego, przy nagranej rozmowie telefonicznej)
+        if (rf != null && Math.abs(file.lastModified() - rf.getTime()) > 3 * 3600 * 1000L) rf = null;
+        GpsHelper.recordingFix = null;
+        if (rf != null) {
+            RecMeta pg = RecMeta.load(this, file.getName());
+            if (!pg.hasGps()) { pg.lat = rf.getLatitude(); pg.lon = rf.getLongitude(); pg.save(this, file.getName()); }
+        }
         if (!Access.full(this)) {
             // WERSJA PODSTAWOWA (Play, bez zakupu): nagranie zapisane do pliku, bez opisu
             callRecLabel = null;
@@ -1286,6 +1295,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         }
         String[] fix = loadFixTarget();
         RecMeta init = new RecMeta();
+        if (rf != null) { init.lat = rf.getLatitude(); init.lon = rf.getLongitude(); }
         String banner = null;
         if (fix != null) {
             init.cat = fix[1];
@@ -1378,6 +1388,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Po opisaniu nagrania — jak w PitchRec: kwestionariusz (Google Forms) + punkt na MAPIE
     // (historia zawsze, gdy jest GPS; "na zywo" dla Sklepow i Przechodniow, gdy wlaczone).
     private void afterDescribed(RecMeta m, long timeMs) {
+        // dom zapamietywany sam; nagranie "terenowe" z okolicy domu -> podpowiedz
+        if (m.hasGps()) {
+            int homeDist = HomeGps.onRecording(this, m.cat, m.lat, m.lon);
+            if (homeDist >= 0) {
+                String msg = "🏠 " + L.f("Nagranie „{0}” z okolicy domu ({1} m). Spróbuj wyjść dalej do miasta!", L.cat(m.cat), homeDist);
+                setStatus(msg);
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            }
+        }
         // Wersja Play bez konta: opis zostaje TYLKO na telefonie (bez formularza kursu i mapy)
         if (Access.localMode(this)) return;
         try {
@@ -1873,7 +1892,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             hints.addView(hint(L.t("st = półton. Mniejsza zmiana tonu w sylabie nie daje strzałki; im większa zmiana, tym bardziej stroma strzałka.")));
         }
         hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
-        hints.addView(toggleRow("📈 " + L.t("Pitch przy otwieraniu nagrania — bez pytania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
+        hints.addView(toggleRow("📈 " + L.t("Licz pitch od razu przy otwieraniu nagrania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
         if (logged) hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
 
@@ -2729,6 +2748,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void startRecordingFlow() {
+        hidePitchButton();
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
@@ -2786,6 +2806,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void stopRecordingFlow() {
+        // jeszcze nie ma pozycji z nagrania (GPS sie spoznil) — probujemy teraz, na miejscu nagrania
+        if (GpsHelper.recordingFix == null && GpsHelper.hasPermission(this))
+            GpsHelper.requestFix(this, loc -> { if (loc != null && GpsHelper.recordingFix == null) GpsHelper.recordingFix = loc; });
         releasePlayer(); // podglad z pauzy nie moze grac dalej po STOP
         saving = true;
         Intent intent = new Intent(this, BackgroundRecorderService.class);
@@ -3073,6 +3096,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void loadAndDisplayFile(File file) {
         final int gen = ++loadGen;
+        hidePitchButton();
         // STARY odtwarzacz (poprzednie nagranie) musi zniknac — inaczej PLAY wznawial go
         // i grala poprzednia pamiec, choc na wykresie byl juz nowy plik.
         releasePlayer();
@@ -3103,18 +3127,35 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 statusText.setText(L.t("Wczytano nagranie"));
                 // 2) pitch tylko na zyczenie (pauz przy odsluchu nie liczymy)
                 if (prefs().getBoolean("auto_pitch", false)) { loadPitchFor(file, gen); return; }
-                new AlertDialog.Builder(this)
-                        .setTitle(L.t("Załadować linię pitch?"))
-                        .setMessage(L.t("Fala nagrania jest gotowa. Linia intonacji (pitch) liczy się kilka sekund."))
-                        .setPositiveButton(L.t("Tak"), (d, w) -> loadPitchFor(file, gen))
-                        .setNeutralButton(L.t("Zawsze"), (d, w) -> { prefs().edit().putBoolean("auto_pitch", true).apply(); loadPitchFor(file, gen); })
-                        .setNegativeButton(L.t("Nie"), null)
-                        .show();
+                // bez pytania — przycisk "Policz linię pitch" pod wykresem
+                showPitchButton(file, gen);
             });
         }, "load-daw").start();
     }
 
+    // ── PRZYCISK "📈 Policz linię pitch" pod wykresem (zamiast pytania przy otwieraniu nagrania) ──
+    private Button pitchButton;
+
+    private void showPitchButton(File file, int gen) {
+        if (pitchButton == null) {
+            View st = findViewById(R.id.statusText);
+            if (st == null || !(st.getParent() instanceof android.widget.LinearLayout)) return;
+            android.widget.LinearLayout parent = (android.widget.LinearLayout) st.getParent();
+            pitchButton = Ui.button(this, "📈 " + L.t("Policz linię pitch"), R.color.pr_accent, true);
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            int m = (int) (6 * getResources().getDisplayMetrics().density);
+            lp.setMargins(m, m / 2, m, m / 2);
+            parent.addView(pitchButton, parent.indexOfChild(st) + 1, lp);
+        }
+        pitchButton.setOnClickListener(v -> loadPitchFor(file, gen));
+        pitchButton.setVisibility(View.VISIBLE);
+    }
+
+    private void hidePitchButton() { if (pitchButton != null) pitchButton.setVisibility(View.GONE); }
+
     private void loadPitchFor(File file, int gen) {
+        hidePitchButton();
         if (gen != loadGen) return;
         statusText.setText("⏳ " + L.t("Liczenie linii pitch…"));
         final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
