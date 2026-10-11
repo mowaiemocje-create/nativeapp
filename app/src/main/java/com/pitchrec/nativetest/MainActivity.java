@@ -731,7 +731,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 sb.setSpan(new android.text.style.ForegroundColorSpan(Color.parseColor("#E8820C")), 0, head.length(), 0);
                 if (!f.note.isEmpty()) {
                     int st = sb.length();
-                    sb.append("\n").append(f.note);
+                    sb.append("\n💬 ").append(f.note);
                     sb.setSpan(new android.text.style.RelativeSizeSpan(0.92f), st, sb.length(), 0);
                 }
                 focusBox.setText(sb);

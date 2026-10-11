@@ -192,9 +192,33 @@ public final class CoachNotices {
                 String nm = v instanceof JSONObject ? ((JSONObject) v).optString("name", "") : String.valueOf(v);
                 if (!nm.trim().isEmpty()) f.criteria.add(nm.trim());
             }
-            f.note = o.isNull("note") ? "" : o.optString("note", "").trim();
+            // wskazowka trenera: pole "note" (albo podobne nazwy); dodatkowo wskazowki przy
+            // poszczegolnych kryteriach ("Ogonek: ..."), gdy trener wpisal je osobno
+            StringBuilder nb = new StringBuilder(textOf(o));
+            for (int k = 0; cr != null && k < cr.length(); k++) {
+                JSONObject co = cr.optJSONObject(k);
+                if (co == null) continue;
+                String cn = textOf(co);
+                if (cn.isEmpty() || nb.indexOf(cn) >= 0) continue;
+                if (nb.length() > 0) nb.append("\n");
+                nb.append(co.optString("name", "").trim()).append(": ").append(cn);
+            }
+            f.note = nb.toString().trim();
             return f.criteria.isEmpty() ? null : f;
         } catch (Exception e) { return null; }
+    }
+
+    private static final String[] NOTE_KEYS = {"note", "notes", "hint", "tip", "comment", "message", "text", "description", "advice", "guidance"};
+
+    private static String textOf(JSONObject o) {
+        for (String k : NOTE_KEYS) {
+            if (!o.has(k) || o.isNull(k)) continue;
+            Object v = o.opt(k);
+            String t = v instanceof JSONObject ? textOf((JSONObject) v) : String.valueOf(v);
+            t = t.trim();
+            if (!t.isEmpty() && !"null".equals(t)) return t;
+        }
+        return "";
     }
 
     // Nowo opanowane kryteria (porownanie z zapamietanymi). Przy pierwszym pobraniu tylko
