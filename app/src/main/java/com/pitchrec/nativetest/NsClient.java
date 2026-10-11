@@ -81,6 +81,7 @@ public class NsClient {
         public String err;          // komunikat błędu dla użytkownika
         public String token, email, userId;
         public String body;
+        public boolean mute;        // nie wyslano: w nagraniu dluga calkowita cisza (MuteCheck)
         public boolean isAuthError() { return status == 401 || status == 403; }
         // 429 = dzienny limit NOWYCH nagran w NS (serwer nie zawsze dodaje opis ze slowem "limit")
         public boolean isLimitError() { return status == 429 || (err != null && err.toLowerCase(Locale.ROOT).contains("limit")); }
@@ -98,11 +99,15 @@ public class NsClient {
     private static void prog(String key, int stage, double f, boolean shrunk) {
         float pf = (float) Math.max(0, Math.min(1, f));
         float all;
-        if (stage == 0) all = 0.5f * pf;
+        if (stage == 3) all = 0f;           // sprawdzanie nagrania (cisza)
+        else if (stage == 0) all = 0.5f * pf;
         else if (stage == 1) all = shrunk ? 0.5f + 0.5f * pf : pf;
         else all = 1f;
         PROGRESS.put(key, new float[]{all, stage, pf});
     }
+
+    // kontekst aplikacji (pamiec wynikow sprawdzania ciszy) — ustawiany przy starcie aplikacji
+    public static volatile android.content.Context appCtx;
 
     private static void runAsync(java.util.concurrent.Callable<Result> job, Callback cb) {
         NET.execute(() -> {
@@ -484,6 +489,9 @@ public class NsClient {
         runAsync(() -> {
             // dlugie nagranie → mniejsza kopia (limit wielkosci pliku na serwerze NS)
             final String key = file.getName();
+            // dluga calkowita cisza (mikrofon przestal nagrywac) -> NIE wysylamy
+            MuteCheck.Res mute = MuteCheck.check(appCtx, file, f -> prog(key, 3, f, false));
+            if (mute.bad()) { PROGRESS.remove(key); Result mr = new Result(); mr.ok = false; mr.mute = true; mr.err = MuteCheck.describe(mute); return mr; }
             final boolean shrink = UploadShrink.needed(file);
             File up = UploadShrink.forUpload(file, f -> prog(key, 0, f, true));
             UploadShrink.Prog sendP = f -> prog(key, 1, f, shrink);
@@ -514,6 +522,9 @@ public class NsClient {
         runAsync(() -> {
             // dlugie nagranie → mniejsza kopia (limit wielkosci pliku na serwerze NS)
             final String key = file.getName();
+            // dluga calkowita cisza (mikrofon przestal nagrywac) -> NIE wysylamy
+            MuteCheck.Res mute = MuteCheck.check(appCtx, file, f -> prog(key, 3, f, false));
+            if (mute.bad()) { PROGRESS.remove(key); Result mr = new Result(); mr.ok = false; mr.mute = true; mr.err = MuteCheck.describe(mute); return mr; }
             final boolean shrink = UploadShrink.needed(file);
             File up = UploadShrink.forUpload(file, f -> prog(key, 0, f, true));
             UploadShrink.Prog sendP = f -> prog(key, 1, f, shrink);

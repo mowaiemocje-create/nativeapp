@@ -1,0 +1,230 @@
+package com.pitchrec.nativetest;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+// Komunikaty od trenera z workera newspeech-backend:
+//  • /call-notices/mine — "📞 Zadzwoń do trenera" (powtarza sie ten sam blad w korektach).
+//    Kursant NIE zamyka banera sam — znika, gdy trener kliknie "Porozmawialismy" albo zaliczy nagranie.
+//  • /focus/mine — "🎯 Dziś pilnuj" (kryteria + wskazowka trenera) i "achieved" (opanowane).
+// Ostatni dobry stan jest zapamietany — bez sieci pokazujemy go dalej.
+public final class CoachNotices {
+
+    private CoachNotices() { }
+
+    public static final class Notice {
+        public String id = "", recordId = "";
+        public List<String> criteria = new ArrayList<>();
+        public int correctionNo;
+        public boolean acked;
+    }
+
+    public static final class Focus {
+        public List<String> criteria = new ArrayList<>();
+        public String note = "";
+    }
+
+    private static SharedPreferences prefs(Context c) {
+        return c.getSharedPreferences("app_settings", Context.MODE_PRIVATE);
+    }
+
+    private static volatile boolean busy;
+
+    // wlasny watek sieci — nie czeka za dlugimi wysylkami nagran (NsClient ma jeden watek)
+    private static final java.util.concurrent.ExecutorService NET = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    private static void http(String method, String pathAndQuery, String jsonBody, NsClient.Callback cb) {
+        NET.execute(() -> {
+            NsClient.Result r = new NsClient.Result();
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL("https://newspeech-backend.mowaiemocje.workers.dev" + pathAndQuery).openConnection();
+                c.setRequestMethod(method);
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(20000);
+                c.setRequestProperty("Accept", "application/json");
+                if (jsonBody != null) {
+                    c.setDoOutput(true);
+                    c.setRequestProperty("Content-Type", "application/json");
+                    try (java.io.OutputStream os = c.getOutputStream()) { os.write(jsonBody.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+                }
+                r.status = c.getResponseCode();
+                r.ok = r.status >= 200 && r.status < 300;
+                java.io.InputStream is = r.ok ? c.getInputStream() : c.getErrorStream();
+                if (is != null) {
+                    java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                    byte[] b = new byte[8192]; int k;
+                    while ((k = is.read(b)) > 0) bo.write(b, 0, k);
+                    is.close();
+                    r.body = bo.toString("UTF-8");
+                }
+                c.disconnect();
+            } catch (Exception e) { r.ok = false; r.status = 0; }
+            final NsClient.Result fr = r;
+            MAIN.post(() -> cb.done(fr));
+        });
+    }
+
+    private static String auth(SharedPreferences p) {
+        return "ns_token=" + NsClient.enc(p.getString("ns_token", "")) + "&ns_email=" + NsClient.enc(p.getString("ns_email", "")) + "&ns_server=new";
+    }
+
+    // Pobiera oba endpointy (razem). done wywolywane zawsze (na watku glownym), takze bez sieci.
+    public static void refresh(Context ctx, Runnable done) {
+        Context c = ctx.getApplicationContext();
+        SharedPreferences p = prefs(c);
+        if (p.getString("ns_token", null) == null || busy) { if (done != null) done.run(); return; }
+        busy = true;
+        String q = "?" + auth(p);
+        http("GET", "/call-notices/mine" + q, null, r1 -> {
+            try {
+                if (r1.ok && r1.body != null) {
+                    JSONObject o = new JSONObject(r1.body);
+                    if (o.optBoolean("ok", false)) {
+                        JSONArray a = o.optJSONArray("notices");
+                        p.edit().putString("coach_call_json", a == null ? "[]" : a.toString()).apply();
+                    }
+                }
+            } catch (Exception e) { /* zostaje poprzedni stan */ }
+            http("GET", "/focus/mine" + q, null, r2 -> {
+                try {
+                    if (r2.ok && r2.body != null) {
+                        JSONObject o = new JSONObject(r2.body);
+                        if (o.optBoolean("ok", false)) {
+                            JSONObject f = o.optJSONObject("focus");
+                            p.edit().putString("coach_focus_json", f == null ? "" : f.toString()).apply();
+                        }
+                    }
+                } catch (Exception e) { /* zostaje poprzedni stan */ }
+                busy = false;
+                if (done != null) done.run();
+            });
+        });
+    }
+
+    public static List<Notice> notices(Context c) {
+        List<Notice> out = new ArrayList<>();
+        Set<String> acked = prefs(c).getStringSet("coach_acked", new HashSet<>());
+        try {
+            JSONArray a = new JSONArray(prefs(c).getString("coach_call_json", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                Notice n = new Notice();
+                n.id = o.optString("id", "");
+                n.recordId = o.isNull("record_id") ? "" : o.optString("record_id", "");
+                n.correctionNo = o.optInt("correction_no", 0);
+                JSONArray cr = o.optJSONArray("criteria");
+                for (int k = 0; cr != null && k < cr.length(); k++) { String s = cr.optString(k, "").trim(); if (!s.isEmpty()) n.criteria.add(s); }
+                n.acked = (!o.isNull("acked_at") && !o.optString("acked_at", "").isEmpty()) || acked.contains(n.id);
+                out.add(n);
+            }
+        } catch (Exception e) { }
+        return out;
+    }
+
+    public static Notice forRecord(Context c, String recordId) {
+        if (recordId == null || recordId.isEmpty()) return null;
+        for (Notice n : notices(c)) if (recordId.equals(n.recordId)) return n;
+        return null;
+    }
+
+    public static String bannerText(Context c, List<Notice> list) {
+        StringBuilder sb = new StringBuilder();
+        for (Notice n : list) {
+            if (sb.length() > 0) sb.append("\n\n");
+            String what = n.criteria.isEmpty()
+                    ? L.t("powtarza się ten sam błąd")
+                    : L.t("powtarza się błąd:") + " " + android.text.TextUtils.join(", ", n.criteria);
+            sb.append("📞 ").append(L.t("Zadzwoń do trenera")).append(" — ").append(what);
+            if (n.correctionNo > 0) sb.append(" ").append(L.f("({0}. korekta tego nagrania).", n.correctionNo));
+            else sb.append(".");
+        }
+        sb.append("\n").append(L.t("Zanim wyślesz kolejną poprawkę, porozmawiaj z trenerem."));
+        return sb.toString();
+    }
+
+    // "Kursant widzial" — wysylane przy pierwszym wyswietleniu banera
+    public static void ackShown(Context ctx, List<Notice> list) {
+        Context c = ctx.getApplicationContext();
+        SharedPreferences p = prefs(c);
+        for (Notice n : list) {
+            if (n.acked || n.id.isEmpty()) continue;
+            Set<String> sending = SENDING;
+            synchronized (sending) { if (!sending.add(n.id)) continue; }
+            try {
+                JSONObject b = new JSONObject();
+                b.put("ns_token", p.getString("ns_token", ""));
+                b.put("ns_email", p.getString("ns_email", ""));
+                b.put("ns_server", "new");
+                b.put("id", n.id);
+                http("POST", "/call-notices/ack", b.toString(), r -> {
+                    synchronized (SENDING) { SENDING.remove(n.id); }
+                    if (r.ok) {
+                        Set<String> s = new HashSet<>(p.getStringSet("coach_acked", new HashSet<>()));
+                        s.add(n.id);
+                        p.edit().putStringSet("coach_acked", s).apply();
+                    }
+                });
+            } catch (Exception e) { synchronized (SENDING) { SENDING.remove(n.id); } }
+        }
+    }
+
+    private static final Set<String> SENDING = new HashSet<>();
+
+    public static Focus focus(Context c) {
+        String s = prefs(c).getString("coach_focus_json", "");
+        if (s.isEmpty()) return null;
+        try {
+            JSONObject o = new JSONObject(s);
+            Focus f = new Focus();
+            JSONArray cr = o.optJSONArray("criteria");
+            for (int k = 0; cr != null && k < cr.length(); k++) {
+                Object v = cr.opt(k);
+                String nm = v instanceof JSONObject ? ((JSONObject) v).optString("name", "") : String.valueOf(v);
+                if (!nm.trim().isEmpty()) f.criteria.add(nm.trim());
+            }
+            f.note = o.isNull("note") ? "" : o.optString("note", "").trim();
+            return f.criteria.isEmpty() ? null : f;
+        } catch (Exception e) { return null; }
+    }
+
+    // Nowo opanowane kryteria (porownanie z zapamietanymi). Przy pierwszym pobraniu tylko
+    // zapamietujemy stan — gratulacje dopiero za nowe pozycje.
+    public static List<String> takeNewAchieved(Context c) {
+        List<String> out = new ArrayList<>();
+        SharedPreferences p = prefs(c);
+        String s = p.getString("coach_focus_json", "");
+        if (s.isEmpty()) return out;
+        try {
+            JSONArray a = new JSONObject(s).optJSONArray("achieved");
+            if (a == null) return out;
+            boolean first = !p.getBoolean("coach_ach_init", false);
+            Set<String> seen = new HashSet<>(p.getStringSet("coach_ach_seen", new HashSet<>()));
+            boolean changed = false;
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                String nm = o.optString("name", "").trim();
+                if (nm.isEmpty()) continue;
+                String key = nm + "|" + o.optString("at", "");
+                if (seen.add(key)) { changed = true; if (!first) out.add(nm); }
+            }
+            if (changed || first) p.edit().putStringSet("coach_ach_seen", seen).putBoolean("coach_ach_init", true).apply();
+        } catch (Exception e) { }
+        return out;
+    }
+
+    public static void clear(Context c) {
+        prefs(c).edit().remove("coach_call_json").remove("coach_focus_json").remove("coach_acked")
+                .remove("coach_ach_seen").remove("coach_ach_init").apply();
+    }
+}

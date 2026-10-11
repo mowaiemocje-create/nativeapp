@@ -267,12 +267,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         setupBadges();
         redrawHandler.postDelayed(buttonGuard, 400);
         setupGoalLine();
+        setupCoachViews();
+        renderCoach();
         applySliderVisibility();
         showPage("daw");
         // Przypomnienie o 20:00 (nagranie + dziennik) — domyslnie wlaczone
         ReminderReceiver.schedule(this);
         TrainerWatch.schedule(this);
         TrainerWatch.check(this, null); // oceny trenera od ostatniego otwarcia
+        NsClient.appCtx = getApplicationContext();
         AvailWatch.schedule(this);
         AvailWatch.check(this, null);   // kto teraz chetnie porozmawia
         Push.register(this);            // powiadomienia push "Chcę porozmawiać" (od razu)
@@ -650,6 +653,110 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if ("daw".equals(page)) refreshGoal();
     }
 
+    // ── KOMUNIKATY OD TRENERA: "📞 Zadzwoń do trenera" + "🎯 Dziś pilnuj" (worker newspeech-backend) ──
+    private TextView coachBanner, focusBox;
+    private boolean coachOverride;
+    private final java.util.Set<String> coachAllowed = new java.util.HashSet<>();
+    private final Runnable coachPoll = new Runnable() {
+        @Override public void run() {
+            refreshCoach();
+            View r = findViewById(android.R.id.content);
+            if (r != null) { r.removeCallbacks(this); r.postDelayed(this, 5 * 60 * 1000L); }
+        }
+    };
+
+    private void setupCoachViews() {
+        float d = getResources().getDisplayMetrics().density;
+        View header = findViewById(R.id.appHeader);
+        if (header != null && header.getParent() instanceof android.widget.LinearLayout) {
+            android.widget.LinearLayout root = (android.widget.LinearLayout) header.getParent();
+            coachBanner = new TextView(this);
+            coachBanner.setTextColor(Color.WHITE);
+            coachBanner.setTextSize(13.5f);
+            coachBanner.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            coachBanner.setPadding((int) (12 * d), (int) (9 * d), (int) (12 * d), (int) (9 * d));
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable(
+                    android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT, new int[]{Color.parseColor("#C62828"), Color.parseColor("#EF6C00")});
+            g.setCornerRadius(10 * d);
+            coachBanner.setBackground(g);
+            coachBanner.setVisibility(View.GONE);
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins((int) (8 * d), (int) (4 * d), (int) (8 * d), (int) (4 * d));
+            root.addView(coachBanner, root.indexOfChild(header) + 1, lp);
+        }
+        View anchor = goalText != null ? goalText : findViewById(R.id.statusText);
+        if (anchor != null && anchor.getParent() instanceof android.widget.LinearLayout) {
+            android.widget.LinearLayout parent = (android.widget.LinearLayout) anchor.getParent();
+            focusBox = new TextView(this);
+            focusBox.setTextColor(getResources().getColor(R.color.pr_text));
+            focusBox.setTextSize(13f);
+            focusBox.setPadding((int) (10 * d), (int) (7 * d), (int) (10 * d), (int) (7 * d));
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setColor(getResources().getColor(R.color.pr_card));
+            g.setStroke((int) (2 * d), Color.parseColor("#E8820C"));
+            g.setCornerRadius(10 * d);
+            focusBox.setBackground(g);
+            focusBox.setVisibility(View.GONE);
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins((int) (8 * d), (int) (4 * d), (int) (8 * d), (int) (4 * d));
+            parent.addView(focusBox, parent.indexOfChild(anchor), lp);
+        }
+    }
+
+    private void refreshCoach() {
+        if (!isLoggedIn()) { renderCoach(); return; }
+        CoachNotices.refresh(this, () -> { if (!isFinishing()) renderCoach(); });
+    }
+
+    private void renderCoach() {
+        boolean li = isLoggedIn();
+        if (coachBanner != null) {
+            java.util.List<CoachNotices.Notice> ns = li ? CoachNotices.notices(this) : new java.util.ArrayList<>();
+            if (ns.isEmpty()) coachBanner.setVisibility(View.GONE);
+            else {
+                coachBanner.setText(CoachNotices.bannerText(this, ns));
+                coachBanner.setVisibility(View.VISIBLE);
+                CoachNotices.ackShown(this, ns); // trener widzi "kursant widzial"
+            }
+        }
+        if (focusBox != null) {
+            CoachNotices.Focus f = li ? CoachNotices.focus(this) : null;
+            if (f == null) focusBox.setText("");
+            else {
+                String head = "🎯 " + L.t("Dziś pilnuj:") + " " + android.text.TextUtils.join(", ", f.criteria);
+                android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder(head);
+                sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, head.length(), 0);
+                sb.setSpan(new android.text.style.ForegroundColorSpan(Color.parseColor("#E8820C")), 0, head.length(), 0);
+                if (!f.note.isEmpty()) {
+                    int st = sb.length();
+                    sb.append("\n").append(f.note);
+                    sb.setSpan(new android.text.style.RelativeSizeSpan(0.92f), st, sb.length(), 0);
+                }
+                focusBox.setText(sb);
+            }
+            updateFocusVisibility();
+        }
+        if (li && !isFinishing()) {
+            java.util.List<String> got = CoachNotices.takeNewAchieved(this);
+            if (!got.isEmpty()) {
+                StringBuilder m = new StringBuilder();
+                for (String n : got) { if (m.length() > 0) m.append("\n"); m.append("🎉 ").append(L.f("{0} opanowany — trener zdjął go z fokusu!", n)); }
+                new AlertDialog.Builder(this).setTitle("🎉 " + L.t("Gratulacje!")).setMessage(m.toString())
+                        .setPositiveButton(L.t("OK"), null).show();
+            }
+        }
+    }
+
+    // fokus widoczny przed nagraniem i w pauzie; w trakcie nagrywania nie zabiera miejsca wykresowi
+    private void updateFocusVisibility() {
+        if (focusBox == null) return;
+        boolean show = focusBox.getText().length() > 0 && !(isRecording && !isPaused);
+        int v = show ? View.VISIBLE : View.GONE;
+        if (focusBox.getVisibility() != v) focusBox.setVisibility(v);
+    }
+
     // ── CEL DNIA na ekranie nagrywania (z harmonogramu, pewne dane z NS) ──
     private TextView goalText;
 
@@ -942,6 +1049,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
                 updateNavForLogin();
                 refreshAccountSection();
+                refreshCoach();
                 Toast.makeText(this, L.t("✓ Zalogowano do NewSpeech"), Toast.LENGTH_SHORT).show();
             } else {
                 errView.setText("✗ " + r.err);
@@ -952,10 +1060,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private void doLogout() {
         Push.unregister(this); // przed usunieciem danych konta (potrzebny identyfikator)
         prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").remove("special_credit").remove("special_credit_init").remove("harmo_cache").putBoolean("ns_session_expired", false).apply();
+        CoachNotices.clear(this);
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
         updateNavForLogin();
         refreshAccountSection();
+        renderCoach();
     }
 
     // Sekcja "Konto NewSpeech" na gorze Ustawien — zawsze pokazuje JASNY stan:
@@ -1119,7 +1229,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         float all = p == null ? 0f : p[0];
         int stage = p == null ? 1 : (int) p[1];
         int pct = Math.round((p == null ? 0f : p[2]) * 100);
-        String txt = stage == 0 ? L.t("⏳ Zmniejszanie") + " " + pct + "%"
+        String txt = stage == 3 ? L.t("⏳ Sprawdzanie nagrania") + " " + pct + "%"
+                : stage == 0 ? L.t("⏳ Zmniejszanie") + " " + pct + "%"
                 : stage == 2 ? L.t("⏳ Serwer przetwarza…")
                 : L.t("⏳ Wysyłanie") + " " + pct + "%";
         if (!txt.contentEquals(b.getText())) b.setText(txt);
@@ -1145,6 +1256,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             return;
         }
         if ("sent".equals(meta.ns)) { Toast.makeText(this, L.t("☁✓ To nagranie jest już wysłane do NS"), Toast.LENGTH_SHORT).show(); return; }
+        if (!meta.fixRecordId.isEmpty() && !coachOverride && CoachNotices.forRecord(this, meta.fixRecordId) != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("📞 " + L.t("Zadzwoń do trenera"))
+                    .setMessage(L.t("Trener prosi o telefon przed kolejną poprawką. Wysłać mimo to?"))
+                    .setNegativeButton(L.t("Anuluj"), null)
+                    .setPositiveButton(L.t("Wyślij mimo to"), (d, w) -> { coachOverride = true; sendToNs(file); coachOverride = false; })
+                    .show();
+            return;
+        }
         if (meta.fixRecordId.isEmpty() && limitHitToday() && !limitOverride) {
             new AlertDialog.Builder(this)
                     .setCustomTitle(nsLogoTitle(L.t("⛔ Limit na dziś wyczerpany")))
@@ -1171,6 +1291,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 StatsPage.invalidateHarmonogram(this); // nowe nagranie — harmonogram odswiezy sie przy nastepnym wejsciu
                 if (isFix) fixListCache = null;
                 afterSendRefresh();
+            } else if (r.mute) {
+                markNs(file, "error");
+                setStatus("🔇 " + L.t("Nie wysłano — w nagraniu jest długa cisza"));
+                new AlertDialog.Builder(this).setTitle("🔇 " + L.t("Mikrofon przestał nagrywać"))
+                        .setMessage(r.err).setPositiveButton(L.t("OK"), null).show();
             } else if (isFix && r.isLimitError()) {
                 markNs(file, "error");
                 setStatus(L.t("⛔ Poprawka odrzucona z powodu limitu"));
@@ -1250,6 +1375,17 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         RecMeta fm = RecMeta.load(this, f.getName());
         String catId = NsClient.categoryId(fm.cat);
         if (catId == null) { sendNext(todo, idx + 1, okCount); return; }
+        if (!fm.fixRecordId.isEmpty() && !coachAllowed.contains(f.getName()) && CoachNotices.forRecord(this, fm.fixRecordId) != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("📞 " + L.t("Zadzwoń do trenera"))
+                    .setMessage(f.getName() + "\n\n" + L.t("Trener prosi o telefon przed kolejną poprawką. Wysłać mimo to?"))
+                    .setCancelable(false)
+                    .setNegativeButton(L.t("Pomiń"), (d, w) -> sendNext(todo, idx + 1, okCount))
+                    .setPositiveButton(L.t("Wyślij mimo to"), (d, w) -> { coachAllowed.add(f.getName()); sendNext(todo, idx, okCount); })
+                    .show();
+            return;
+        }
+        coachAllowed.remove(f.getName());
         setStatus(L.t("☁ Wysyłanie ") + (idx + 1) + "/" + todo.size() + "…");
         sendingNow.add(f.getName());
         startSendTicker();
@@ -1260,6 +1396,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 markNs(f, "sent");
                 rememberNsId(f, r.body);
                 sendNext(todo, idx + 1, okCount + 1);
+            } else if (r.mute) {
+                // to nagranie pomijamy (dluga cisza), reszte wysylamy dalej
+                markNs(f, "error");
+                Toast.makeText(this, "🔇 " + f.getName() + ": " + r.err, Toast.LENGTH_LONG).show();
+                sendNext(todo, idx + 1, okCount);
             } else if (r.isLimitError() && fm.fixRecordId.isEmpty()) {
                 showDailyLimit(L.f("Wysłano teraz: {0}, czeka: {1}.", okCount, todo.size() - idx));
             } else {
@@ -2818,6 +2959,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // WERSJA KURSANTOW: bez zgody na lokalizacje i wlaczonej lokalizacji nie nagrywamy —
         // pozycja z czasu nagrania jest czescia nagrania (opis, mapa, etykieta dom/teren dla trenera)
         if (!gpsReadyForRecording()) return;
+        refreshCoach(); // "Dziś pilnuj" / "Zadzwoń do trenera" — swieze przed nagraniem
 
         // GPS jak w PitchRec: pozycja z czasu NAGRYWANIA (zapisywana w opisie i nazwie pliku)
         GpsHelper.recordingFix = null;
@@ -3311,6 +3453,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void syncButtons() {
+        updateFocusVisibility();
         if (recordButton == null || playButton == null || pauseButton == null) return;
         recordButton.setButtonText(!isRecording ? getString(R.string.btn_rec) : isPaused ? getString(R.string.btn_resume) : getString(R.string.btn_pause));
         boolean hasFile = loadedFilePath != null || lastSavedFilePath != null;
@@ -3540,6 +3683,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     protected void onResume() {
         super.onResume();
+        // komunikaty od trenera: teraz i co 5 min, dopoki aplikacja jest na ekranie
+        View coachRoot = findViewById(android.R.id.content);
+        if (coachRoot != null) { coachRoot.removeCallbacks(coachPoll); coachRoot.post(coachPoll); }
         LiveAudioData.loggedIn = isLoggedIn();
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
@@ -3549,6 +3695,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // Powrot do apki (np. z powiadomienia o ocenie) — odswiez statusy na liscie nagran
         if ("recs".equals(currentPage) && isLoggedIn())
             NsStatus.refresh(this, () -> runOnUiThread(() -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        View coachRoot = findViewById(android.R.id.content);
+        if (coachRoot != null) coachRoot.removeCallbacks(coachPoll);
     }
 
     private void scheduleRecsPoll() {
