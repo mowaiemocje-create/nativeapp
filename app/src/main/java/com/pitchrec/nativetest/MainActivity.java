@@ -182,9 +182,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.gainMultiplier = (float) Math.pow(10.0, 6.0 / 20.0); // +6dB domyslnie
         gainValueText.setText(L.t("+6.0 dB"));
 
-        zoomSlider.setValue(0.12f); // domyslnie ~8s
-        zoomValueText.setText("8s");
-        pitchWaveView.setZoomSeconds(8f);
+        // ZOOM: bez suwaka — palcami (2 palce) w pauzie / po nagraniu / przy odsluchu.
+        // Nagrywanie zawsze startuje ze stalym widokiem 6 s.
+        zoomSlider.setValue(0.09f);
+        zoomValueText.setText("6s");
+        pitchWaveView.setZoomSeconds(6f);
         zoomSlider.setOnValueChangeListener(v -> {
             if (v < 0.02f) {
                 zoomValueText.setText("ALL");
@@ -712,7 +714,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         int v = prefs().getBoolean("show_sliders", true) ? View.VISIBLE : View.GONE;
         View a = findViewById(R.id.micRow), b = findViewById(R.id.zoomRow);
         if (a != null) a.setVisibility(v);
-        if (b != null) b.setVisibility(v);
+        if (b != null) b.setVisibility(View.GONE); // suwak ZOOM zastapiony gestem dwoma palcami
     }
 
     // Po wyslaniu: swiezy status/cel dnia i ewentualne nowe odznaki (pelna historia z NS)
@@ -1854,7 +1856,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             snd.addView(hint(L.t("W pierwszej sekundzie nagrania bramka sama mierzy szum tła (najlepiej chwilę poczekaj, zanim zaczniesz mówić). Potem ścisza tylko to, co nie jest wyraźnie głośniejsze od szumu. Gdy ucina ciche słowa — zmniejsz siłę; gdy szum dalej słychać — zwiększ.") + measured));
         }
         android.widget.LinearLayout scr = section(c, "scr", "📱  " + L.t("EKRAN NAGRYWANIA"));
-        scr.addView(toggleRow("🎚 " + L.t("Suwaki MIC i ZOOM na ekranie nagrywania"), prefs().getBoolean("show_sliders", true), on -> { prefs().edit().putBoolean("show_sliders", on).apply(); applySliderVisibility(); }));
+        scr.addView(toggleRow("🎚 " + L.t("Suwak MIC na ekranie nagrywania"), prefs().getBoolean("show_sliders", true), on -> { prefs().edit().putBoolean("show_sliders", on).apply(); applySliderVisibility(); }));
         scr.addView(hint(L.t("Gdy mikrofon jest już dobrze ustawiony, możesz je schować — ekran nagrywania będzie prostszy.")));
         scr.addView(toggleRow("🔆 " + L.t("Ekran nie gaśnie (wyłączony wygaszacz)"), keepScreenOnEnabled, on -> { keepScreenOnEnabled = on; applyKeepScreenOnSetting(); saveDawSettings(); }));
         final View[] gpsHolder = {null};
@@ -2851,12 +2853,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         pauseButton.setButtonText(getString(R.string.btn_stop));
         playButton.setButtonEnabled(false);
         pitchWaveView.setLiveMode(true);
-        // Podczas nagrywania zoom zablokowany na 8s — zapobiega przypadkowej zmianie
+        // Podczas nagrywania zoom zablokowany na 6s — zapobiega przypadkowej zmianie
         // widoku w trakcie mowienia.
         zoomSlider.setEnabled(false);
-        zoomSlider.setValue(0.12f);
-        zoomValueText.setText("8s");
-        pitchWaveView.setZoomSeconds(8f);
+        zoomSlider.setValue(0.09f);
+        zoomValueText.setText("6s");
+        pitchWaveView.setZoomSeconds(6f); // nagrywanie: zawsze 6 s
         statusText.setText(getString(R.string.status_recording));
         String[] fxRec = loadFixTarget();
         if (fxRec != null) statusText.setText(L.t("🔴 Nagrywasz poprawkę dla: ") + fxRec[1]);

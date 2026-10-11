@@ -227,48 +227,149 @@ public class PitchWaveView extends View {
     private long lastVisibleStartSample = 0L;
     private float lastVisibleSampleRange = 1f;
 
+    // ── GESTY (tylko pauza / po nagraniu / odsluch; podczas nagrywania staly zoom 6 s) ──
+    // 1 palec: przewijanie, krotkie dotkniecie: ustawienie miejsca odtwarzania.
+    // 2 palce: zoom (plynny, bez skokow) wokol punktu miedzy palcami + przesuwanie.
+    // Wczesniej: brak obslugi drugiego palca — gdy jeden palec sie podnosil, pozycja "skakala"
+    // na drugi palec; fala odswiezala sie co 40 ms, a siatka co klatke, wiec przy przewijaniu
+    // rozjezdzaly sie (wyglad "skakania").
+    public static final float MIN_ZOOM_S = 0.5f, MAX_ZOOM_S = 300f;
+    private int activePointerId = -1;
+    private boolean multiTouch = false;     // w tym gescie byl drugi palec — bez "dotkniecia = odtwarzanie od"
+    private long zoomShownAtMs = 0L;        // etykieta zoomu na wykresie (chwile po zmianie)
+    public interface OnZoomListener { void onZoom(float seconds); }
+    private OnZoomListener zoomListener;
+    public void setOnZoomListener(OnZoomListener l) { zoomListener = l; }
+    public float getZoomSeconds() { return zoomSeconds > 0 ? zoomSeconds : lastVisibleSeconds; }
+
+    private final android.view.ScaleGestureDetector scaleDetector = new android.view.ScaleGestureDetector(getContext(),
+            new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override public boolean onScaleBegin(android.view.ScaleGestureDetector d) {
+                    if (isLiveMode) return false;
+                    multiTouch = true;
+                    return true;
+                }
+                @Override public boolean onScale(android.view.ScaleGestureDetector d) {
+                    if (isLiveMode || getWidth() <= 0) return false;
+                    float sf = d.getScaleFactor();
+                    if (!(sf > 0f) || Float.isInfinite(sf)) return true;
+                    float cur = getZoomSeconds();
+                    float totalSec = LiveAudioData.getTotalSamplesWritten() / (float) LiveAudioData.SAMPLE_RATE;
+                    float maxZ = Math.max(6f, Math.min(MAX_ZOOM_S, totalSec * 1.1f));
+                    float nz = Math.max(MIN_ZOOM_S, Math.min(maxZ, cur / sf));
+                    // punkt pod palcami zostaje w tym samym miejscu ekranu
+                    float fx = Math.max(0f, Math.min(1f, d.getFocusX() / getWidth()));
+                    long anchor = panOffsetSample + (long) (fx * cur * LiveAudioData.SAMPLE_RATE);
+                    zoomSeconds = nz;
+                    panOffsetSample = clampPan(anchor - (long) (fx * nz * LiveAudioData.SAMPLE_RATE), nz);
+                    lastVisibleSeconds = nz;
+                    lastVisibleSampleRange = nz * LiveAudioData.SAMPLE_RATE;
+                    zoomShownAtMs = System.currentTimeMillis();
+                    forceNextRebuild = true;
+                    if (zoomListener != null) zoomListener.onZoom(nz);
+                    invalidate();
+                    return true;
+                }
+            });
+
+    { scaleDetector.setQuickScaleEnabled(false); } // bez zoomu "podwojne dotkniecie + przeciagniecie" (myli sie z przewijaniem)
+
+    private long clampPan(long pan, float visSec) {
+        long totalSamples = LiveAudioData.getTotalSamplesWritten();
+        long maxPan = Math.max(0, totalSamples - (long) (visSec * 0.2f * LiveAudioData.SAMPLE_RATE));
+        long minPan = -(long) (visSec * LiveAudioData.SAMPLE_RATE / 2f);
+        return Math.max(minPan, Math.min(pan, maxPan));
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (isLiveMode) return false;
         lastTouchMs = System.currentTimeMillis();
         // przewijanie w poziomie nie moze byc przejmowane przez przewijana strone
-        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(event.getAction() != MotionEvent.ACTION_UP && event.getAction() != MotionEvent.ACTION_CANCEL);
+        int act = event.getActionMasked();
+        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(act != MotionEvent.ACTION_UP && act != MotionEvent.ACTION_CANCEL);
+        scaleDetector.onTouchEvent(event);
 
-        switch (event.getAction()) {
+        switch (act) {
             case MotionEvent.ACTION_DOWN:
-                touchStartX = event.getX();
+                activePointerId = event.getPointerId(0);
+                touchStartX = event.getX(0);
                 touchLastX = touchStartX;
                 touchMoved = false;
+                multiTouch = false;
                 return true;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                multiTouch = true;
+                touchMoved = true;
+                return true;
+            case MotionEvent.ACTION_POINTER_UP: {
+                // podniesiony palec byl "prowadzacy" — przejmuje drugi, BEZ skoku pozycji
+                int upIdx = event.getActionIndex();
+                if (event.getPointerId(upIdx) == activePointerId) {
+                    int newIdx = upIdx == 0 ? 1 : 0;
+                    activePointerId = event.getPointerId(newIdx);
+                    touchLastX = event.getX(newIdx);
+                } else {
+                    int idx = event.findPointerIndex(activePointerId);
+                    if (idx >= 0) touchLastX = event.getX(idx);
+                }
+                return true;
+            }
             case MotionEvent.ACTION_MOVE: {
-                float dx = event.getX() - touchLastX;
-                touchLastX = event.getX();
-                if (Math.abs(event.getX() - touchStartX) > TAP_THRESHOLD_PX) touchMoved = true;
-
-                float pxPerSecond = getWidth() / Math.max(0.001f, lastVisibleSeconds);
+                if (scaleDetector.isInProgress() || event.getPointerCount() > 1) {
+                    int idx = event.findPointerIndex(activePointerId);
+                    if (idx >= 0) touchLastX = event.getX(idx); // po zoomie przewijanie rusza z biezacego miejsca
+                    return true;
+                }
+                int idx = event.findPointerIndex(activePointerId);
+                if (idx < 0) { activePointerId = event.getPointerId(0); idx = 0; touchLastX = event.getX(0); }
+                float x = event.getX(idx);
+                float dx = x - touchLastX;
+                touchLastX = x;
+                if (Math.abs(x - touchStartX) > TAP_THRESHOLD_PX) touchMoved = true;
+                float vis = getZoomSeconds();
+                float pxPerSecond = getWidth() / Math.max(0.001f, vis);
                 long sampleDelta = (long) (-dx / pxPerSecond * LiveAudioData.SAMPLE_RATE);
-                long newPan = panOffsetSample + sampleDelta;
-                // OGRANICZENIE: nie pozwalamy przewijac dalej niz do konca faktycznie
-                // nagranych/wczytanych danych — bez tego, mozna bylo przewijac w
-                // nieskonczonosc nawet przy krotkim nagraniu.
-                long totalSamples = LiveAudioData.getTotalSamplesWritten();
-                long maxPan = Math.max(0, totalSamples - (long) (lastVisibleSeconds * 0.2f * LiveAudioData.SAMPLE_RATE));
-                long minPan = -(long) (lastVisibleSampleRange / 2f);
-                panOffsetSample = Math.max(minPan, Math.min(newPan, maxPan));
+                // OGRANICZENIE: nie dalej niz koniec nagrania (i pol ekranu przed poczatkiem)
+                panOffsetSample = clampPan(panOffsetSample + sampleDelta, vis);
+                forceNextRebuild = true; // fala i siatka razem, bez opoznienia
                 invalidate();
                 return true;
             }
             case MotionEvent.ACTION_UP:
-                if (!touchMoved) {
-                    float pxPerSecond = getWidth() / Math.max(0.001f, lastVisibleSeconds);
+                if (!touchMoved && !multiTouch) {
+                    float pxPerSecond = getWidth() / Math.max(0.001f, getZoomSeconds());
                     long tappedSample = Math.max(0, panOffsetSample + (long) (event.getX() / pxPerSecond * LiveAudioData.SAMPLE_RATE));
                     playheadSample = tappedSample;
                     if (seekListener != null) seekListener.onSeek(tappedSample);
                     invalidate();
                 }
+                activePointerId = -1;
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                activePointerId = -1;
                 return true;
         }
         return false;
+    }
+
+    // etykieta zoomu (np. "6,0 s") w rogu wykresu przez chwile po zmianie palcami
+    private final Paint zoomLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private void drawZoomLabel(Canvas canvas, int w) {
+        long age = System.currentTimeMillis() - zoomShownAtMs;
+        if (zoomShownAtMs == 0L || age > 1500) return;
+        float z = getZoomSeconds();
+        String t = z < 10 ? String.format(Locale.getDefault(), "🔍 %.1f s", z) : String.format(Locale.getDefault(), "🔍 %.0f s", z);
+        zoomLabelPaint.setTextSize(dp(14));
+        zoomLabelPaint.setColor(0xFFFFFFFF);
+        zoomLabelPaint.setAlpha(age < 1000 ? 230 : (int) (230 * (1500 - age) / 500f));
+        float tw = zoomLabelPaint.measureText(t);
+        float x = w - tw - dp(12), y = dp(RULER_HEIGHT_DP) + dp(22);
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bg.setColor(0x99000000);
+        canvas.drawRoundRect(x - dp(6), y - dp(16), x + tw + dp(6), y + dp(6), dp(8), dp(8), bg);
+        canvas.drawText(t, x, y, zoomLabelPaint);
+        postInvalidateDelayed(50); // wygaszanie etykiety
     }
 
     @Override
@@ -315,8 +416,10 @@ public class PitchWaveView extends View {
         // MIN_REBUILD_INTERVAL_MS — audio dopisuje nowe probki czesciej niz warto
         // przerysowywac caly wykres, wiec bez tego ograniczenia cache przebudowywal sie
         // praktycznie przy kazdej klatce, negujac wiekszosc korzysci buforowania.
+        // Poza nagrywaniem (przewijanie, zoom palcami) przebudowa od razu — inaczej fala
+        // spozniala sie do 40 ms za siatka i obraz "skakal" pod palcem.
         boolean needsRebuild = !cacheValid || forceNextRebuild
-                || (dataChanged && (now - lastRebuildTimeMs >= MIN_REBUILD_INTERVAL_MS));
+                || (dataChanged && (!isLiveMode || now - lastRebuildTimeMs >= MIN_REBUILD_INTERVAL_MS));
 
         if (needsRebuild) {
             rebuildCache(cacheCanvas, w, fullH);
@@ -372,6 +475,7 @@ public class PitchWaveView extends View {
                 canvas.drawLine(px, rulerHeight, px, fullH, playheadPaint);
             }
         }
+        if (!isLiveMode) drawZoomLabel(canvas, w);
     }
 
     // Liczy AKTUALNY (nie throttled/cachowany) widoczny zakres i rysuje siatke+podzialke
