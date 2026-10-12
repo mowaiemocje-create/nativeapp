@@ -5667,10 +5667,15 @@ var CORS = {
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-NS-Auth, X-NS-Email, Email, X-Requested-With, X-NS-Server"
 };
 var worker_default = {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    SPEED_ENV = env;
+    SPEED_CTX = ctx || null;
     try {
+      if (url.pathname === "/student/home" && request.method === "GET") {
+        return await handleStudentHome(request, env, url, ctx);
+      }
       if (url.pathname === "/auth/register" && request.method === "POST") {
         return await handleRegister(request, env);
       }
@@ -5936,6 +5941,9 @@ var worker_default = {
       if (url.pathname === "/favorites/toggle" && request.method === "POST") {
         return await handleFavoriteToggle(request, env);
       }
+      if (url.pathname === "/favorites/note" && request.method === "POST") {
+        return await handleFavoriteNote(request, env);
+      }
       if (url.pathname === "/favorites/list" && request.method === "GET") {
         return await handleFavoritesList(request, env, url);
       }
@@ -6043,8 +6051,10 @@ var worker_default = {
         ).bind(user.id).first();
         const ageMs = syncState ? Date.now() - syncState.last_synced_at * 1e3 : Infinity;
         const forceRefresh = url.searchParams.get("force") === "1";
-        if (forceRefresh || ageMs > 12e4) {
+        if (!syncState) {
           await syncNeedsCorrectionFromPostgres(env, user.id, user.email);
+        } else if (forceRefresh || ageMs > 12e4) {
+          speedLater(syncNeedsCorrectionFromPostgres(env, user.id, user.email));
         }
         const { results } = await env.DB.prepare(
           "SELECT * FROM needs_correction_cache WHERE user_id = ? ORDER BY COALESCE(recorded_at, reviewed_at) ASC"
@@ -6072,7 +6082,7 @@ var worker_default = {
         if (!user) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS" }, 401);
         const dateFrom = url.searchParams.get("date_from") || "1970-01-01";
         const dateTo = url.searchParams.get("date_to") || "2999-12-31";
-        const stats = await fetchHarmonogramStatsFromPostgres(env, user.email, dateFrom, dateTo);
+        const stats = await harmoStatsCached(env, user.email, dateFrom, dateTo);
         return json({ ok: true, ...stats });
       }
       if (url.pathname === "/dashboard" && request.method === "GET") {
@@ -6462,7 +6472,67 @@ async function handleAudioProxy(request, env) {
 }
 __name(handleAudioProxy, "handleAudioProxy");
 __name2(handleAudioProxy, "handleAudioProxy");
+var SPEED_ENV = null;
+var SPEED_CTX = null;
+var SPEED_TABLES_READY = false;
+var TOKEN_MEM = /* @__PURE__ */ new Map();
+async function speedTables(env) {
+  if (SPEED_TABLES_READY || !env || !env.DB) return;
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS ns_token_ok (k TEXT PRIMARY KEY, email TEXT, until INTEGER)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS ns_user_cache (email TEXT PRIMARY KEY, ns_id TEXT, role TEXT, at INTEGER)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS harmo_stats_cache (k TEXT PRIMARY KEY, email TEXT, body TEXT, at INTEGER)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_harmo_stats_email ON harmo_stats_cache(email)")
+  ]);
+  SPEED_TABLES_READY = true;
+}
+__name(speedTables, "speedTables");
+async function tokenKey(nsToken, nsEmail, serverChoice) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode((serverChoice === "old" ? "old" : "new") + "|" + String(nsEmail).toLowerCase() + "|" + nsToken));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+__name(tokenKey, "tokenKey");
+function speedLater(promise) {
+  try {
+    if (SPEED_CTX && SPEED_CTX.waitUntil) {
+      SPEED_CTX.waitUntil(promise);
+      return;
+    }
+  } catch (e) {
+  }
+  promise.catch(() => {
+  });
+}
+__name(speedLater, "speedLater");
 async function validateNsToken(nsToken, nsEmail, serverChoice) {
+  if (!nsToken || !nsEmail) return false;
+  const now = Math.floor(Date.now() / 1e3);
+  let k = null;
+  try {
+    k = await tokenKey(nsToken, nsEmail, serverChoice);
+    const m = TOKEN_MEM.get(k);
+    if (m && m > now) return true;
+    if (SPEED_ENV && SPEED_ENV.DB) {
+      await speedTables(SPEED_ENV);
+      const row = await SPEED_ENV.DB.prepare("SELECT until FROM ns_token_ok WHERE k = ?").bind(k).first();
+      if (row && row.until > now) {
+        TOKEN_MEM.set(k, Math.min(row.until, now + 600));
+        return true;
+      }
+    }
+  } catch (e) {
+  }
+  const ok = await validateNsTokenRemote(nsToken, nsEmail, serverChoice);
+  if (ok && k) {
+    TOKEN_MEM.set(k, now + 600);
+    if (TOKEN_MEM.size > 5e3) TOKEN_MEM.clear();
+    if (SPEED_ENV && SPEED_ENV.DB) speedLater(SPEED_ENV.DB.prepare("INSERT INTO ns_token_ok (k, email, until) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET until = excluded.until").bind(k, String(nsEmail).toLowerCase(), now + 1800).run());
+  }
+  return ok;
+}
+__name(validateNsToken, "validateNsToken");
+__name2(validateNsToken, "validateNsToken");
+async function validateNsTokenRemote(nsToken, nsEmail, serverChoice) {
   if (!nsToken || !nsEmail) return false;
   try {
     const r = await fetch(nsServerBase(serverChoice) + "/api/v1/record_categories", {
@@ -6478,8 +6548,8 @@ async function validateNsToken(nsToken, nsEmail, serverChoice) {
     return false;
   }
 }
-__name(validateNsToken, "validateNsToken");
-__name2(validateNsToken, "validateNsToken");
+__name(validateNsTokenRemote, "validateNsTokenRemote");
+__name2(validateNsTokenRemote, "validateNsTokenRemote");
 async function getOrCreateUserByNsEmail(env, nsEmail, nsName) {
   let user = await env.DB.prepare("SELECT * FROM users WHERE email = ?").bind(nsEmail).first();
   if (user) return user;
@@ -6565,8 +6635,19 @@ async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
         });
       }
     }
-    const stmts = [env.DB.prepare("DELETE FROM needs_correction_cache WHERE user_id = ?").bind(localUserId)];
-    for (const rec of byRecord.values()) {
+    const ncKey = /* @__PURE__ */ __name((id, cat, rv, rc, fs, rd, wa) => [id, cat, rv, rc, fs, rd, wa].map((x) => x == null ? "" : String(x)).join("|"), "ncKey");
+    const newSig = [...byRecord.values()].map((rec) => {
+      const rd = rec.record_date instanceof Date ? rec.record_date.toISOString().slice(0, 10) : rec.record_date ? String(rec.record_date).slice(0, 10) : null;
+      const ts = /* @__PURE__ */ __name((v) => v ? Math.floor(new Date(v).getTime() / 1e3) : null, "ts");
+      return ncKey(rec.ns_record_id, rec.category_name, ts(rec.reviewed_at), ts(rec.recorded_at), ts(rec.first_sent_at), rd, JSON.stringify(rec.weak_areas));
+    }).sort().join(";");
+    const { results: oldRows } = await env.DB.prepare(
+      "SELECT ns_record_id, category_name, reviewed_at, recorded_at, first_sent_at, record_date, weak_areas FROM needs_correction_cache WHERE user_id = ?"
+    ).bind(localUserId).all();
+    const oldSig = (oldRows || []).map((r) => ncKey(r.ns_record_id, r.category_name, r.reviewed_at, r.recorded_at, r.first_sent_at, r.record_date, r.weak_areas)).sort().join(";");
+    const ncUnchanged = newSig === oldSig;
+    const stmts = ncUnchanged ? [] : [env.DB.prepare("DELETE FROM needs_correction_cache WHERE user_id = ?").bind(localUserId)];
+    for (const rec of ncUnchanged ? [] : byRecord.values()) {
       const reviewedTs = rec.reviewed_at ? Math.floor(new Date(rec.reviewed_at).getTime() / 1e3) : null;
       const recordedTs = rec.recorded_at ? Math.floor(new Date(rec.recorded_at).getTime() / 1e3) : null;
       const firstSentTs = rec.first_sent_at ? Math.floor(new Date(rec.first_sent_at).getTime() / 1e3) : null;
@@ -6600,6 +6681,37 @@ async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
 }
 __name(syncNeedsCorrectionFromPostgres, "syncNeedsCorrectionFromPostgres");
 __name2(syncNeedsCorrectionFromPostgres, "syncNeedsCorrectionFromPostgres");
+async function harmoStatsCached(env, nsEmail, dateFrom, dateTo) {
+  const em = String(nsEmail).toLowerCase(), k = em + "|" + dateFrom + "|" + dateTo, now = Math.floor(Date.now() / 1e3);
+  let row = null;
+  try {
+    await speedTables(env);
+    row = await env.DB.prepare("SELECT body, at FROM harmo_stats_cache WHERE k = ?").bind(k).first();
+  } catch (e) {
+  }
+  const recompute = /* @__PURE__ */ __name(async () => {
+    const st = await fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo);
+    try {
+      await env.DB.prepare("INSERT INTO harmo_stats_cache (k, email, body, at) VALUES (?, ?, ?, ?) ON CONFLICT(k) DO UPDATE SET body = excluded.body, at = excluded.at").bind(k, em, JSON.stringify(st), Math.floor(Date.now() / 1e3)).run();
+    } catch (e) {
+    }
+    return st;
+  }, "recompute");
+  if (row) {
+    let st = null;
+    try {
+      st = JSON.parse(row.body);
+    } catch (e) {
+    }
+    if (st) {
+      if (row.at < now - 600) speedLater(recompute());
+      return st;
+    }
+  }
+  return await recompute();
+}
+__name(harmoStatsCached, "harmoStatsCached");
+__name2(harmoStatsCached, "harmoStatsCached");
 async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo) {
   const pgClient = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pgClient.connect();
@@ -7150,13 +7262,32 @@ async function contactAuth(env, nsToken, nsEmail, nsServer) {
   return { email: String(nsEmail).toLowerCase(), admin: role === "admin" };
 }
 __name(contactAuth, "contactAuth");
+var NS_USER_MEM = /* @__PURE__ */ new Map();
 async function nsUserByEmail(env, email) {
   if (!email) return null;
+  const em = String(email).toLowerCase(), now = Math.floor(Date.now() / 1e3);
+  const mm = NS_USER_MEM.get(em);
+  if (mm && mm.until > now) return mm.u;
+  try {
+    await speedTables(env);
+    const row = await env.DB.prepare("SELECT ns_id, role, at FROM ns_user_cache WHERE email = ?").bind(em).first();
+    if (row && row.at > now - 7 * 86400) {
+      const u = { id: row.ns_id, role: row.role };
+      NS_USER_MEM.set(em, { u, until: now + 3600 });
+      return u;
+    }
+  } catch (e) {
+  }
   const pgClient = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   try {
     await pgClient.connect();
     const r = await pgClient.query(`SELECT id, role FROM users WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL LIMIT 1`, [email]);
-    return r.rows[0] || null;
+    const u = r.rows[0] || null;
+    if (u) {
+      NS_USER_MEM.set(em, { u, until: now + 3600 });
+      speedLater(env.DB.prepare("INSERT INTO ns_user_cache (email, ns_id, role, at) VALUES (?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ns_id = excluded.ns_id, role = excluded.role, at = excluded.at").bind(em, String(u.id), u.role || "", now).run());
+    }
+    return u;
   } catch (e) {
     return null;
   } finally {
@@ -7927,6 +8058,44 @@ async function handleCallNoticesClear(request, env) {
 }
 __name(handleCallNoticesClear, "handleCallNoticesClear");
 __name2(handleCallNoticesClear, "handleCallNoticesClear");
+async function handleStudentHome(request, env, url, ctx) {
+  const me = await coachStudentFromRequest(request, env, url, null);
+  if (!me) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  const out = { ok: true, notices: [], focus: null, corrections: null, special_done: null };
+  const jobs = [];
+  if (me.id) {
+    jobs.push((async () => {
+      await ensureCoachTables(env);
+      const rows = (await env.DB.prepare("SELECT * FROM call_notice WHERE ns_student_id = ? AND cleared_at IS NULL ORDER BY created_at DESC").bind(me.id).all()).results || [];
+      out.notices = rows.map(coachNoticeOut);
+      const f = await env.DB.prepare("SELECT * FROM student_focus WHERE ns_student_id = ?").bind(me.id).first();
+      out.focus = coachFocusOut(f);
+    })());
+  }
+  jobs.push((async () => {
+    try {
+      const r = await handleSpecialTasksMine(request, env, url);
+      const d = await r.json();
+      if (d && d.ok) out.special_done = d.done || [];
+    } catch (e) {
+    }
+  })());
+  jobs.push((async () => {
+    try {
+      const u = await getOrCreateUserByNsEmail(env, me.email, null);
+      const syncState = await env.DB.prepare("SELECT last_synced_at FROM needs_correction_sync_state WHERE user_id = ?").bind(u.id).first();
+      if (!syncState) await syncNeedsCorrectionFromPostgres(env, u.id, u.email);
+      else if (Date.now() - syncState.last_synced_at * 1e3 > 12e4) speedLater(syncNeedsCorrectionFromPostgres(env, u.id, u.email));
+      const { results } = await env.DB.prepare("SELECT * FROM needs_correction_cache WHERE user_id = ? ORDER BY COALESCE(recorded_at, reviewed_at) ASC").bind(u.id).all();
+      out.corrections = { count: results.length, entries: results.map((r) => ({ id: r.ns_record_id, category_name: r.category_name, recorded_at: r.recorded_at ?? null, first_sent_at: r.first_sent_at ?? null, record_date: r.record_date ?? null, reviewed_at: r.reviewed_at, weak_areas: JSON.parse(r.weak_areas || "[]"), all_good: !!r.all_good })) };
+    } catch (e) {
+    }
+  })());
+  await Promise.all(jobs);
+  return json(out);
+}
+__name(handleStudentHome, "handleStudentHome");
+__name2(handleStudentHome, "handleStudentHome");
 async function handleCallNoticesMine(request, env, url) {
   const me = await coachStudentFromRequest(request, env, url, null);
   if (!me) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -8790,13 +8959,52 @@ async function handleFavoritesList(request, env, url) {
   const nsServer = url.searchParams.get("ns_server");
   const valid = await validateNsToken(nsToken, nsEmail, nsServer);
   if (!valid) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  await ensureFavNoteColumn(env);
   const { results } = await env.DB.prepare(
-    "SELECT record_id, student_id, student_name, category_name, record_date, ns_path, created_at FROM favorite_records WHERE created_by = ? ORDER BY created_at DESC"
+    "SELECT record_id, student_id, student_name, category_name, record_date, ns_path, created_at, trainer_note, note_updated_at FROM favorite_records WHERE created_by = ? ORDER BY created_at DESC"
   ).bind(nsEmail).all();
   return json({ ok: true, favorites: results });
 }
 __name(handleFavoritesList, "handleFavoritesList");
 __name2(handleFavoritesList, "handleFavoritesList");
+var FAV_NOTE_READY = false;
+async function ensureFavNoteColumn(env) {
+  if (FAV_NOTE_READY) return;
+  try {
+    await env.DB.prepare("SELECT trainer_note, note_updated_at FROM favorite_records LIMIT 1").first();
+  } catch (e) {
+    try {
+      await env.DB.prepare("ALTER TABLE favorite_records ADD COLUMN trainer_note TEXT").run();
+    } catch (e2) {
+    }
+    try {
+      await env.DB.prepare("ALTER TABLE favorite_records ADD COLUMN note_updated_at INTEGER").run();
+    } catch (e3) {
+    }
+  }
+  FAV_NOTE_READY = true;
+}
+__name(ensureFavNoteColumn, "ensureFavNoteColumn");
+__name2(ensureFavNoteColumn, "ensureFavNoteColumn");
+async function handleFavoriteNote(request, env) {
+  let body = {};
+  try {
+    body = await request.json();
+  } catch (e) {
+  }
+  const valid = await validateNsToken(body.ns_token, body.ns_email, body.ns_server);
+  if (!valid) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  const rid = String(body.record_id || "").trim();
+  if (!rid) return json({ error: "Brak record_id" }, 400);
+  const note = String(body.note || "").trim().slice(0, 2e3);
+  await ensureFavNoteColumn(env);
+  const now = Math.floor(Date.now() / 1e3);
+  const r = await env.DB.prepare("UPDATE favorite_records SET trainer_note = ?, note_updated_at = ? WHERE record_id = ? AND created_by = ?").bind(note || null, now, rid, body.ns_email).run();
+  if (!r.meta || !r.meta.changes) return json({ error: "Tego nagrania nie ma w Twoich ulubionych" }, 404);
+  return json({ ok: true, note: note || null, note_updated_at: now });
+}
+__name(handleFavoriteNote, "handleFavoriteNote");
+__name2(handleFavoriteNote, "handleFavoriteNote");
 async function handlePublicTemplatesList(env) {
   const { results } = await env.DB.prepare(
     "SELECT id, name, items, created_by, created_at FROM schedule_templates ORDER BY created_at DESC"
@@ -9022,6 +9230,11 @@ async function pollPostgresChanges(env) {
     const { results: localStudents } = await env.DB.prepare(
       `SELECT id, name, ns_legacy_id, created_at FROM users WHERE ns_legacy_id IN (${placeholders})`
     ).bind(...nsIdList).all();
+    try {
+      await speedPrecompute(env, nsIdList);
+    } catch (e) {
+      errors.push("precompute:" + e.message);
+    }
     for (const student of localStudents) {
       try {
         await syncStudentRecordingsCore(env, student, null);
@@ -9040,6 +9253,35 @@ async function pollPostgresChanges(env) {
 }
 __name(pollPostgresChanges, "pollPostgresChanges");
 __name2(pollPostgresChanges, "pollPostgresChanges");
+async function speedPrecompute(env, nsIdList) {
+  if (!nsIdList || !nsIdList.length) return;
+  await speedTables(env);
+  const pgClient = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  let emails = [];
+  await pgClient.connect();
+  try {
+    const r = await pgClient.query("SELECT email FROM users WHERE id::text = ANY($1::text[]) AND email IS NOT NULL", [nsIdList.map((x) => String(x))]);
+    emails = r.rows.map((x) => String(x.email).toLowerCase());
+  } finally {
+    try {
+      await pgClient.end();
+    } catch (e) {
+    }
+  }
+  for (const em of emails.slice(0, 40)) {
+    try {
+      await env.DB.prepare("DELETE FROM harmo_stats_cache WHERE email = ?").bind(em).run();
+    } catch (e) {
+    }
+    try {
+      const u = await env.DB.prepare("SELECT u.id, u.email FROM users u JOIN needs_correction_sync_state s ON s.user_id = u.id WHERE LOWER(u.email) = ?").bind(em).first();
+      if (u) await syncNeedsCorrectionFromPostgres(env, u.id, u.email);
+    } catch (e) {
+    }
+  }
+}
+__name(speedPrecompute, "speedPrecompute");
+__name2(speedPrecompute, "speedPrecompute");
 async function handleUploadRecording(request, env, user) {
   const formData = await request.formData();
   const file = formData.get("file");
