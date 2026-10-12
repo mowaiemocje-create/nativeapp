@@ -123,7 +123,12 @@ public final class CoachNotices {
                 n.recordId = o.isNull("record_id") ? "" : o.optString("record_id", "");
                 n.correctionNo = o.optInt("correction_no", 0);
                 JSONArray cr = o.optJSONArray("criteria");
-                for (int k = 0; cr != null && k < cr.length(); k++) { String s = cr.optString(k, "").trim(); if (!s.isEmpty()) n.criteria.add(s); }
+                for (int k = 0; cr != null && k < cr.length(); k++) {
+                    String s = RateNames.fixName(cr.optString(k, ""));
+                    boolean dup = false;
+                    for (String x : n.criteria) if (x.equalsIgnoreCase(s)) dup = true;
+                    if (!s.isEmpty() && !dup) n.criteria.add(s);
+                }
                 n.acked = (!o.isNull("acked_at") && !o.optString("acked_at", "").isEmpty()) || acked.contains(n.id);
                 out.add(n);
             }

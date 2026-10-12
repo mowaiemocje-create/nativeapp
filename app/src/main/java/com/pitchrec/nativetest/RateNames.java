@@ -114,10 +114,18 @@ public final class RateNames {
 
     private static String clean(String s) { return s == null || "null".equals(s) ? "" : s.trim(); }
 
+    // Nazwy z NS bywaja zapisane bez spacji ("Lekkiwydech") — poprawna polska nazwa
+    public static String fixName(String n) {
+        if (n == null) return "";
+        String t = n.trim();
+        if (t.equalsIgnoreCase("Lekkiwydech")) return "Lekki wydech";
+        return t;
+    }
+
     // Nazwa po polsku -> w jezyku aplikacji (gdy nie ma tlumaczenia — bez zmian)
     public static synchronized String tr(String pl) {
         if (pl == null) return "";
-        String s = pl.trim();
+        String s = fixName(pl);
         String l = L.lang();
         if (s.isEmpty() || "pl".equals(l)) return s;
         String key = s.toLowerCase(Locale.ROOT);

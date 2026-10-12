@@ -282,13 +282,18 @@ public class NsClient {
                             StringBuilder sb = new StringBuilder();
                             JSONArray wk = o.optJSONArray("weak_areas");
                             if (wk != null) {
-                                for (int j = 0; j < Math.min(4, wk.length()); j++) {
+                                java.util.Set<String> seen = new java.util.HashSet<>();
+                                int shown = 0;
+                                for (int j = 0; j < wk.length() && shown < 4; j++) {
                                     JSONObject w = wk.optJSONObject(j);
                                     if (w == null) continue;
+                                    String cn = RateNames.fixName(w.optString("category_name", ""));
+                                    if (!seen.add(cn.toLowerCase(Locale.ROOT))) continue; // ten sam element tylko raz
                                     String unit = w.optString("unit_name", "");
                                     if (unit.isEmpty()) unit = w.optInt("percent_mark", 0) + "%";
                                     if (sb.length() > 0) sb.append("\n");
-                                    sb.append("• ").append(RateNames.tr(w.optString("category_name", ""))).append(" — ").append(RateNames.tr(unit));
+                                    sb.append("• ").append(RateNames.tr(cn)).append(" — ").append(RateNames.tr(unit));
+                                    shown++;
                                 }
                             }
                             fe.weakText = sb.toString();
@@ -497,6 +502,7 @@ public class NsClient {
             StringBuilder sb = new StringBuilder();
             JSONArray rates = o.optJSONArray("record_rates");
             int weak = 0;
+            java.util.Set<String> seen = new java.util.HashSet<>();
             for (int j = 0; rates != null && j < rates.length(); j++) {
                 JSONObject rr = rates.optJSONObject(j);
                 if (rr == null) continue;
@@ -504,7 +510,8 @@ public class NsClient {
                 if (unit == null || unit.optInt("percent_mark", 100) >= 100) continue;
                 weak++;
                 if (weak > 4) continue;
-                String cn = rc == null ? "" : (has(rc, "name_pl") ? rc.optString("name_pl", "") : rc.optString("name", ""));
+                String cn = RateNames.fixName(rc == null ? "" : (has(rc, "name_pl") ? rc.optString("name_pl", "") : rc.optString("name", "")));
+                if (!seen.add(cn.toLowerCase(Locale.ROOT))) { weak--; continue; }
                 String un = has(unit, "name_pl") ? unit.optString("name_pl", "") : has(unit, "name") ? unit.optString("name", "") : unit.optInt("percent_mark", 0) + "%";
                 if (sb.length() > 0) sb.append("\n");
                 sb.append("• ").append(RateNames.tr(cn)).append(" — ").append(RateNames.tr(un));
