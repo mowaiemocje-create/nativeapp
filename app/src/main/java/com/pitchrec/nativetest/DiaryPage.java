@@ -122,7 +122,8 @@ public class DiaryPage {
 
     // DOWODEM są tylko nagrania WYSŁANE do NewSpeech (to, co jest na serwerze), nie pliki w telefonie.
     // Dzisiejsze rekordy kursanta: wysłane albo poprawione dziś. Z telefonu bierzemy tylko emocję z opisu.
-    private static final class SrvRec { String id, cat; }
+    private static final class SrvRec { String id, cat; int emo; }
+    private static final java.util.regex.Pattern EMO_IN_NAME = java.util.regex.Pattern.compile("-(luz|komfortowo|neutralnie|niekomfortowo|stres)(?=[-_.])");
     private List<SrvRec> serverToday = new ArrayList<>();
 
     private void loadServerToday(Runnable then) {
@@ -140,6 +141,9 @@ public class DiaryPage {
                 SrvRec s = new SrvRec();
                 s.id = o.optString("id", "");
                 s.cat = nm;
+                // emocja z nazwy pliku na serwerze (PitchRec dopisuje ją do nazwy, np. "-luz")
+                java.util.regex.Matcher em = EMO_IN_NAME.matcher(o.toString());
+                if (em.find()) s.emo = java.util.Arrays.asList(RecMeta.EMOTION_LABELS).indexOf(em.group(1));
                 out.add(s);
             }
             serverToday = out;
@@ -735,6 +739,7 @@ public class DiaryPage {
             n++;
             cats.add(c);
             Integer e = emo.get(r.id);
+            if (e == null && r.emo >= 1 && r.emo <= 5) e = r.emo;
             if (e != null) {
                 emoSum += e; emoN++;
                 int[] x = emoByCat.get(c);
