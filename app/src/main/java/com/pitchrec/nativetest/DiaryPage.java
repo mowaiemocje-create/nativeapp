@@ -732,18 +732,29 @@ public class DiaryPage {
         if (files == null) return;
         String t = today();
         SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        boolean fam = false, other = false;
+        // kategoria nagrania -> z kim (slownik NS: rodzina, praca / szkola, znajomi, obcy)
+        java.util.Map<String, String[]> who = new java.util.HashMap<>();
+        who.put("Rodzina", new String[]{"rodzin"});
+        who.put("Telefon rodzina/znajomi", new String[]{"rodzin", "znajom"});
+        who.put("Przyjaciele", new String[]{"znajom"});
+        who.put("Praca / Szkoła", new String[]{"prac", "szkoł"});
+        who.put("Phone do Kursanta/Trenera", new String[]{"znajom"});
+        who.put("W grupie", new String[]{"znajom"});
+        java.util.Set<String> keys = new java.util.HashSet<>();
         for (java.io.File f : files) {
             if (!t.equals(df.format(new Date(f.lastModified())))) continue;
             String cat = RecMeta.load(a, f.getName()).cat;
-            if ("Rodzina".equals(cat)) fam = true; else if (!cat.isEmpty()) other = true;
+            if (cat.isEmpty() || "Special".equals(cat)) continue;
+            String[] k = who.get(cat);
+            if (k == null) k = new String[]{"obc"};
+            java.util.Collections.addAll(keys, k);
         }
         for (int i = 0; i < successPeople.length(); i++) {
             JSONObject o = successPeople.optJSONObject(i);
             if (o == null) continue;
             String n = name(o).toLowerCase(Locale.ROOT);
-            if (fam && n.contains("rodzin")) draft.successWho.add(o.optString("id", ""));
-            if (other && n.contains("obc")) draft.successWho.add(o.optString("id", ""));
+            if (n.startsWith("nikt")) continue;
+            for (String k : keys) if (n.contains(k)) { String id = o.optString("id", ""); if (!draft.successWho.contains(id)) draft.successWho.add(id); break; }
         }
     }
 
