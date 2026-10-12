@@ -2,7 +2,9 @@ name: Kopia workera newspeech-backend
 
 # Co 30 min (i na żądanie) pobiera AKTUALNIE WDROŻONY worker newspeech-backend z Cloudflare
 # i zapisuje go na osobnej gałęzi "worker" tego repo (plik worker.js).
-# Dzięki temu Claude zawsze ma najnowszą wersję workera bez ręcznego pobierania.
+# Dzięki temu Claude zawsze ma najnowszą WDROŻONĄ wersję workera bez ręcznego pobierania.
+# Uwaga: to wersja po spakowaniu przez wrangler (bez komentarzy) — służy do sprawdzenia,
+# czy ktoś nie zmienił workera, a źródłem do edycji pozostaje ~/newspeech-backend/worker.js.
 # Gałąź "worker" NIE uruchamia budowania aplikacji (build.yml działa tylko na main).
 #
 # Potrzebne sekrety (Settings → Secrets and variables → Actions):
@@ -37,6 +39,20 @@ jobs:
           curl -sS --fail -H "Authorization: Bearer $CF_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/newspeech-backend/content/v2" \
             -o /tmp/worker.js
+          # Cloudflare oddaje plik w kopercie "multipart" — wyjmujemy z niej sam kod workera
+          python3 - <<'PY'
+          import re
+          b = open('/tmp/worker.js', 'rb').read()
+          m = re.match(rb'--([^\r\n]+)\r?\n', b)
+          if m:
+              bd = m.group(1)
+              for part in b.split(b'--' + bd):
+                  if b'name="worker.js"' in part or b'application/javascript' in part:
+                      body = re.split(rb'\r?\n\r?\n', part, 1)[1]
+                      body = re.sub(rb'\r?\n$', b'', body)
+                      open('/tmp/worker.js', 'wb').write(body + b'\n')
+                      break
+          PY
           SIZE=$(wc -c < /tmp/worker.js)
           echo "Pobrano $SIZE bajtów"
           # zabezpieczenie: zamiast workera przyszedł komunikat błędu albo pusty plik
