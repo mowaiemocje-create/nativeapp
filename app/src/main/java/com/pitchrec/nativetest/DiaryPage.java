@@ -55,6 +55,8 @@ public class DiaryPage {
         int tiredness = 5, motivation = 5, coffee = 0;
         double sleep = 7;
         String activity = null;     // "tak" / "nie"
+        boolean autoDone = false;   // podpowiedzi z dzisiejszych nagran juz naniesione
+        String autoSummary = null;
     }
 
     private static Draft draft;
@@ -275,6 +277,16 @@ public class DiaryPage {
             TextView info = Ui.text(a, L.t("Dzisiejszy wpis już istnieje — możesz go poprawić i zapisać ponownie."), 12f, R.color.pr_muted);
             info.setPadding(0, 0, 0, (int) (8 * d));
             root.addView(info);
+        }
+
+        // Czesc dziennika z dzisiejszych nagran — kursant tylko sprawdza i dokancza
+        if (!draft.locked && !draft.autoDone && "".equals(draft.existingId)) { draft.autoDone = true; draft.autoSummary = autoFillFromRecordings(); }
+        if (!draft.locked && draft.autoSummary != null) {
+            TextView auto = Ui.text(a, draft.autoSummary, 12f, R.color.pr_text);
+            auto.setPadding((int) (10 * d), (int) (8 * d), (int) (10 * d), (int) (8 * d));
+            auto.setBackground(Ui.rounded((Ui.col(a, R.color.pr_accent) & 0x00FFFFFF) | 0x1A000000, Ui.col(a, R.color.pr_accent), d, 8 * d));
+            root.addView(auto);
+            root.addView(Ui.spacer(a, 8));
         }
 
         // Cwiczenia relaksacyjne
@@ -639,6 +651,78 @@ public class DiaryPage {
             fl.addView(c);
         }
         wrap.addView(fl);
+    }
+
+    // ── DZIENNIK Z NAGRAN ──
+    // Z dzisiejszych opisanych nagran: sukcesy (tak), sytuacje latwe/trudne (z emocji: luz/komfortowo
+    // = latwe, niekomfortowo/stres = trudne) i samopoczucie (srednia emocji). Tylko "tak" i tylko
+    // w polach jeszcze nieuzupelnionych — kursant moze wszystko zmienic.
+    static final java.util.Set<String> OUTDOOR = new java.util.HashSet<>(java.util.Arrays.asList(
+            "Sklepy", "Przechodzień", "Restauracja Kelner", "McDrive, DriveThru", "Miasto - inne", "Wystąpienie", "Praca / Szkoła", "W grupie"));
+
+    private String autoFillFromRecordings() {
+        java.io.File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files == null) return null;
+        String t = today();
+        SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        java.util.LinkedHashSet<String> cats = new java.util.LinkedHashSet<>();
+        int n = 0, emoSum = 0, emoN = 0;
+        java.util.Map<String, int[]> emoByCat = new java.util.HashMap<>();
+        for (java.io.File f : files) {
+            if (!t.equals(df.format(new Date(f.lastModified())))) continue;
+            RecMeta m = RecMeta.load(a, f.getName());
+            if (m.cat.isEmpty() || "Special".equals(m.cat)) continue;
+            n++;
+            cats.add(m.cat);
+            if (m.emotion >= 1 && m.emotion <= 5) {
+                emoSum += m.emotion; emoN++;
+                int[] e = emoByCat.get(m.cat);
+                if (e == null) { e = new int[2]; emoByCat.put(m.cat, e); }
+                e[0] += m.emotion; e[1]++;
+            }
+        }
+        if (n == 0) return null;
+        List<String> done = new ArrayList<>();
+        boolean outdoor = false, initiated = false, shop = false, phone = false;
+        for (String c : cats) {
+            if (OUTDOOR.contains(c)) outdoor = true;
+            if ("Przechodzień".equals(c) || "Telefon do miasta".equals(c)) initiated = true;
+            if ("Sklepy".equals(c) || "Restauracja Kelner".equals(c) || "McDrive, DriveThru".equals(c)) shop = true;
+            if (c.startsWith("Telefon") || c.startsWith("Phone")) phone = true;
+        }
+        if (outdoor && draft.success.get("spoke") == null) { draft.success.put("spoke", true); done.add(L.t("rozmowa poza domem")); }
+        if (initiated && draft.success.get("initiated") == null) { draft.success.put("initiated", true); done.add(L.t("rozmowa zaczęta pierwszy")); }
+        if (shop && draft.success.get("shop") == null) { draft.success.put("shop", true); done.add(L.t("sklep / zamówienie")); }
+        if (phone && draft.success.get("phone") == null) { draft.success.put("phone", true); done.add(L.t("telefon")); }
+        java.util.Set<String> sit = new java.util.HashSet<>(java.util.Arrays.asList(SITUATIONS));
+        List<String> easy = new ArrayList<>(), hard = new ArrayList<>();
+        for (java.util.Map.Entry<String, int[]> e : emoByCat.entrySet()) {
+            if (!sit.contains(e.getKey())) continue;
+            double avg = e.getValue()[0] / (double) e.getValue()[1];
+            if (avg <= 2.0 && draft.easy.isEmpty()) easy.add(e.getKey());
+            else if (avg >= 4.0 && draft.hard.isEmpty()) hard.add(e.getKey());
+        }
+        draft.easy.addAll(easy);
+        draft.hard.addAll(hard);
+        if (!easy.isEmpty()) done.add(L.t("łatwe:") + " " + catList(easy));
+        if (!hard.isEmpty()) done.add(L.t("trudne:") + " " + catList(hard));
+        if (draft.feelingId == null && emoN > 0 && feelings != null) {
+            double avg = emoSum / (double) emoN;
+            String want = avg <= 1.5 ? "wyśmienite" : avg <= 2.3 ? "bardzo dobre" : avg <= 3.4 ? "dobre" : "słabe";
+            for (int i = 0; i < feelings.length(); i++) {
+                JSONObject o = feelings.optJSONObject(i);
+                if (o != null && name(o).trim().equalsIgnoreCase(want)) { draft.feelingId = o.optString("id", ""); done.add(L.t("samopoczucie:") + " " + L.t(name(o))); break; }
+            }
+        }
+        if (done.isEmpty()) return null;
+        return "✨ " + L.f("Część dziennika uzupełniona z dzisiejszych nagrań ({0}):", n) + " " + android.text.TextUtils.join(", ", done)
+                + ".\n" + L.t("Sprawdź i dokończ resztę — możesz wszystko zmienić.");
+    }
+
+    private static String catList(List<String> l) {
+        List<String> o = new ArrayList<>();
+        for (String c : l) o.add(L.cat(c));
+        return android.text.TextUtils.join(", ", o);
     }
 
     // Jak w PWA: jesli dzis sa nagrania, "Z kim sukcesy" podpowiada Rodzine / Obcych.
