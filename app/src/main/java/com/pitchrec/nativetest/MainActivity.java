@@ -267,7 +267,9 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         setupBadges();
         redrawHandler.postDelayed(buttonGuard, 400);
         setupGoalLine();
+        NsClient.appCtx = getApplicationContext();
         setupCoachViews();
+        if (isLoggedIn()) fixListCache = NsClient.cachedFix();
         renderCoach();
         applySliderVisibility();
         showPage("daw");
@@ -707,7 +709,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void refreshCoach() {
         if (!isLoggedIn()) { renderCoach(); return; }
-        CoachNotices.refresh(this, () -> { if (!isFinishing()) renderCoach(); });
+        CoachNotices.refresh(this, () -> {
+            if (isFinishing()) return;
+            // /student/home przyniósł też świeżą listę KOREKTA — od razu w pamięci (odznaka, karta)
+            if (!"fix".equals(currentPage)) { java.util.List<NsClient.FixEntry> fl = NsClient.cachedFix(); if (fl != null) { fixListCache = fl; updateBadges(); } }
+            renderCoach();
+        });
     }
 
     private void renderCoach() {
@@ -1060,7 +1067,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void doLogout() {
         Push.unregister(this); // przed usunieciem danych konta (potrzebny identyfikator)
-        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").remove("special_credit").remove("special_credit_init").remove("harmo_cache").putBoolean("ns_session_expired", false).apply();
+        prefs().edit().remove("ns_token").remove("ns_user_id").remove("contact_list_json").remove("contact_list_at").remove("call_days_json").remove("call_days_seen").remove("call_days_done").remove("inbox_json").remove("special_credit").remove("special_credit_init").remove("harmo_cache").remove("fix_cache_json").remove("fix_cache_at").putBoolean("ns_session_expired", false).apply();
+        fixListCache = null;
         CoachNotices.clear(this);
         nsAuthState = "none";
         nsAuthCheckedAt = 0L;
@@ -2458,6 +2466,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         refresh.setOnClickListener(v -> renderFixPage(true));
         head.addView(refresh);
         c.addView(head);
+        if (fixListCache == null) fixListCache = NsClient.cachedFix(); // zapisana w telefonie — widać od razu
         // Najpierw (jesli jest) poprzednia lista — od razu widoczna — a w tle ZAWSZE swieze dane
         // z serwera (force), zeby nowe oceny trenera pojawialy sie bez czekania na cache.
         TextView loading = Ui.text(this, fixListCache != null ? L.t("⟳ Odświeżanie…") : L.t("⏳ Wczytywanie…"), 12f, R.color.pr_muted);

@@ -84,6 +84,30 @@ public final class CoachNotices {
         if (p.getString("ns_token", null) == null || busy) { if (done != null) done.run(); return; }
         busy = true;
         String q = "?" + auth(p);
+        // PRZYSPIESZENIE: jedno zapytanie /student/home (komunikaty + fokus + lista KOREKTA);
+        // starszy worker bez tego adresu -> dwa osobne zapytania jak dotad
+        http("GET", "/student/home" + q, null, rh -> {
+            boolean handled = false;
+            try {
+                if (rh.ok && rh.body != null) {
+                    JSONObject o = new JSONObject(rh.body);
+                    if (o.optBoolean("ok", false)) {
+                        JSONArray a = o.optJSONArray("notices");
+                        JSONObject f = o.optJSONObject("focus");
+                        p.edit().putString("coach_call_json", a == null ? "[]" : a.toString())
+                                .putString("coach_focus_json", f == null ? "" : f.toString()).apply();
+                        JSONObject cor = o.optJSONObject("corrections");
+                        if (cor != null && cor.optJSONArray("entries") != null) NsClient.saveFixCache(cor.optJSONArray("entries").toString());
+                        handled = true;
+                    }
+                }
+            } catch (Exception e) { }
+            if (handled || rh.status == 401 || rh.status == 403) { busy = false; if (done != null) done.run(); return; }
+            refreshSeparate(p, q, done);
+        });
+    }
+
+    private static void refreshSeparate(SharedPreferences p, String q, Runnable done) {
         http("GET", "/call-notices/mine" + q, null, r1 -> {
             try {
                 if (r1.ok && r1.body != null) {

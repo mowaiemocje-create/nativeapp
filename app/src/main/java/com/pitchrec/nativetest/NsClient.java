@@ -90,6 +90,18 @@ public class NsClient {
     public interface Callback { void done(Result r); }
 
     private static final ExecutorService NET = Executors.newSingleThreadExecutor();
+    // PRZYSPIESZENIE: szybkie odczyty (korekty, harmonogram, komunikaty) NIE czekają w kolejce za wysyłką nagrań
+    private static final ExecutorService FAST = Executors.newFixedThreadPool(3);
+
+    private static void runFast(java.util.concurrent.Callable<Result> job, Callback cb) {
+        FAST.execute(() -> {
+            Result r;
+            try { r = job.call(); }
+            catch (Exception e) { r = new Result(); r.ok = false; r.status = 0; r.err = L.t("Brak połączenia z serwerem NewSpeech"); }
+            final Result fr = r;
+            MAIN.post(() -> cb.done(fr));
+        });
+    }
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     // POSTEP WYSYLKI nagrania (klucz: nazwa oryginalnego pliku) — dla przycisku "Wysyłanie…".
@@ -247,8 +259,61 @@ public class NsClient {
 
     public interface FixCallback { void done(java.util.List<FixEntry> list, String err); }
 
+    // Lista KOREKTA z odpowiedzi backendu (needs-correction / student/home)
+    public static java.util.List<FixEntry> parseFix(JSONArray arr) {
+        java.util.List<FixEntry> list = new java.util.ArrayList<>();
+        for (int i = 0; arr != null && i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            FixEntry fe = new FixEntry();
+            fe.id = o.optString("id", "");
+            fe.categoryName = o.optString("category_name", "");
+            fe.reviewedAt = o.optLong("reviewed_at", 0L);
+            fe.recordedAt = o.isNull("recorded_at") ? 0L : o.optLong("recorded_at", 0L);
+            fe.firstSentAt = o.isNull("first_sent_at") ? 0L : o.optLong("first_sent_at", 0L);
+            fe.recordDate = o.isNull("record_date") ? "" : o.optString("record_date", "");
+            fe.allGood = o.optBoolean("all_good", false);
+            StringBuilder sb = new StringBuilder();
+            JSONArray wk = o.optJSONArray("weak_areas");
+            if (wk != null) {
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                int shown = 0;
+                for (int j = 0; j < wk.length() && shown < 4; j++) {
+                    JSONObject w = wk.optJSONObject(j);
+                    if (w == null) continue;
+                    String cn = RateNames.fixName(w.optString("category_name", ""));
+                    if (!seen.add(cn.toLowerCase(Locale.ROOT))) continue; // ten sam element tylko raz
+                    String unit = w.optString("unit_name", "");
+                    if (unit.isEmpty()) unit = w.optInt("percent_mark", 0) + "%";
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append("• ").append(RateNames.tr(cn)).append(" — ").append(RateNames.tr(unit));
+                    shown++;
+                }
+            }
+            fe.weakText = sb.toString();
+            if (!fe.id.isEmpty()) list.add(fe);
+        }
+        return list;
+    }
+
+    // PRZYSPIESZENIE: ostatnia lista KOREKTA zapisana w telefonie — pokazywana od razu po otwarciu
+    public static void saveFixCache(String entriesJson) {
+        android.content.Context c = appCtx;
+        if (c == null || entriesJson == null) return;
+        c.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).edit()
+                .putString("fix_cache_json", entriesJson).putLong("fix_cache_at", System.currentTimeMillis()).apply();
+    }
+
+    public static java.util.List<FixEntry> cachedFix() {
+        android.content.Context c = appCtx;
+        if (c == null) return null;
+        String s = c.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE).getString("fix_cache_json", null);
+        if (s == null) return null;
+        try { return parseFix(new JSONArray(s)); } catch (Exception e) { return null; }
+    }
+
     public static void fetchNeedsCorrection(String token, String email, boolean force, FixCallback cb) {
-        NET.execute(() -> {
+        FAST.execute(() -> {
             java.util.List<FixEntry> list = new java.util.ArrayList<>();
             String err = null;
             try {
@@ -268,37 +333,8 @@ public class NsClient {
                     if (!d.optBoolean("ok", false)) err = d.optString("error", L.t("Błąd serwera"));
                     JSONArray arr = d.optJSONArray("entries");
                     if (arr != null) {
-                        for (int i = 0; i < arr.length(); i++) {
-                            JSONObject o = arr.optJSONObject(i);
-                            if (o == null) continue;
-                            FixEntry fe = new FixEntry();
-                            fe.id = o.optString("id", "");
-                            fe.categoryName = o.optString("category_name", "");
-                            fe.reviewedAt = o.optLong("reviewed_at", 0L);
-                            fe.recordedAt = o.isNull("recorded_at") ? 0L : o.optLong("recorded_at", 0L);
-                            fe.firstSentAt = o.isNull("first_sent_at") ? 0L : o.optLong("first_sent_at", 0L);
-                            fe.recordDate = o.isNull("record_date") ? "" : o.optString("record_date", "");
-                            fe.allGood = o.optBoolean("all_good", false);
-                            StringBuilder sb = new StringBuilder();
-                            JSONArray wk = o.optJSONArray("weak_areas");
-                            if (wk != null) {
-                                java.util.Set<String> seen = new java.util.HashSet<>();
-                                int shown = 0;
-                                for (int j = 0; j < wk.length() && shown < 4; j++) {
-                                    JSONObject w = wk.optJSONObject(j);
-                                    if (w == null) continue;
-                                    String cn = RateNames.fixName(w.optString("category_name", ""));
-                                    if (!seen.add(cn.toLowerCase(Locale.ROOT))) continue; // ten sam element tylko raz
-                                    String unit = w.optString("unit_name", "");
-                                    if (unit.isEmpty()) unit = w.optInt("percent_mark", 0) + "%";
-                                    if (sb.length() > 0) sb.append("\n");
-                                    sb.append("• ").append(RateNames.tr(cn)).append(" — ").append(RateNames.tr(unit));
-                                    shown++;
-                                }
-                            }
-                            fe.weakText = sb.toString();
-                            if (!fe.id.isEmpty()) list.add(fe);
-                        }
+                        list.addAll(parseFix(arr));
+                        if (err == null) saveFixCache(arr.toString());
                     }
                 }
             } catch (Exception e) {
@@ -317,7 +353,8 @@ public class NsClient {
 
     // ── Ogolne zapytanie do NS (JSON / formularz) — uzywane przez Dziennik i Statystyki ──
     public static void request(String method, String path, String token, String email, String contentType, byte[] body, Callback cb) {
-        runAsync(() -> {
+        ("GET".equals(method) ? (java.util.function.BiConsumer<java.util.concurrent.Callable<Result>, Callback>) NsClient::runFast
+                : (java.util.function.BiConsumer<java.util.concurrent.Callable<Result>, Callback>) NsClient::runAsync).accept(() -> {
             HttpURLConnection c = open(path, method, token, email);
             c.setReadTimeout(30000);
             if (body != null) {
@@ -331,7 +368,7 @@ public class NsClient {
 
     // Zapytanie do naszego nowego backendu (Cloudflare Worker "newspeech-backend")
     public static void backend(String method, String pathAndQuery, String jsonBody, Callback cb) {
-        runAsync(() -> {
+        runFast(() -> {
             Result br;
             try { br = backendNow(method, pathAndQuery, jsonBody); }
             catch (Exception e) { br = new Result(); br.ok = false; br.status = 0; br.err = L.t("Brak połączenia z serwerem"); }
