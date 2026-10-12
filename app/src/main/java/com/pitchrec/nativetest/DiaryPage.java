@@ -280,7 +280,8 @@ public class DiaryPage {
         }
 
         // Czesc dziennika z dzisiejszych nagran — kursant tylko sprawdza i dokancza
-        if (!draft.locked && !draft.autoDone && "".equals(draft.existingId)) { draft.autoDone = true; draft.autoSummary = autoFillFromRecordings(); }
+        // za każdym otwarciem (także gdy wpis już zapisano, ale nie jest zablokowany) — tylko puste pola
+        if (!draft.locked) { String sum = autoFillFromRecordings(); if (sum != null) draft.autoSummary = sum; }
         if (!draft.locked && draft.autoSummary != null) {
             TextView auto = Ui.text(a, draft.autoSummary, 12f, R.color.pr_text);
             auto.setPadding((int) (10 * d), (int) (8 * d), (int) (10 * d), (int) (8 * d));
