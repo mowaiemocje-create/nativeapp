@@ -109,16 +109,77 @@ public class DiaryPage {
                 root.addView(retry);
                 return;
             }
-            checkToday(() -> {
+            checkToday(() -> loadServerToday(() -> {
                 if (!host.isCurrent()) return;
                 root.removeAllViews();
                 root.addView(header());
                 buildForm();
-            });
+            }));
         });
     }
 
     interface Done { void run(boolean ok); }
+
+    // DOWODEM są tylko nagrania WYSŁANE do NewSpeech (to, co jest na serwerze), nie pliki w telefonie.
+    // Dzisiejsze rekordy kursanta: wysłane albo poprawione dziś. Z telefonu bierzemy tylko emocję z opisu.
+    private static final class SrvRec { String id, cat; }
+    private List<SrvRec> serverToday = new ArrayList<>();
+
+    private void loadServerToday(Runnable then) {
+        NsClient.request("GET", "/records?page=1&page_size=40&sort_by=date&sort_order=desc", host.token(), host.email(), null, null, r -> {
+            List<SrvRec> out = new ArrayList<>();
+            JSONArray arr = collection(r);
+            String t = today();
+            for (int i = 0; arr != null && i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                if (!isTodayIso(o.optString("created_at", ""), t) && !isTodayIso(o.isNull("record_file_updated_by_author_at") ? "" : o.optString("record_file_updated_by_author_at", ""), t)) continue;
+                JSONObject c = o.optJSONObject("record_category");
+                String nm = c == null ? "" : name(c);
+                if (nm.isEmpty() || "Special".equals(nm)) continue;
+                SrvRec s = new SrvRec();
+                s.id = o.optString("id", "");
+                s.cat = nm;
+                out.add(s);
+            }
+            serverToday = out;
+            then.run();
+        });
+    }
+
+    private static boolean isTodayIso(String iso, String today) {
+        long sec = NsClient.isoSec(iso);
+        if (sec <= 0) return false;
+        return today.equals(new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(sec * 1000L)));
+    }
+
+    // emocja z opisu nagrania w telefonie — po ID rekordu NS
+    private java.util.Map<String, Integer> localEmotions() {
+        java.util.Map<String, Integer> m = new java.util.HashMap<>();
+        java.io.File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files == null) return m;
+        for (java.io.File f : files) {
+            RecMeta rm = RecMeta.load(a, f.getName());
+            String id = !rm.nsRecordId.isEmpty() ? rm.nsRecordId : rm.fixRecordId;
+            if (!id.isEmpty() && rm.emotion >= 1 && rm.emotion <= 5) m.put(id, rm.emotion);
+        }
+        return m;
+    }
+
+    // nazwa kategorii z NS -> nazwa jak w aplikacji (np. "Telefon rodzina znajomi" -> "Telefon rodzina/znajomi")
+    private static String canonCat(String n) {
+        String k = key(n);
+        for (String c : ALL_CATS) if (key(c).equals(k)) return c;
+        return n.trim();
+    }
+
+    private static String key(String s) {
+        String x = java.text.Normalizer.normalize(s.toLowerCase(Locale.ROOT), java.text.Normalizer.Form.NFD).replaceAll("\\p{M}", "").replace("ł", "l");
+        return x.replaceAll("[^a-z0-9]", "");
+    }
+
+    private static final String[] ALL_CATS = {"Sklepy", "Rodzina", "Telefon rodzina/znajomi", "Wystąpienie", "Praca / Szkoła", "Monolog / Czytanie", "Przechodzień",
+            "Miasto - inne", "Przyjaciele", "Special", "Telefon do miasta", "W grupie", "Zerówka", "Phone do Kursanta/Trenera", "Restauracja Kelner", "McDrive, DriveThru"};
 
     private void loadDicts(Done done) {
         if (feelings != null && feelings.length() > 0 && successPeople != null && successPeople.length() > 0 && talkPeople != null) { done.run(true); return; }
@@ -662,24 +723,23 @@ public class DiaryPage {
             "Sklepy", "Przechodzień", "Restauracja Kelner", "McDrive, DriveThru", "Miasto - inne", "Wystąpienie", "Praca / Szkoła", "W grupie"));
 
     private String autoFillFromRecordings() {
-        java.io.File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
-        if (files == null) return null;
-        String t = today();
-        SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         java.util.LinkedHashSet<String> cats = new java.util.LinkedHashSet<>();
         int n = 0, emoSum = 0, emoN = 0;
         java.util.Map<String, int[]> emoByCat = new java.util.HashMap<>();
-        for (java.io.File f : files) {
-            if (!t.equals(df.format(new Date(f.lastModified())))) continue;
-            RecMeta m = RecMeta.load(a, f.getName());
-            if (m.cat.isEmpty() || "Special".equals(m.cat)) continue;
+        java.util.Map<String, Integer> emo = localEmotions();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (SrvRec r : serverToday) {
+            if (!seen.add(r.id)) continue;
+            String c = canonCat(r.cat);
+            if (c.isEmpty() || "Special".equals(c)) continue;
             n++;
-            cats.add(m.cat);
-            if (m.emotion >= 1 && m.emotion <= 5) {
-                emoSum += m.emotion; emoN++;
-                int[] e = emoByCat.get(m.cat);
-                if (e == null) { e = new int[2]; emoByCat.put(m.cat, e); }
-                e[0] += m.emotion; e[1]++;
+            cats.add(c);
+            Integer e = emo.get(r.id);
+            if (e != null) {
+                emoSum += e; emoN++;
+                int[] x = emoByCat.get(c);
+                if (x == null) { x = new int[2]; emoByCat.put(c, x); }
+                x[0] += e; x[1]++;
             }
         }
         if (n == 0) return null;
@@ -716,7 +776,7 @@ public class DiaryPage {
             }
         }
         if (done.isEmpty()) return null;
-        return "✨ " + L.f("Część dziennika uzupełniona z dzisiejszych nagrań ({0}):", n) + " " + android.text.TextUtils.join(", ", done)
+        return "✨ " + L.f("Część dziennika uzupełniona z dzisiejszych nagrań wysłanych do NewSpeech ({0}):", n) + " " + android.text.TextUtils.join(", ", done)
                 + ".\n" + L.t("Sprawdź i dokończ resztę — możesz wszystko zmienić.");
     }
 
@@ -729,11 +789,7 @@ public class DiaryPage {
     // Jak w PWA: jesli dzis sa nagrania, "Z kim sukcesy" podpowiada Rodzine / Obcych.
     private void autoFillSuccessWho() {
         if (!draft.successWho.isEmpty() || successPeople == null) return;
-        java.io.File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
-        if (files == null) return;
-        String t = today();
-        SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        // kategoria nagrania -> z kim (slownik NS: rodzina, praca / szkola, znajomi, obcy)
+        // kategoria nagrania WYSŁANEGO dziś -> z kim (słownik NS: rodzina, praca / szkoła, znajomi, obcy)
         java.util.Map<String, String[]> who = new java.util.HashMap<>();
         who.put("Rodzina", new String[]{"rodzin"});
         who.put("Telefon rodzina/znajomi", new String[]{"rodzin", "znajom"});
@@ -742,9 +798,8 @@ public class DiaryPage {
         who.put("Phone do Kursanta/Trenera", new String[]{"znajom"});
         who.put("W grupie", new String[]{"znajom"});
         java.util.Set<String> keys = new java.util.HashSet<>();
-        for (java.io.File f : files) {
-            if (!t.equals(df.format(new Date(f.lastModified())))) continue;
-            String cat = RecMeta.load(a, f.getName()).cat;
+        for (SrvRec r : serverToday) {
+            String cat = canonCat(r.cat);
             if (cat.isEmpty() || "Special".equals(cat)) continue;
             String[] k = who.get(cat);
             if (k == null) k = new String[]{"obc"};
