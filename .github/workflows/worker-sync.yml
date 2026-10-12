@@ -1,0 +1,68 @@
+name: Kopia workera newspeech-backend
+
+# Co 30 min (i na żądanie) pobiera AKTUALNIE WDROŻONY worker newspeech-backend z Cloudflare
+# i zapisuje go na osobnej gałęzi "worker" tego repo (plik worker.js).
+# Dzięki temu Claude zawsze ma najnowszą wersję workera bez ręcznego pobierania.
+# Gałąź "worker" NIE uruchamia budowania aplikacji (build.yml działa tylko na main).
+#
+# Potrzebne sekrety (Settings → Secrets and variables → Actions):
+#   CF_API_TOKEN   — token Cloudflare z uprawnieniem "Workers Scripts: Read"
+#   CF_ACCOUNT_ID  — ID konta Cloudflare (pokazuje je: npx wrangler whoami)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: worker-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz worker z Cloudflare
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          set -e
+          if [ -z "$CF_API_TOKEN" ] || [ -z "$CF_ACCOUNT_ID" ]; then
+            echo "Brak sekretów CF_API_TOKEN / CF_ACCOUNT_ID"; exit 1
+          fi
+          curl -sS --fail -H "Authorization: Bearer $CF_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/newspeech-backend/content/v2" \
+            -o /tmp/worker.js
+          SIZE=$(wc -c < /tmp/worker.js)
+          echo "Pobrano $SIZE bajtów"
+          # zabezpieczenie: zamiast workera przyszedł komunikat błędu albo pusty plik
+          if [ "$SIZE" -lt 50000 ] || head -c 20 /tmp/worker.js | grep -q '"success"'; then
+            head -c 500 /tmp/worker.js; echo; echo "To nie wygląda na worker — przerywam"; exit 1
+          fi
+
+      - name: Zapisz na gałęzi "worker"
+        run: |
+          set -e
+          git config --global user.name "worker-sync"
+          git config --global user.email "worker-sync@users.noreply.github.com"
+          git clone --quiet "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" repo
+          cd repo
+          if git ls-remote --exit-code --heads origin worker >/dev/null 2>&1; then
+            git checkout --quiet worker
+          else
+            git checkout --quiet --orphan worker
+            git rm -rfq . || true
+          fi
+          cp /tmp/worker.js worker.js
+          git add worker.js
+          if git diff --cached --quiet; then
+            echo "Bez zmian — worker taki sam jak w kopii"
+          else
+            git commit -qm "Worker newspeech-backend $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push --quiet origin worker
+            echo "Zapisano nową wersję workera"
+          fi
