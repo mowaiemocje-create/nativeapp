@@ -914,7 +914,7 @@ public class StatsPage {
         int daysLeft = (int) Math.max(0, Math.ceil((deadline + 86400000L - now) / 86400000.0));
         String dl = to.length() >= 10 ? to.substring(8, 10) + "." + to.substring(5, 7) + "." + to.substring(0, 4) : to;
 
-        JSONArray reqs = visit.optJSONArray("visit_record_requirements");
+        JSONArray reqs = HarmoGoal.mergeReqs(visit.optJSONArray("visit_record_requirements"));
         int totReq = 0, totCorrect = 0, totSent = 0;
         List<Object[]> rows = new ArrayList<>();
         for (int i = 0; reqs != null && i < reqs.length(); i++) {

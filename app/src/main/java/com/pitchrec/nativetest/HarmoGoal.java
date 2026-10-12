@@ -44,6 +44,30 @@ public final class HarmoGoal {
         } catch (Exception e) { return null; }
     }
 
+    // Harmonogram: ta sama kategoria dodana kilka razy -> jedna pozycja (suma wymaganych).
+    // Inaczej kategoria pokazuje sie dwukrotnie, a postep liczy sie podwojnie.
+    public static JSONArray mergeReqs(JSONArray reqs) {
+        JSONArray out = new JSONArray();
+        if (reqs == null) return out;
+        java.util.Map<String, JSONObject> by = new java.util.HashMap<>();
+        for (int i = 0; i < reqs.length(); i++) {
+            JSONObject q = reqs.optJSONObject(i);
+            if (q == null) continue;
+            JSONObject cat = q.optJSONObject("record_category");
+            String id = cat != null ? cat.optString("id", "") : "";
+            String nm = cat != null ? (cat.optString("name_pl", "").isEmpty() ? cat.optString("name", "") : cat.optString("name_pl", "")) : "";
+            String k = !id.isEmpty() ? id : "n:" + nm.trim().toLowerCase(Locale.ROOT).replaceAll("\\s*/\\s*", " ").replaceAll("\\s+", " ");
+            try {
+                JSONObject have = by.get(k);
+                if (have != null) { have.put("records_count", have.optInt("records_count", 0) + q.optInt("records_count", 0)); continue; }
+                JSONObject cp = new JSONObject(q.toString());
+                by.put(k, cp);
+                out.put(cp);
+            } catch (Exception e) { out.put(q); }
+        }
+        return out;
+    }
+
     private static JSONObject firstWithReqs(NsClient.Result r) {
         JSONArray arr = coll(r);
         for (int i = 0; arr != null && i < arr.length(); i++) {
@@ -74,7 +98,7 @@ public final class HarmoGoal {
                     JSONObject by = null;
                     JSONObject dj = new JSONObject(rs.body);
                     if (dj.optBoolean("ok", false)) by = dj.optJSONObject("byCategory");
-                    JSONArray reqs = visit.optJSONArray("visit_record_requirements");
+                    JSONArray reqs = mergeReqs(visit.optJSONArray("visit_record_requirements"));
                     int totReq = 0, totCorrect = 0, totSent = 0;
                     for (int i = 0; reqs != null && i < reqs.length(); i++) {
                         JSONObject rq = reqs.optJSONObject(i);

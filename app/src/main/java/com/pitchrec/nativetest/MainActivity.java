@@ -716,7 +716,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             java.util.List<CoachNotices.Notice> ns = li ? CoachNotices.notices(this) : new java.util.ArrayList<>();
             if (ns.isEmpty()) coachBanner.setVisibility(View.GONE);
             else {
-                coachBanner.setText(CoachNotices.bannerText(this, ns));
+                coachBanner.setText(CoachNotices.bannerText(this, ns, fixListCache));
                 coachBanner.setVisibility(View.VISIBLE);
                 CoachNotices.ackShown(this, ns); // trener widzi "kursant widzial"
             }
@@ -725,7 +725,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             CoachNotices.Focus f = li ? CoachNotices.focus(this) : null;
             if (f == null) focusBox.setText("");
             else {
-                String head = "🎯 " + L.t("Dziś pilnuj:") + " " + android.text.TextUtils.join(", ", f.criteria);
+                String head = "🎯 " + L.t("Dziś pilnuj:") + " " + CoachNotices.trJoin(f.criteria);
                 android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder(head);
                 sb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, head.length(), 0);
                 sb.setSpan(new android.text.style.ForegroundColorSpan(Color.parseColor("#E8820C")), 0, head.length(), 0);
@@ -742,7 +742,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             java.util.List<String> got = CoachNotices.takeNewAchieved(this);
             if (!got.isEmpty()) {
                 StringBuilder m = new StringBuilder();
-                for (String n : got) { if (m.length() > 0) m.append("\n"); m.append("🎉 ").append(L.f("{0} opanowany — trener zdjął go z fokusu!", n)); }
+                for (String n : got) { if (m.length() > 0) m.append("\n"); m.append("🎉 ").append(L.f("{0} opanowany — trener zdjął go z fokusu!", RateNames.tr(n))); }
                 new AlertDialog.Builder(this).setTitle("🎉 " + L.t("Gratulacje!")).setMessage(m.toString())
                         .setPositiveButton(L.t("OK"), null).show();
             }
@@ -2474,7 +2474,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 c.addView(er, 1);
                 return;
             }
-            fixListCache = list; updateBadges();
+            fixListCache = list; updateBadges(); renderCoach();
             fixListCacheAt = System.currentTimeMillis();
             fillFixList(c, list);
             TextView upd = Ui.text(this, L.t("Zaktualizowano ") + new java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new java.util.Date()) + L.t(" · odświeża się co minutę"), 10f, R.color.pr_muted);
@@ -2535,6 +2535,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             pill.setBackground(Ui.rounded((getResources().getColor(R.color.pr_warn) & 0x00FFFFFF) | 0x26000000, 0, 0, 6 * d));
             top.addView(pill);
             card.addView(top);
+            // trener prosi o telefon w sprawie TEGO nagrania — druga linia pod kategoria
+            CoachNotices.Notice callN = CoachNotices.forRecord(this, fe.id);
+            if (callN != null) {
+                TextView cl = Ui.text(this, CoachNotices.cardLine(callN), 12.5f, R.color.pr_text);
+                cl.setTextColor(Color.WHITE);
+                cl.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                cl.setPadding((int) (10 * d), (int) (6 * d), (int) (10 * d), (int) (6 * d));
+                cl.setBackground(Ui.rounded(Color.parseColor("#D84315"), 0, 0, 8 * d));
+                android.widget.LinearLayout.LayoutParams clp = new android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                clp.setMargins(0, (int) (5 * d), 0, (int) (2 * d));
+                card.addView(cl, clp);
+            }
             // Daty: glowna = record_date (dzien, pod ktorym nagranie widac w NS), pod spodem ocena;
             // gdy kursant podmienil nagranie innego dnia (recorded_at) — dopisek. Czas polski.
             java.util.TimeZone pl = java.util.TimeZone.getTimeZone("Europe/Warsaw");

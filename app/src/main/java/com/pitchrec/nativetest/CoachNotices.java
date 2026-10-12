@@ -137,17 +137,75 @@ public final class CoachNotices {
         return null;
     }
 
-    public static String bannerText(Context c, List<Notice> list) {
+    // liczebnik porzadkowy SLOWNIE (poprawka/korekta — rodzaj zenski), 1–10; dalej cyfra z kropka
+    private static final java.util.Map<String, String[]> ORD = new java.util.HashMap<>();
+    static {
+        ORD.put("pl", new String[]{"pierwsza", "druga", "trzecia", "czwarta", "piąta", "szósta", "siódma", "ósma", "dziewiąta", "dziesiąta"});
+        ORD.put("en", new String[]{"first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"});
+        ORD.put("cs", new String[]{"první", "druhá", "třetí", "čtvrtá", "pátá", "šestá", "sedmá", "osmá", "devátá", "desátá"});
+        ORD.put("sk", new String[]{"prvá", "druhá", "tretia", "štvrtá", "piata", "šiesta", "siedma", "ôsma", "deviata", "desiata"});
+        ORD.put("de", new String[]{"erste", "zweite", "dritte", "vierte", "fünfte", "sechste", "siebte", "achte", "neunte", "zehnte"});
+        ORD.put("es", new String[]{"primera", "segunda", "tercera", "cuarta", "quinta", "sexta", "séptima", "octava", "novena", "décima"});
+        ORD.put("hu", new String[]{"első", "második", "harmadik", "negyedik", "ötödik", "hatodik", "hetedik", "nyolcadik", "kilencedik", "tizedik"});
+    }
+
+    public static String ordinal(int n) {
+        String[] a = ORD.get(L.lang());
+        if (a == null) a = ORD.get("pl");
+        return n >= 1 && n <= a.length ? a[n - 1] : n + ".";
+    }
+
+    // "to już trzecia poprawka tego nagrania"
+    public static String correctionText(int n) {
+        return L.f("to już {0} poprawka tego nagrania", ordinal(n));
+    }
+
+    // Kategoria nagrania z komunikatu: z listy KOREKTA (cache) albo z nagran w telefonie
+    public static String categoryFor(Context c, String recordId, java.util.List<NsClient.FixEntry> fixList) {
+        if (recordId == null || recordId.isEmpty()) return "";
+        if (fixList != null) for (NsClient.FixEntry fe : fixList)
+            if (recordId.equals(fe.id) && fe.categoryName != null && !fe.categoryName.isEmpty()) return fe.categoryName;
+        java.io.File[] all = c.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (all != null) for (java.io.File f : all) {
+            RecMeta m = RecMeta.load(c, f.getName());
+            if ((recordId.equals(m.nsRecordId) || recordId.equals(m.fixRecordId)) && !m.cat.isEmpty()) return m.cat;
+        }
+        return "";
+    }
+
+    // Krotka linia do karty w KOREKCIE (druga linia pod kategoria)
+    public static String cardLine(Notice n) {
+        StringBuilder sb = new StringBuilder("📞 ").append(L.t("Zadzwoń do trenera"));
+        if (n.correctionNo > 0) sb.append(" — ").append(correctionText(n.correctionNo));
+        sb.append(".");
+        sb.append("\n").append(n.criteria.isEmpty() ? cap(L.t("powtarza się ten sam błąd")) + "."
+                : cap(L.t("powtarza się błąd:")) + " " + trJoin(n.criteria));
+        return sb.toString();
+    }
+
+    // nazwy kryteriow (Ogonek, Intonacja…) w jezyku aplikacji
+    public static String trJoin(List<String> names) {
+        StringBuilder b = new StringBuilder();
+        for (String x : names) { if (b.length() > 0) b.append(", "); b.append(RateNames.tr(x)); }
+        return b.toString();
+    }
+
+    private static String cap(String s) { return s.isEmpty() ? s : s.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + s.substring(1); }
+
+    public static String bannerText(Context c, List<Notice> list, java.util.List<NsClient.FixEntry> fixList) {
         StringBuilder sb = new StringBuilder();
         for (Notice n : list) {
             if (sb.length() > 0) sb.append("\n\n");
-            String what = n.criteria.isEmpty()
-                    ? L.t("powtarza się ten sam błąd")
-                    : L.t("powtarza się błąd:") + " " + android.text.TextUtils.join(", ", n.criteria);
-            sb.append("📞 ").append(L.t("Zadzwoń do trenera")).append(" — ").append(what);
-            if (n.correctionNo > 0) sb.append(" ").append(L.f("({0}. korekta tego nagrania).", n.correctionNo));
-            else sb.append(".");
+            sb.append("📞 ").append(L.t("Zadzwoń do trenera"));
+            if (n.correctionNo > 0) sb.append(" — ").append(correctionText(n.correctionNo));
+            sb.append(".");
+            String cat = categoryFor(c, n.recordId, fixList);
+            if (!cat.isEmpty()) sb.append("\n").append(L.t("Kategoria:")).append(" ").append(L.cat(cat));
+            sb.append("\n").append(n.criteria.isEmpty() ? cap(L.t("powtarza się ten sam błąd")) + "."
+                    : cap(L.t("powtarza się błąd:")) + " " + trJoin(n.criteria));
         }
+        Focus f = focus(c);
+        if (f != null && !f.note.isEmpty()) sb.append("\n💬 ").append(f.note);
         sb.append("\n").append(L.t("Zanim wyślesz kolejną poprawkę, porozmawiaj z trenerem."));
         return sb.toString();
     }

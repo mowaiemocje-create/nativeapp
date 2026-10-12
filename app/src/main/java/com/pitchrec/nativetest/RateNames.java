@@ -20,6 +20,8 @@ public final class RateNames {
 
     // pl -> {en, cs, sk, de, es, hu}
     private static final Map<String, String[]> DICT = new HashMap<>();
+    private static final java.util.Set<String> FIXED = new java.util.HashSet<>(java.util.Arrays.asList(
+            "spokój", "rezonans", "ogonek", "lekki wydech", "tempo", "podział", "intonacja"));
     private static void d(String pl, String en, String cs, String sk, String de, String es, String hu) {
         DICT.put(pl.toLowerCase(Locale.ROOT), new String[]{en, cs, sk, de, es, hu});
     }
@@ -27,6 +29,11 @@ public final class RateNames {
         // kryteria
         d("Tempo", "Tempo", "Tempo", "Tempo", "Tempo", "Ritmo", "Tempó");
         d("Rezonans", "Resonance", "Rezonance", "Rezonancia", "Resonanz", "Resonancia", "Rezonancia");
+        // kryteria trenera (nazwy z panelu NS; angielskie podane przez szkole)
+        d("Spokój", "Calmness", "Klid", "Pokoj", "Ruhe", "Calma", "Nyugalom");
+        d("Ogonek", "Tail", "Zbytek", "Chvostík", "Ausklang", "Cola", "Lecsengés");
+        d("Lekki wydech", "Light voice", "Lehký hlas", "Ľahký hlas", "Leichte Stimme", "Voz ligera", "Könnyű hang");
+        d("Podział", "Slicing", "Dělení", "Delenie", "Aufteilung", "División", "Tagolás");
         d("Intonacja", "Intonation", "Intonace", "Intonácia", "Intonation", "Entonación", "Intonáció");
         d("Melodia", "Melody", "Melodie", "Melódia", "Melodie", "Melodía", "Dallam");
         d("Pauzy", "Pauses", "Pauzy", "Pauzy", "Pausen", "Pausas", "Szünetek");
@@ -114,7 +121,7 @@ public final class RateNames {
         String l = L.lang();
         if (s.isEmpty() || "pl".equals(l)) return s;
         String key = s.toLowerCase(Locale.ROOT);
-        String[] le = LEARNED.get(key);
+        String[] le = FIXED.contains(key) ? null : LEARNED.get(key); // nazwy podane przez szkole maja pierwszenstwo
         if (le != null) {
             String v = "cs".equals(l) || "sk".equals(l) ? le[1] : le[0];
             if (!v.isEmpty() && ("en".equals(l) || "cs".equals(l) || "sk".equals(l) || DICT.get(key) == null)) return v;
