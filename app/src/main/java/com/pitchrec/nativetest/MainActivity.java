@@ -717,6 +717,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (ns.isEmpty()) coachBanner.setVisibility(View.GONE);
             else {
                 coachBanner.setText(CoachNotices.bannerText(this, ns, fixListCache));
+                CoachNotices.lookupMissingCategories(this, ns, fixListCache, () -> { if (!isFinishing()) renderCoach(); });
                 coachBanner.setVisibility(View.VISIBLE);
                 CoachNotices.ackShown(this, ns); // trener widzi "kursant widzial"
             }

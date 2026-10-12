@@ -299,6 +299,11 @@ public class NsClient {
             } catch (Exception e) {
                 err = L.t("Brak połączenia z serwerem");
             }
+            // szybkie zrodlo nie dziala (np. blad 500 bazy) — lista wprost z NewSpeech
+            if (err != null && !"AUTH".equals(err)) {
+                java.util.List<FixEntry> fb = fixFromNs(token, email);
+                if (!fb.isEmpty() || nsReachable(token, email)) { list.clear(); list.addAll(fb); err = null; }
+            }
             final String fErr = err;
             MAIN.post(() -> cb.done(list, fErr));
         });
@@ -322,6 +327,20 @@ public class NsClient {
     // Zapytanie do naszego nowego backendu (Cloudflare Worker "newspeech-backend")
     public static void backend(String method, String pathAndQuery, String jsonBody, Callback cb) {
         runAsync(() -> {
+            Result br;
+            try { br = backendNow(method, pathAndQuery, jsonBody); }
+            catch (Exception e) { br = new Result(); br.ok = false; br.status = 0; br.err = L.t("Brak połączenia z serwerem"); }
+            // Awaria szybkiego zrodla (np. 500 z bazy) — statystyki harmonogramu liczymy wprost z NS
+            if (!br.ok && br.status != 401 && br.status != 403 && pathAndQuery.startsWith("/harmonogram-stats/from-ns")) {
+                Result fb = harmoStatsFromNs(pathAndQuery);
+                if (fb != null) return fb;
+            }
+            return br;
+        }, cb);
+    }
+
+    private static Result backendNow(String method, String pathAndQuery, String jsonBody) throws Exception {
+        {
             HttpURLConnection c = (HttpURLConnection) new URL("https://newspeech-backend.mowaiemocje.workers.dev" + pathAndQuery).openConnection();
             c.setRequestMethod(method);
             c.setConnectTimeout(15000);
@@ -333,7 +352,168 @@ public class NsClient {
                 try (OutputStream os = c.getOutputStream()) { os.write(jsonBody.getBytes(StandardCharsets.UTF_8)); }
             }
             return finish(c);
-        }, cb);
+        }
+    }
+
+    private static boolean nsReachable(String token, String email) {
+        try { HttpURLConnection c = open("/records?page=1&page_size=1", "GET", token, email); c.setReadTimeout(20000); return c.getResponseCode() == 200; }
+        catch (Exception e) { return false; }
+    }
+
+    private static String qp(String pathAndQuery, String key) {
+        int i = pathAndQuery.indexOf('?');
+        if (i < 0) return "";
+        for (String kv : pathAndQuery.substring(i + 1).split("&")) {
+            int e = kv.indexOf('=');
+            if (e > 0 && kv.substring(0, e).equals(key)) {
+                try { return java.net.URLDecoder.decode(kv.substring(e + 1), "UTF-8"); } catch (Exception x) { return kv.substring(e + 1); }
+            }
+        }
+        return "";
+    }
+
+    // Nagrania kursanta wprost z NS (najnowsze, do maxPages*100) — zapas, gdy backend nie dziala
+    private static java.util.List<JSONObject> nsRecords(String token, String email, String minDay, int maxPages) {
+        java.util.List<JSONObject> out = new java.util.ArrayList<>();
+        try {
+            for (int page = 1; page <= maxPages; page++) {
+                HttpURLConnection c = open("/records?page=" + page + "&page_size=100&sort_by=date&sort_order=desc", "GET", token, email);
+                c.setReadTimeout(45000);
+                if (c.getResponseCode() != 200) break;
+                String b = readBody(c).trim();
+                JSONArray arr = b.startsWith("[") ? new JSONArray(b) : new JSONObject(b).optJSONArray("collection");
+                if (arr == null || arr.length() == 0) break;
+                boolean older = false;
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    out.add(o);
+                    String day = o.optString("date", o.optString("created_at", ""));
+                    if (minDay != null && day.length() >= 10 && day.substring(0, 10).compareTo(minDay) < 0) older = true;
+                }
+                if (arr.length() < 100 || older) break;
+            }
+        } catch (Exception e) { }
+        return out;
+    }
+
+    private static String catNameOf(JSONObject rec) {
+        JSONObject c = rec.optJSONObject("record_category");
+        if (c == null) return "";
+        String n = c.optString("name_pl", "");
+        return n.isEmpty() || "null".equals(n) ? c.optString("name", "") : n;
+    }
+
+    private static boolean pendingReReview(JSONObject rec) {
+        String rv = rec.optString("reviewed_at", ""), fu = rec.optString("record_file_updated_by_author_at", "");
+        if (fu.isEmpty() || "null".equals(fu)) fu = rec.optString("updated_by_author_at", "");
+        if (rv.isEmpty() || "null".equals(rv) || fu.isEmpty() || "null".equals(fu)) return false;
+        return isoSec(fu) > isoSec(rv);
+    }
+
+    static long isoSec(String iso) {
+        if (iso == null || iso.length() < 19) return 0L;
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            long t = f.parse(iso.substring(0, 19)).getTime() / 1000L;
+            // przesuniecie strefy z napisu (np. +02:00)
+            String rest = iso.substring(19).replaceAll("^\\.\\d+", "");
+            if (rest.length() >= 6 && (rest.charAt(0) == '+' || rest.charAt(0) == '-')) {
+                int sg = rest.charAt(0) == '+' ? 1 : -1;
+                t -= sg * (Integer.parseInt(rest.substring(1, 3)) * 3600L + Integer.parseInt(rest.substring(4, 6)) * 60L);
+            }
+            return t;
+        } catch (Exception e) { return 0L; }
+    }
+
+    private static boolean has(JSONObject o, String k) { String v = o.optString(k, ""); return !v.isEmpty() && !"null".equals(v); }
+
+    // Zapas dla /harmonogram-stats/from-ns: te same liczby (wyslane / ocenione / zaliczone per kategoria)
+    private static Result harmoStatsFromNs(String pathAndQuery) {
+        String token = qp(pathAndQuery, "ns_token"), email = qp(pathAndQuery, "ns_email");
+        String from = qp(pathAndQuery, "date_from"), to = qp(pathAndQuery, "date_to");
+        if (token.isEmpty()) return null;
+        if (from.isEmpty()) from = "1970-01-01";
+        if (to.isEmpty()) to = "2999-12-31";
+        java.util.List<JSONObject> recs = nsRecords(token, email, from, 10);
+        if (recs.isEmpty()) return null;
+        try {
+            java.util.Map<String, int[]> byName = new java.util.LinkedHashMap<>();
+            java.util.Map<String, java.util.List<String>> ids = new java.util.HashMap<>();
+            int s = 0, rv = 0, ok = 0;
+            for (JSONObject r : recs) {
+                String day = r.optString("created_at", "");
+                if (day.length() < 10) continue;
+                day = day.substring(0, 10);
+                if (day.compareTo(from.substring(0, Math.min(10, from.length()))) < 0 || day.compareTo(to.substring(0, Math.min(10, to.length()))) > 0) continue;
+                JSONObject cat = r.optJSONObject("record_category");
+                String cid = cat != null ? cat.optString("id", "") : r.optString("record_category_id", "");
+                String nm = catNameOf(r);
+                String key = nm.isEmpty() ? cid : nm;
+                int[] t = byName.get(key);
+                if (t == null) { t = new int[3]; byName.put(key, t); ids.put(key, new java.util.ArrayList<>()); }
+                if (!cid.isEmpty() && !ids.get(key).contains(cid)) ids.get(key).add(cid);
+                boolean reviewed = has(r, "reviewed_at") && !pendingReReview(r);
+                boolean correct = reviewed && r.optBoolean("is_correct", false);
+                t[0]++; if (reviewed) t[1]++; if (correct) t[2]++;
+                s++; if (reviewed) rv++; if (correct) ok++;
+            }
+            JSONObject by = new JSONObject();
+            for (java.util.Map.Entry<String, int[]> e : byName.entrySet()) {
+                for (String id : ids.get(e.getKey())) {
+                    JSONObject o = new JSONObject();
+                    o.put("category_name", e.getKey());
+                    o.put("sent", e.getValue()[0]);
+                    o.put("reviewed", e.getValue()[1]);
+                    o.put("correct", e.getValue()[2]);
+                    by.put(id, o);
+                }
+            }
+            JSONObject res = new JSONObject();
+            res.put("ok", true);
+            res.put("fallback", true);
+            res.put("overall", new JSONObject().put("sent", s).put("reviewed", rv).put("correct", ok));
+            res.put("byCategory", by);
+            Result r = new Result();
+            r.ok = true; r.status = 200; r.body = res.toString();
+            return r;
+        } catch (Exception e) { return null; }
+    }
+
+    // Zapas dla listy KOREKTA: odrzucone (i jeszcze nie poprawione) nagrania wprost z NS
+    private static java.util.List<FixEntry> fixFromNs(String token, String email) {
+        java.util.List<FixEntry> list = new java.util.ArrayList<>();
+        for (JSONObject o : nsRecords(token, email, null, 3)) {
+            if (!has(o, "reviewed_at") || o.optBoolean("is_correct", true) || pendingReReview(o)) continue;
+            if (o.isNull("is_correct")) continue;
+            FixEntry fe = new FixEntry();
+            fe.id = o.optString("id", "");
+            fe.categoryName = catNameOf(o);
+            fe.reviewedAt = isoSec(o.optString("reviewed_at", ""));
+            fe.recordedAt = isoSec(has(o, "record_file_updated_by_author_at") ? o.optString("record_file_updated_by_author_at", "") : o.optString("created_at", ""));
+            fe.firstSentAt = isoSec(o.optString("created_at", ""));
+            fe.recordDate = has(o, "date") ? o.optString("date", "") : "";
+            StringBuilder sb = new StringBuilder();
+            JSONArray rates = o.optJSONArray("record_rates");
+            int weak = 0;
+            for (int j = 0; rates != null && j < rates.length(); j++) {
+                JSONObject rr = rates.optJSONObject(j);
+                if (rr == null) continue;
+                JSONObject unit = rr.optJSONObject("record_rate_unit"), rc = rr.optJSONObject("record_rate_category");
+                if (unit == null || unit.optInt("percent_mark", 100) >= 100) continue;
+                weak++;
+                if (weak > 4) continue;
+                String cn = rc == null ? "" : (has(rc, "name_pl") ? rc.optString("name_pl", "") : rc.optString("name", ""));
+                String un = has(unit, "name_pl") ? unit.optString("name_pl", "") : has(unit, "name") ? unit.optString("name", "") : unit.optInt("percent_mark", 0) + "%";
+                if (sb.length() > 0) sb.append("\n");
+                sb.append("• ").append(RateNames.tr(cn)).append(" — ").append(RateNames.tr(un));
+            }
+            fe.weakText = sb.toString();
+            fe.allGood = weak == 0;
+            if (!fe.id.isEmpty()) list.add(fe);
+        }
+        return list;
     }
 
     // Wyslanie formularza (np. Google Forms) — "wyslij i zapomnij", bledy ignorowane.

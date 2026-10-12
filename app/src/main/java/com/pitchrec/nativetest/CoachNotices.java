@@ -163,6 +163,8 @@ public final class CoachNotices {
     // Kategoria nagrania z komunikatu: z listy KOREKTA (cache) albo z nagran w telefonie
     public static String categoryFor(Context c, String recordId, java.util.List<NsClient.FixEntry> fixList) {
         if (recordId == null || recordId.isEmpty()) return "";
+        String cached = prefs(c).getString("coach_cat_" + recordId, "");
+        if (!cached.isEmpty()) return cached;
         if (fixList != null) for (NsClient.FixEntry fe : fixList)
             if (recordId.equals(fe.id) && fe.categoryName != null && !fe.categoryName.isEmpty()) return fe.categoryName;
         java.io.File[] all = c.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
@@ -171,6 +173,34 @@ public final class CoachNotices {
             if ((recordId.equals(m.nsRecordId) || recordId.equals(m.fixRecordId)) && !m.cat.isEmpty()) return m.cat;
         }
         return "";
+    }
+
+    private static final Set<String> CAT_ASKED = new HashSet<>();
+
+    // Kategoria nieznana lokalnie — pytamy NS o to nagranie (raz), wynik zapamietany
+    public static void lookupMissingCategories(Context ctx, List<Notice> list, java.util.List<NsClient.FixEntry> fixList, Runnable changed) {
+        Context c = ctx.getApplicationContext();
+        SharedPreferences p = prefs(c);
+        String token = p.getString("ns_token", null);
+        if (token == null) return;
+        for (Notice n : list) {
+            if (n.recordId.isEmpty() || !categoryFor(c, n.recordId, fixList).isEmpty()) continue;
+            synchronized (CAT_ASKED) { if (!CAT_ASKED.add(n.recordId)) continue; }
+            NsClient.request("GET", "/records/" + n.recordId, token, p.getString("ns_email", ""), null, null, r -> {
+                if (!r.ok || r.body == null) return;
+                try {
+                    JSONObject o = new JSONObject(r.body);
+                    if (o.optJSONObject("record") != null) o = o.optJSONObject("record");
+                    JSONObject cat = o.optJSONObject("record_category");
+                    String nm = cat == null ? "" : cat.optString("name_pl", "");
+                    if (cat != null && (nm.isEmpty() || "null".equals(nm))) nm = cat.optString("name", "");
+                    if (!nm.isEmpty() && !"null".equals(nm)) {
+                        p.edit().putString("coach_cat_" + n.recordId, nm).apply();
+                        if (changed != null) changed.run();
+                    }
+                } catch (Exception e) { }
+            });
+        }
     }
 
     // Krotka linia do karty w KOREKCIE (druga linia pod kategoria)
