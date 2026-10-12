@@ -1,7 +1,3 @@
---aaf83da8bd2f90616ab72aa22ef4f2b893fe0a7153e7add02150baa0b425
-Content-Disposition: form-data; name="worker.js"; filename="worker.js"
-Content-Type: application/javascript+module
-
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
@@ -10844,4 +10840,3 @@ export {
 };
 //# sourceMappingURL=worker.js.map
 
---aaf83da8bd2f90616ab72aa22ef4f2b893fe0a7153e7add02150baa0b425--
