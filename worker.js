@@ -5881,6 +5881,12 @@ var worker_default = {
       if (url.pathname === "/coach-settings/save" && request.method === "POST") {
         return await handleCoachSettingsSave(request, env);
       }
+      if (url.pathname === "/record-fp" && request.method === "GET") {
+        return await handleRecordFpList(request, env, url);
+      }
+      if (url.pathname === "/record-fp/save" && request.method === "POST") {
+        return await handleRecordFpSave(request, env);
+      }
       if (url.pathname === "/record-system" && request.method === "GET") {
         return await handleRecordSystemGet(request, env, url);
       }
@@ -6062,19 +6068,10 @@ var worker_default = {
         return json({
           ok: true,
           count: results.length,
-          entries: results.map((r) => ({
-            id: r.ns_record_id,
-            category_name: r.category_name,
-            // recorded_at = kiedy przyszla AKTUALNA wersja nagrania (unix, s) - te date pokazujemy w korektach
-            recorded_at: r.recorded_at ?? null,
-            // first_sent_at = pierwsze wyslanie (jesli kursant potem podmienil plik, rozni sie od recorded_at)
-            first_sent_at: r.first_sent_at ?? null,
-            // record_date = dzien przypisany nagraniu w NS (YYYY-MM-DD)
-            record_date: r.record_date ?? null,
-            reviewed_at: r.reviewed_at,
-            weak_areas: JSON.parse(r.weak_areas || "[]"),
-            all_good: !!r.all_good
-          }))
+          // recorded_at = kiedy przyszla AKTUALNA wersja nagrania (unix, s); first_sent_at = pierwsze wyslanie;
+          // record_date = dzien w NS; review_details = komentarz trenera; not_counted = trener uznal nagranie
+          // za te sama sytuacje / ponownie wyslane (komentarz zaczyna sie od 🚫) — NIE wliczone do harmonogramu
+          entries: results.map(correctionEntryOut)
         });
       }
       if (url.pathname === "/harmonogram-stats/from-ns" && request.method === "GET") {
@@ -6583,7 +6580,44 @@ async function requireNsBridgeUser(request, env) {
 }
 __name(requireNsBridgeUser, "requireNsBridgeUser");
 __name2(requireNsBridgeUser, "requireNsBridgeUser");
+function isNotCountedReview(details) {
+  return /^\s*🚫/.test(String(details || ""));
+}
+__name(isNotCountedReview, "isNotCountedReview");
+__name2(isNotCountedReview, "isNotCountedReview");
+function correctionEntryOut(r) {
+  return {
+    id: r.ns_record_id,
+    category_name: r.category_name,
+    recorded_at: r.recorded_at ?? null,
+    first_sent_at: r.first_sent_at ?? null,
+    record_date: r.record_date ?? null,
+    reviewed_at: r.reviewed_at,
+    weak_areas: JSON.parse(r.weak_areas || "[]"),
+    all_good: !!r.all_good,
+    review_details: r.review_details ?? null,
+    not_counted: isNotCountedReview(r.review_details)
+  };
+}
+__name(correctionEntryOut, "correctionEntryOut");
+__name2(correctionEntryOut, "correctionEntryOut");
+var NC_DETAILS_COL_READY = false;
+async function ensureNcDetailsColumn(env) {
+  if (NC_DETAILS_COL_READY) return;
+  try {
+    await env.DB.prepare("SELECT review_details FROM needs_correction_cache LIMIT 1").first();
+  } catch (e) {
+    try {
+      await env.DB.prepare("ALTER TABLE needs_correction_cache ADD COLUMN review_details TEXT").run();
+    } catch (e2) {
+    }
+  }
+  NC_DETAILS_COL_READY = true;
+}
+__name(ensureNcDetailsColumn, "ensureNcDetailsColumn");
+__name2(ensureNcDetailsColumn, "ensureNcDetailsColumn");
 async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
+  await ensureNcDetailsColumn(env);
   const pgClient = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pgClient.connect();
   try {
@@ -6591,6 +6625,7 @@ async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
       `SELECT
          r.id AS record_id,
          r.reviewed_at,
+         r.review_details,
          r.date AS record_date,
          r.created_at AS first_sent_at,
          GREATEST(r.created_at, COALESCE(r.updated_by_author_at, r.created_at)) AS recorded_at,
@@ -6619,6 +6654,7 @@ async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
           ns_record_id: row.record_id,
           category_name: row.category_name,
           reviewed_at: row.reviewed_at,
+          review_details: row.review_details || null,
           record_date: row.record_date,
           first_sent_at: row.first_sent_at,
           recorded_at: row.recorded_at,
@@ -6635,16 +6671,16 @@ async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
         });
       }
     }
-    const ncKey = /* @__PURE__ */ __name((id, cat, rv, rc, fs, rd, wa) => [id, cat, rv, rc, fs, rd, wa].map((x) => x == null ? "" : String(x)).join("|"), "ncKey");
+    const ncKey = /* @__PURE__ */ __name((id, cat, rv, rc, fs, rd, wa, det) => [id, cat, rv, rc, fs, rd, wa, det].map((x) => x == null ? "" : String(x)).join("|"), "ncKey");
     const newSig = [...byRecord.values()].map((rec) => {
       const rd = rec.record_date instanceof Date ? rec.record_date.toISOString().slice(0, 10) : rec.record_date ? String(rec.record_date).slice(0, 10) : null;
       const ts = /* @__PURE__ */ __name((v) => v ? Math.floor(new Date(v).getTime() / 1e3) : null, "ts");
-      return ncKey(rec.ns_record_id, rec.category_name, ts(rec.reviewed_at), ts(rec.recorded_at), ts(rec.first_sent_at), rd, JSON.stringify(rec.weak_areas));
+      return ncKey(rec.ns_record_id, rec.category_name, ts(rec.reviewed_at), ts(rec.recorded_at), ts(rec.first_sent_at), rd, JSON.stringify(rec.weak_areas), rec.review_details);
     }).sort().join(";");
     const { results: oldRows } = await env.DB.prepare(
-      "SELECT ns_record_id, category_name, reviewed_at, recorded_at, first_sent_at, record_date, weak_areas FROM needs_correction_cache WHERE user_id = ?"
+      "SELECT ns_record_id, category_name, reviewed_at, recorded_at, first_sent_at, record_date, weak_areas, review_details FROM needs_correction_cache WHERE user_id = ?"
     ).bind(localUserId).all();
-    const oldSig = (oldRows || []).map((r) => ncKey(r.ns_record_id, r.category_name, r.reviewed_at, r.recorded_at, r.first_sent_at, r.record_date, r.weak_areas)).sort().join(";");
+    const oldSig = (oldRows || []).map((r) => ncKey(r.ns_record_id, r.category_name, r.reviewed_at, r.recorded_at, r.first_sent_at, r.record_date, r.weak_areas, r.review_details)).sort().join(";");
     const ncUnchanged = newSig === oldSig;
     const stmts = ncUnchanged ? [] : [env.DB.prepare("DELETE FROM needs_correction_cache WHERE user_id = ?").bind(localUserId)];
     for (const rec of ncUnchanged ? [] : byRecord.values()) {
@@ -6653,13 +6689,13 @@ async function syncNeedsCorrectionFromPostgres(env, localUserId, nsEmail) {
       const firstSentTs = rec.first_sent_at ? Math.floor(new Date(rec.first_sent_at).getTime() / 1e3) : null;
       const recordDate = rec.record_date instanceof Date ? rec.record_date.toISOString().slice(0, 10) : rec.record_date ? String(rec.record_date).slice(0, 10) : null;
       stmts.push(env.DB.prepare(
-        `INSERT INTO needs_correction_cache (user_id, ns_record_id, category_name, reviewed_at, recorded_at, first_sent_at, record_date, weak_areas, all_good, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO needs_correction_cache (user_id, ns_record_id, category_name, reviewed_at, recorded_at, first_sent_at, record_date, weak_areas, all_good, synced_at, review_details)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(ns_record_id) DO UPDATE SET
            category_name=excluded.category_name, reviewed_at=excluded.reviewed_at,
            recorded_at=excluded.recorded_at, first_sent_at=excluded.first_sent_at, record_date=excluded.record_date,
-           weak_areas=excluded.weak_areas, all_good=excluded.all_good, synced_at=excluded.synced_at`
-      ).bind(localUserId, rec.ns_record_id, rec.category_name, reviewedTs, recordedTs, firstSentTs, recordDate, JSON.stringify(rec.weak_areas), rec.weak_areas.length === 0 ? 1 : 0, Math.floor(Date.now() / 1e3)));
+           weak_areas=excluded.weak_areas, all_good=excluded.all_good, synced_at=excluded.synced_at, review_details=excluded.review_details`
+      ).bind(localUserId, rec.ns_record_id, rec.category_name, reviewedTs, recordedTs, firstSentTs, recordDate, JSON.stringify(rec.weak_areas), rec.weak_areas.length === 0 && !isNotCountedReview(rec.review_details) ? 1 : 0, Math.floor(Date.now() / 1e3), rec.review_details || null));
     }
     if (stmts.length) {
       const BATCH = 30;
@@ -6723,7 +6759,8 @@ async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo)
          COUNT(*) FILTER (WHERE r.is_correct = true AND r.reviewed_at IS NOT NULL) AS correct
        FROM records r
        JOIN users u ON u.id = r.user_id
-       WHERE u.email = $1 AND r.deleted_at IS NULL AND r.created_at >= $2 AND r.created_at < ($3::date + interval '1 day')`,
+       WHERE u.email = $1 AND r.deleted_at IS NULL AND r.created_at >= $2 AND r.created_at < ($3::date + interval '1 day')
+         AND COALESCE(r.review_details, '') NOT LIKE '\u{1F6AB}%'`,
       [nsEmail, dateFrom, dateTo]
     );
     const overall = overallResult.rows[0] || { sent: 0, reviewed: 0, correct: 0 };
@@ -6739,6 +6776,7 @@ async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo)
        LEFT JOIN record_categories rc ON rc.id = r.record_category_id
        LEFT JOIN record_category_translations rc_t ON rc_t.record_category_id = rc.id AND rc_t.locale = 'pl'
        WHERE u.email = $1 AND r.deleted_at IS NULL AND r.created_at >= $2 AND r.created_at < ($3::date + interval '1 day')
+         AND COALESCE(r.review_details, '') NOT LIKE '\u{1F6AB}%'
        GROUP BY r.record_category_id, rc_t.name`,
       [nsEmail, dateFrom, dateTo]
     );
@@ -7844,6 +7882,8 @@ async function ensureCoachTables(env) {
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS student_focus (ns_student_id TEXT PRIMARY KEY, criteria TEXT, note TEXT, achieved TEXT, set_by TEXT, set_at INTEGER)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS coach_settings (trainer_email TEXT PRIMARY KEY, corr_threshold INTEGER, updated_at INTEGER)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS student_coach_settings (ns_student_id TEXT PRIMARY KEY, corr_threshold INTEGER, set_by TEXT, updated_at INTEGER)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS record_fp (ns_record_id TEXT PRIMARY KEY, ns_student_id TEXT, sha256 TEXT, dur REAL, rec_ts INTEGER, env TEXT, created_at INTEGER)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_record_fp_student ON record_fp(ns_student_id)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS record_system_override (ns_record_id TEXT PRIMARY KEY, ns_student_id TEXT, system TEXT NOT NULL, student_system TEXT, set_by TEXT, set_at INTEGER)`)
   ]);
   COACH_TABLES_READY = true;
@@ -7965,6 +8005,36 @@ async function handleCoachSettingsSave(request, env) {
 }
 __name(handleCoachSettingsSave, "handleCoachSettingsSave");
 __name2(handleCoachSettingsSave, "handleCoachSettingsSave");
+async function handleRecordFpList(request, env, url) {
+  const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+  const sid = String(url.searchParams.get("student_id") || "");
+  if (!sid) return json({ error: "Brak student_id" }, 400);
+  await ensureCoachTables(env);
+  const rs = await env.DB.prepare("SELECT ns_record_id, sha256, dur, rec_ts, env FROM record_fp WHERE ns_student_id = ? ORDER BY rec_ts DESC LIMIT 500").bind(sid).all();
+  return json({ ok: true, fps: (rs.results || []).map((r) => ({ record_id: r.ns_record_id, sha256: r.sha256, dur: r.dur, rec_ts: r.rec_ts, env: r.env })) });
+}
+__name(handleRecordFpList, "handleRecordFpList");
+__name2(handleRecordFpList, "handleRecordFpList");
+async function handleRecordFpSave(request, env) {
+  let body = {};
+  try {
+    body = await request.json();
+  } catch (e) {
+  }
+  const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+  const rid = String(body.record_id || ""), sid = String(body.student_id || "");
+  const envStr = String(body.env || "");
+  if (!rid || !sid || !envStr || envStr.length > 4e4) return json({ error: "Brak danych odcisku" }, 400);
+  await ensureCoachTables(env);
+  await env.DB.prepare("INSERT INTO record_fp (ns_record_id, ns_student_id, sha256, dur, rec_ts, env, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(ns_record_id) DO NOTHING").bind(rid, sid, String(body.sha256 || "").slice(0, 64), Number(body.dur) || 0, parseInt(body.rec_ts, 10) || null, envStr, Math.floor(Date.now() / 1e3)).run();
+  return json({ ok: true });
+}
+__name(handleRecordFpSave, "handleRecordFpSave");
+__name2(handleRecordFpSave, "handleRecordFpSave");
 async function handleRecordSystemGet(request, env, url) {
   const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
   if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -8087,7 +8157,7 @@ async function handleStudentHome(request, env, url, ctx) {
       if (!syncState) await syncNeedsCorrectionFromPostgres(env, u.id, u.email);
       else if (Date.now() - syncState.last_synced_at * 1e3 > 12e4) speedLater(syncNeedsCorrectionFromPostgres(env, u.id, u.email));
       const { results } = await env.DB.prepare("SELECT * FROM needs_correction_cache WHERE user_id = ? ORDER BY COALESCE(recorded_at, reviewed_at) ASC").bind(u.id).all();
-      out.corrections = { count: results.length, entries: results.map((r) => ({ id: r.ns_record_id, category_name: r.category_name, recorded_at: r.recorded_at ?? null, first_sent_at: r.first_sent_at ?? null, record_date: r.record_date ?? null, reviewed_at: r.reviewed_at, weak_areas: JSON.parse(r.weak_areas || "[]"), all_good: !!r.all_good })) };
+      out.corrections = { count: results.length, entries: results.map(correctionEntryOut) };
     } catch (e) {
     }
   })());
