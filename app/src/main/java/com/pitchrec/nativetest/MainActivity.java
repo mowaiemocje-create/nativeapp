@@ -2540,7 +2540,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             TextView cat = Ui.text(this, L.cat(fe.categoryName), 15f, R.color.pr_text);
             cat.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
             top.addView(cat, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            TextView pill = Ui.text(this, L.t("nie zaliczone"), 10f, R.color.pr_warn);
+            TextView pill = Ui.text(this, fe.notCounted ? "🚫 " + L.t("nie wliczone") : L.t("nie zaliczone"), 10f, R.color.pr_warn);
             pill.setPadding((int) (8 * d), (int) (2 * d), (int) (8 * d), (int) (2 * d));
             pill.setBackground(Ui.rounded((getResources().getColor(R.color.pr_warn) & 0x00FFFFFF) | 0x26000000, 0, 0, 6 * d));
             top.addView(pill);
@@ -2588,13 +2588,41 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 dt.setPadding(0, (int) (4 * d), 0, (int) (6 * d));
                 card.addView(dt);
             }
-            if (fe.allGood) {
+            if (fe.notCounted) {
+                // 🚫 trener nie wlicza nagrania (ta sama sytuacja / to samo nagranie wyslane ponownie)
+                TextView nc = Ui.text(this, "🚫 " + L.t("Nie wliczone — ta sama sytuacja / nagranie wysłane ponownie"), 13f, R.color.pr_text);
+                nc.setTextColor(Color.WHITE);
+                nc.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                nc.setPadding((int) (10 * d), (int) (7 * d), (int) (10 * d), (int) (7 * d));
+                android.graphics.drawable.GradientDrawable ng = new android.graphics.drawable.GradientDrawable(
+                        android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT, new int[]{Color.parseColor("#C62828"), Color.parseColor("#EF6C00")});
+                ng.setCornerRadius(8 * d);
+                nc.setBackground(ng);
+                android.widget.LinearLayout.LayoutParams nlp = new android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                nlp.setMargins(0, (int) (4 * d), 0, (int) (4 * d));
+                card.addView(nc, nlp);
+                String ncMsg = fe.reviewDetails.replaceFirst("^\\s*🚫\\s*", "");
+                if (!ncMsg.isEmpty()) {
+                    TextView msg = Ui.text(this, "💬 " + ncMsg, 12.5f, R.color.pr_text);
+                    msg.setPadding(0, (int) (2 * d), 0, (int) (4 * d));
+                    card.addView(msg);
+                }
+                TextView hint = Ui.text(this, "🎤 " + L.t("Nagraj w to miejsce nową, osobną sytuację"), 12f, R.color.pr_accent);
+                hint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                card.addView(hint);
+            } else if (fe.allGood) {
                 card.addView(Ui.text(this, L.t("Wszystkie elementy techniki ocenione dobrze, ale całość nie została zaliczona. Częsty powód: nagranie było słabej jakości (zbyt cicho, szum, przerwa) i trener nie mógł go w pełni ocenić. Spróbuj nagrać jeszcze raz w spokojniejszym miejscu."), 12f, R.color.pr_muted));
             } else if (!fe.weakText.isEmpty()) {
                 card.addView(Ui.text(this, L.t("Słabe elementy:"), 11f, R.color.pr_muted));
                 TextView wk = Ui.text(this, fe.weakText, 12f, R.color.pr_warn);
                 wk.setPadding(0, (int) (2 * d), 0, 0);
                 card.addView(wk);
+            }
+            if (!fe.notCounted && !fe.reviewDetails.isEmpty()) {
+                TextView cm = Ui.text(this, "💬 " + L.t("Komentarz trenera") + ": " + fe.reviewDetails, 12f, R.color.pr_text);
+                cm.setPadding(0, (int) (6 * d), 0, 0);
+                card.addView(cm);
             }
             TextView sysTv = Ui.text(this, "🗣 " + L.t("System mowy") + ": …", 12f, R.color.pr_purple);
             sysTv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);

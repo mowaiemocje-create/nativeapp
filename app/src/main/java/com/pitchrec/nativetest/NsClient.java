@@ -255,6 +255,8 @@ public class NsClient {
         public long recordedAt, firstSentAt;   // unix [s]; 0 = brak (stary cache backendu)
         public String recordDate = "";
         public boolean allGood;
+        public String reviewDetails = "";   // komentarz trenera do nagrania
+        public boolean notCounted;          // 🚫 trener nie wlicza (ta sama sytuacja / nagranie wyslane ponownie)
     }
 
     public interface FixCallback { void done(java.util.List<FixEntry> list, String err); }
@@ -273,6 +275,9 @@ public class NsClient {
             fe.firstSentAt = o.isNull("first_sent_at") ? 0L : o.optLong("first_sent_at", 0L);
             fe.recordDate = o.isNull("record_date") ? "" : o.optString("record_date", "");
             fe.allGood = o.optBoolean("all_good", false);
+            fe.reviewDetails = o.isNull("review_details") ? "" : o.optString("review_details", "").trim();
+            fe.notCounted = o.optBoolean("not_counted", false) || fe.reviewDetails.startsWith("🚫");
+            if (fe.notCounted) fe.allGood = false;
             StringBuilder sb = new StringBuilder();
             JSONArray wk = o.optJSONArray("weak_areas");
             if (wk != null) {
@@ -536,6 +541,8 @@ public class NsClient {
             fe.recordedAt = isoSec(has(o, "record_file_updated_by_author_at") ? o.optString("record_file_updated_by_author_at", "") : o.optString("created_at", ""));
             fe.firstSentAt = isoSec(o.optString("created_at", ""));
             fe.recordDate = has(o, "date") ? o.optString("date", "") : "";
+            fe.reviewDetails = has(o, "review_details") ? o.optString("review_details", "").trim() : "";
+            fe.notCounted = fe.reviewDetails.startsWith("🚫");
             StringBuilder sb = new StringBuilder();
             JSONArray rates = o.optJSONArray("record_rates");
             int weak = 0;
@@ -554,7 +561,7 @@ public class NsClient {
                 sb.append("• ").append(RateNames.tr(cn)).append(" — ").append(RateNames.tr(un));
             }
             fe.weakText = sb.toString();
-            fe.allGood = weak == 0;
+            fe.allGood = weak == 0 && !fe.notCounted;
             if (!fe.id.isEmpty()) list.add(fe);
         }
         return list;
