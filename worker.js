@@ -8129,6 +8129,10 @@ async function ensureTranscriptTables(env) {
   } catch (e) {
   }
   try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN src_file TEXT").run();
+  } catch (e) {
+  }
+  try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS trainer_uploader (ns_user_id TEXT PRIMARY KEY, set_by TEXT, created_at INTEGER)").run();
   } catch (e) {
   }
@@ -8549,6 +8553,7 @@ function transcriptOut(r) {
         return null;
       }
     })(),
+    src_file: r.src_file || null,
     spk_people: (() => {
       try {
         return r.spk_people ? JSON.parse(r.spk_people) : null;
@@ -8743,7 +8748,7 @@ async function txDiarizeAudio(env, rid, audioBuf, lang, words, category, dur, da
 }
 __name(txDiarizeAudio, "txDiarizeAudio");
 __name2(txDiarizeAudio, "txDiarizeAudio");
-async function transcribeAndStore(env, rid, sid, audioBuf, forcedLang, category, trainerAcc) {
+async function transcribeAndStore(env, rid, sid, audioBuf, forcedLang, category, trainerAcc, srcFile) {
   await ensureTranscriptTables(env);
   const now = Math.floor(Date.now() / 1e3);
   const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -8800,6 +8805,9 @@ async function transcribeAndStore(env, rid, sid, audioBuf, forcedLang, category,
   }
   await env.DB.prepare(`INSERT INTO record_transcript (ns_record_id, ns_student_id, status, text, lang, dur, words, speakers, diar, spk_names, spk_src, model, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(ns_record_id) DO UPDATE SET status=excluded.status, text=excluded.text, lang=excluded.lang, dur=excluded.dur, words=excluded.words, speakers=excluded.speakers, diar=excluded.diar, spk_names=excluded.spk_names, spk_src=excluded.spk_src, model=excluded.model, error=excluded.error, created_at=excluded.created_at`).bind(rid, sid ? String(sid) : null, status, text, info.language || null, dur, JSON.stringify(words), speakers ? JSON.stringify(speakers) : null, diarNote, spkNames ? JSON.stringify(spkNames) : null, spkSrc, WHISPER_MODEL + "|" + TX_VERSION, err, now).run();
+  if (status === "ok") {
+    await env.DB.prepare("UPDATE record_transcript SET src_file = ?, fixed = NULL, summary = NULL, edited_by = NULL, spk_people = NULL WHERE ns_record_id = ?").bind(srcFile || null, rid).run();
+  }
   if (status === "ok" && dur) await env.DB.prepare("INSERT INTO transcript_usage (day, minutes) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET minutes = minutes + excluded.minutes").bind(day, dur / 60).run();
   return { ns_record_id: rid, ns_student_id: sid, status, text, lang: info.language || null, dur, words: JSON.stringify(words), speakers: speakers ? JSON.stringify(speakers) : null, spk_names: spkNames ? JSON.stringify(spkNames) : null, spk_src: spkSrc, created_at: now, error: err, diar: diarNote };
 }
@@ -8831,11 +8839,22 @@ async function transcribeTick(env) {
   const state = {};
   for (let i = 0; i < rows.length; i += 90) {
     const chunk = rows.slice(i, i + 90).map((r) => r.id);
-    const rs = await env.DB.prepare(`SELECT ns_record_id, status, model, created_at, (speakers IS NOT NULL) AS has_sp, diar, spk_src, (summary IS NOT NULL) AS has_sum, (fixed IS NOT NULL) AS has_fix FROM record_transcript WHERE ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    const rs = await env.DB.prepare(`SELECT ns_record_id, status, model, created_at, (speakers IS NOT NULL) AS has_sp, diar, spk_src, (summary IS NOT NULL) AS has_sum, (fixed IS NOT NULL) AS has_fix, src_file FROM record_transcript WHERE ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
     for (const x of rs.results || []) state[x.ns_record_id] = x;
   }
   const nowS = Math.floor(Date.now() / 1e3);
-  const missing = rows.filter((r) => !state[r.id] || state[r.id].status === "error" && nowS - state[r.id].created_at > 6 * 3600);
+  const changed = rows.filter((r) => {
+    const x = state[r.id];
+    return x && x.status === "ok" && x.src_file && r.record_file && x.src_file !== r.record_file;
+  });
+  const noSrc = rows.filter((r) => {
+    const x = state[r.id];
+    return x && x.status === "ok" && !x.src_file && r.record_file;
+  }).slice(0, 300);
+  for (let i = 0; i < noSrc.length; i += 50) {
+    await env.DB.batch(noSrc.slice(i, i + 50).map((r) => env.DB.prepare("UPDATE record_transcript SET src_file = ? WHERE ns_record_id = ? AND src_file IS NULL").bind(r.record_file, r.id)));
+  }
+  const missing = changed.concat(rows.filter((r) => !state[r.id] || state[r.id].status === "error" && nowS - state[r.id].created_at > 6 * 3600));
   const outdated = rows.filter((r) => state[r.id] && state[r.id].status === "ok" && !/\|v[345]-/.test(String(state[r.id].model || "")));
   const tset = await txTrainerSet(env);
   const trMails = txTrainerEmails(env);
@@ -8930,7 +8949,7 @@ async function transcribeTick(env) {
       await env.DB.prepare("UPDATE record_transcript SET speakers = ?, diar = ? WHERE ns_record_id = ?").bind(dz.speakers ? JSON.stringify(dz.speakers) : null, dz.note, next.id).run();
       continue;
     }
-    await transcribeAndStore(env, next.id, next.user_id, await a.arrayBuffer(), txLangForCountry(next.country), next.category, await txIsTrainerAcc(env, next.user_id, next.p_fn, next.p_ln, next.p_email));
+    await transcribeAndStore(env, next.id, next.user_id, await a.arrayBuffer(), txLangForCountry(next.country), next.category, await txIsTrainerAcc(env, next.user_id, next.p_fn, next.p_ln, next.p_email), next.record_file);
   }
 }
 __name(transcribeTick, "transcribeTick");
@@ -9448,7 +9467,14 @@ async function handleTranscriptRun(request, env) {
   if (!rid || !path.startsWith("/uploads/")) return json({ error: "Brak record_id albo \u015Bcie\u017Cki pliku" }, 400);
   await ensureTranscriptTables(env);
   const have = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first();
-  if (have && have.status === "ok" && !body.force && String(have.model || "").endsWith(TX_VERSION)) return json({ ok: true, item: transcriptOut(have) });
+  let reqFile = "";
+  try {
+    reqFile = decodeURIComponent(path.split("/").pop() || "");
+  } catch (e) {
+    reqFile = path.split("/").pop() || "";
+  }
+  const sameFile = !have || !have.src_file || !reqFile || have.src_file === reqFile;
+  if (have && have.status === "ok" && !body.force && sameFile && /\|v[345]-/.test(String(have.model || ""))) return json({ ok: true, item: transcriptOut(have) });
   const a = await fetch(nsServerBase(body.ns_server) + path, { headers: { "Authorization": "Token token=" + body.ns_token, "Email": body.ns_email } });
   if (!a.ok) return json({ error: "Nie uda\u0142o si\u0119 pobra\u0107 pliku z NS (" + a.status + ")" }, 502);
   const ri = await txRecordInfo(env, rid);
@@ -9460,7 +9486,7 @@ async function handleTranscriptRun(request, env) {
     }
   } catch (e) {
   }
-  const item = await transcribeAndStore(env, rid, body.student_id, await a.arrayBuffer(), ri.lang, ri.category, ri.trainerAcc);
+  const item = await transcribeAndStore(env, rid, body.student_id, await a.arrayBuffer(), ri.lang, ri.category, ri.trainerAcc, ri.file);
   if (item.status !== "ok") return json({ ok: false, error: item.error, item: transcriptOut(item) }, item.status === "limit" ? 429 : 502);
   return json({ ok: true, item: transcriptOut(item), diar: item.diar || null, category: ri.category || null });
 }
