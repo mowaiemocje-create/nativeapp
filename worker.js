@@ -5925,6 +5925,9 @@ var worker_default = {
         TX_TRAINER_SET = null;
         return json({ ok: true, on: !!body.on });
       }
+      if (url.pathname === "/transcripts/edit" && request.method === "POST") {
+        return await handleTranscriptEdit(request, env);
+      }
       if (url.pathname === "/transcripts/fix" && request.method === "POST") {
         return await handleTranscriptFix(request, env);
       }
@@ -8118,6 +8121,14 @@ async function ensureTranscriptTables(env) {
   } catch (e) {
   }
   try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN spk_people TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN edited_by TEXT").run();
+  } catch (e) {
+  }
+  try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS trainer_uploader (ns_user_id TEXT PRIMARY KEY, set_by TEXT, created_at INTEGER)").run();
   } catch (e) {
   }
@@ -8538,6 +8549,14 @@ function transcriptOut(r) {
         return null;
       }
     })(),
+    spk_people: (() => {
+      try {
+        return r.spk_people ? JSON.parse(r.spk_people) : null;
+      } catch (e) {
+        return null;
+      }
+    })(),
+    edited_by: r.edited_by || null,
     created_at: r.created_at,
     error: r.error || null
   };
@@ -8547,7 +8566,7 @@ __name2(transcriptOut, "transcriptOut");
 var TX_LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 function txAiDailyLimit(env) {
   const v = parseFloat(env.AI_SPEAKERS_DAILY);
-  return isFinite(v) && v >= 0 ? v : 3e3;
+  return isFinite(v) && v >= 0 ? v : 2e4;
 }
 __name(txAiDailyLimit, "txAiDailyLimit");
 function txSentences(words) {
@@ -8599,7 +8618,7 @@ __name2(txLlmText, "txLlmText");
 async function txLlm(env, sys, user, maxTokens) {
   let text = "";
   try {
-    const r1 = await env.AI.run(TX_LLM_BEST, { input: [{ role: "developer", content: sys }, { role: "user", content: user }], reasoning: { effort: "low" }, max_output_tokens: (maxTokens || 1500) + 2e3 });
+    const r1 = await env.AI.run(TX_LLM_BEST, { input: [{ role: "developer", content: sys }, { role: "user", content: user }], reasoning: { effort: "low" }, max_output_tokens: (maxTokens || 1500) + 6e3 });
     text = txLlmText(r1);
   } catch (e) {
     console.log("gpt-oss", String(e && e.message || e).slice(0, 200));
@@ -8639,15 +8658,30 @@ async function txAiSpeakers(env, words, category, lang, force, trainerAcc) {
     const prevN = Math.min(8, i);
     const ctx = prevN ? "Koniec poprzedniego fragmentu (ju\u017C przypisane):\n" + sents.slice(i - prevN, i).map((x, k) => "[osoba " + labels[i - prevN + k] + "] " + x.text).join("\n") + "\n\n" : "";
     const user = "Kategoria nagrania: " + (category || "\u2014") + ". J\u0119zyk: " + (lang || "?") + ".\n" + ctx + "Zdania (" + part.length + "):\n" + part.map((x, k) => k + 1 + ". " + x.text).join("\n");
-    let txt;
+    const pickChanges = /* @__PURE__ */ __name((j2) => {
+      if (!j2) return null;
+      const a = j2.zmiany || j2.changes || j2.turns || j2.zmiana;
+      if (Array.isArray(a) && a.length) return a;
+      if (Array.isArray(j2.s) && j2.s.length) return j2.s.map((x, k) => [k + 1, x]);
+      return null;
+    }, "pickChanges");
+    let txt = "", j = null, ch = null;
     try {
       txt = await txLlm(env, sys, user, 300 + part.length * 3);
+      j = txParseJson(txt);
+      ch = pickChanges(j);
     } catch (e) {
-      return { speakers: null, src: "ai-err", note: "AI: " + String(e && e.message || e).slice(0, 120) };
+      txt = String(e && e.message || e);
     }
-    const j = txParseJson(txt);
-    let ch = j && Array.isArray(j.zmiany) ? j.zmiany : j && Array.isArray(j.s) ? j.s.map((x, k) => [k + 1, x]) : null;
-    if (!ch || !ch.length) return { speakers: null, src: "ai-err", note: "AI: nieczytelna odpowied\u017A" };
+    if (!ch) {
+      try {
+        const res = await env.AI.run(TX_LLM_MODEL, { messages: [{ role: "system", content: sys }, { role: "user", content: user + "\n\nOdpowiedz tylko JSON-em z polami roles i zmiany." }], max_tokens: 400 + part.length * 4, temperature: 0 });
+        j = txParseJson(txLlmText(res));
+        ch = pickChanges(j);
+      } catch (e) {
+      }
+    }
+    if (!ch || !ch.length) return { speakers: null, src: "ai-err", note: "AI: nieczytelna odpowied\u017A (" + String(txt || "").replace(/\s+/g, " ").slice(0, 80) + ")" };
     const arr = new Array(part.length).fill(0);
     ch = ch.map((c) => Array.isArray(c) ? [parseInt(c[0], 10), parseInt(c[1], 10)] : [parseInt(c.zdanie || c.nr, 10), parseInt(c.osoba, 10)]).filter((c) => c[0] >= 1 && c[0] <= part.length && c[1] >= 1 && c[1] <= 3).sort((a, b) => a[0] - b[0]);
     let cur = ch.length && ch[0][0] === 1 ? ch[0][1] : labels.length ? labels[labels.length - 1] : 1, ci = 0;
@@ -8855,6 +8889,11 @@ async function transcribeTick(env) {
   for (const r of diarRetry) r._diarOnly = true;
   const queue = diarRetry.concat(missing, outdated);
   const pathTpl = await txPathTpl(env);
+  const ae0 = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'ai_err_retry'").first();
+  if (!ae0 || ae0.v !== day) {
+    await env.DB.prepare("UPDATE record_transcript SET spk_src = NULL WHERE spk_src = 'ai-err'").run();
+    await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('ai_err_retry', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(day).run();
+  }
   const ar0 = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'ai_spk_v'").first();
   if (!ar0 || ar0.v !== "2") {
     await env.DB.prepare("UPDATE record_transcript SET speakers = NULL, spk_names = NULL, spk_src = NULL WHERE spk_src IN ('ai-text', 'ai-one', 'ai-err')").run();
@@ -9022,11 +9061,12 @@ async function handleTranscriptsCorpus(request, env, url) {
        WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL
          AND COALESCE(r.date, r.created_at::date) >= COALESCE($1::date, '2000-01-01'::date)
          AND COALESCE(r.date, r.created_at::date) <= COALESCE($2::date, '2100-01-01'::date)
+         AND ($4::text IS NULL OR r.user_id::text = $4::text)
          AND ($3::text IS NULL OR r.user_id IN (SELECT s.id FROM users s
                JOIN students_groups_users sgu ON sgu.students_group_id = s.students_group_id
                JOIN users t ON t.id = sgu.user_id WHERE LOWER(t.email) = LOWER($3::text)))
        ORDER BY r.created_at DESC LIMIT 3000`,
-      [from || null, to || null, who.admin ? null : String(who.email || "-")]
+      [from || null, to || null, who.admin ? null : String(who.email || "-"), url.searchParams.get("student_id") || null]
     );
     for (const m of q.rows) meta[m.id] = m;
   } finally {
@@ -9038,7 +9078,7 @@ async function handleTranscriptsCorpus(request, env, url) {
   const ids = Object.keys(meta), rows = [];
   for (let i = 0; i < ids.length; i += 90) {
     const chunk = ids.slice(i, i + 90);
-    const rs = await env.DB.prepare(`SELECT ns_record_id, ns_student_id, text, lang, dur, words, speakers, spk_names, spk_src, summary, fixed, created_at FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    const rs = await env.DB.prepare(`SELECT ns_record_id, ns_student_id, text, lang, dur, words, speakers, spk_names, spk_src, spk_people, edited_by, summary, fixed, created_at FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
     for (const r of rs.results || []) rows.push(r);
   }
   const tpl = await txPathTpl(env);
@@ -9089,10 +9129,23 @@ async function handleTranscriptsCorpus(request, env, url) {
     } catch (e) {
     }
     if (summary && summary.error) summary = null;
+    let people = null;
+    try {
+      people = r.spk_people ? JSON.parse(r.spk_people) : null;
+    } catch (e) {
+    }
+    if (!names && r.spk_names) {
+      try {
+        names = JSON.parse(r.spk_names);
+      } catch (e) {
+      }
+    }
     items.push({
       country: m.country || "",
       turns,
       speaker_names: names,
+      spk_people: people,
+      edited_by: r.edited_by || null,
       spk_src: r.spk_src || null,
       summary,
       fixed,
@@ -9337,6 +9390,40 @@ async function handleTranscriptFix(request, env) {
 }
 __name(handleTranscriptFix, "handleTranscriptFix");
 __name2(handleTranscriptFix, "handleTranscriptFix");
+async function handleTranscriptEdit(request, env) {
+  const { body, err } = await txAuthBody(request, env);
+  if (err) return err;
+  const rid = String(body.record_id || "");
+  if (!rid) return json({ error: "Brak record_id" }, 400);
+  await ensureTranscriptTables(env);
+  const t = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first();
+  if (!t || t.status !== "ok") return json({ error: "To nagranie nie ma tekstu" }, 404);
+  const sets = [], vals = [];
+  if (Array.isArray(body.fixed)) {
+    const f = body.fixed.map((x) => [x[0] === null || x[0] === void 0 || x[0] === "" ? null : Math.max(0, Math.min(5, parseInt(x[0], 10) || 0)), String(x[1] || "").slice(0, 5e3)]).filter((x) => x[1].trim());
+    sets.push("fixed = ?");
+    vals.push(JSON.stringify(f));
+  }
+  if (body.spk_names && typeof body.spk_names === "object") {
+    const n = {};
+    for (const k of Object.keys(body.spk_names)) if (String(body.spk_names[k] || "").trim()) n[k] = String(body.spk_names[k]).trim().slice(0, 60);
+    sets.push("spk_names = ?");
+    vals.push(JSON.stringify(n));
+  }
+  if (body.spk_people && typeof body.spk_people === "object") {
+    const pp = {};
+    for (const k of Object.keys(body.spk_people)) if (body.spk_people[k]) pp[k] = String(body.spk_people[k]);
+    sets.push("spk_people = ?");
+    vals.push(JSON.stringify(pp));
+  }
+  if (!sets.length) return json({ error: "Brak zmian" }, 400);
+  sets.push("edited_by = ?");
+  vals.push(String(body.ns_email || "trener"));
+  await env.DB.prepare("UPDATE record_transcript SET " + sets.join(", ") + " WHERE ns_record_id = ?").bind(...vals, rid).run();
+  return json({ ok: true, item: transcriptOut(await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first()) });
+}
+__name(handleTranscriptEdit, "handleTranscriptEdit");
+__name2(handleTranscriptEdit, "handleTranscriptEdit");
 async function handleTranscriptDelete(request, env) {
   const { body, err } = await txAuthBody(request, env);
   if (err) return err;
