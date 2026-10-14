@@ -61,6 +61,9 @@ public class DiaryPage {
 
     private static Draft draft;
     private static JSONArray feelings, talkPeople, successPeople;
+    // Google Play bez konta NewSpeech (pelna wersja): dziennik zapisywany tylko w telefonie
+    private static boolean draftLocal = false, dictsLocal = false;
+    private final boolean local;
 
     private static final String[][] SUCCESS_Q = {
             {"spoke", "Powiedziałeś coś na głos poza domem?", "Powiedziałem coś na głos poza domem."},
@@ -86,6 +89,7 @@ public class DiaryPage {
         this.root = root;
         this.host = host;
         this.d = a.getResources().getDisplayMetrics().density;
+        this.local = Access.localMode(a);
     }
 
     private static String today() {
@@ -94,7 +98,7 @@ public class DiaryPage {
 
     // ── wczytanie ──
     public void render() {
-        if (draft == null || !today().equals(draft.date)) { draft = new Draft(); draft.date = today(); }
+        if (draft == null || !today().equals(draft.date) || draftLocal != local) { draft = new Draft(); draft.date = today(); draftLocal = local; }
         root.removeAllViews();
         root.addView(header());
         TextView loading = Ui.text(a, L.t("⏳ Wczytywanie dziennika…"), 14f, R.color.pr_muted);
@@ -127,6 +131,7 @@ public class DiaryPage {
     private List<SrvRec> serverToday = new ArrayList<>();
 
     private void loadServerToday(Runnable then) {
+        if (local) { serverToday = localToday(); then.run(); return; }
         NsClient.request("GET", "/records?page=1&page_size=40&sort_by=date&sort_order=desc", host.token(), host.email(), null, null, r -> {
             List<SrvRec> out = new ArrayList<>();
             JSONArray arr = collection(r);
@@ -157,6 +162,26 @@ public class DiaryPage {
         return today.equals(new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(sec * 1000L)));
     }
 
+    // Tryb lokalny: dzisiejsze OPISANE nagrania z telefonu (kategoria + emocja)
+    private List<SrvRec> localToday() {
+        List<SrvRec> out = new ArrayList<>();
+        java.io.File[] files = a.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files == null) return out;
+        String t = today();
+        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        for (java.io.File fl : files) {
+            if (!t.equals(f.format(new Date(fl.lastModified())))) continue;
+            RecMeta rm = RecMeta.load(a, fl.getName());
+            if (rm.cat == null || rm.cat.isEmpty() || "Special".equals(rm.cat)) continue;
+            SrvRec s = new SrvRec();
+            s.id = fl.getName();
+            s.cat = rm.cat;
+            s.emo = rm.emotion;
+            out.add(s);
+        }
+        return out;
+    }
+
     // emocja z opisu nagrania w telefonie — po ID rekordu NS
     private java.util.Map<String, Integer> localEmotions() {
         java.util.Map<String, Integer> m = new java.util.HashMap<>();
@@ -185,7 +210,23 @@ public class DiaryPage {
     private static final String[] ALL_CATS = {"Sklepy", "Rodzina", "Telefon rodzina/znajomi", "Wystąpienie", "Praca / Szkoła", "Monolog / Czytanie", "Przechodzień",
             "Miasto - inne", "Przyjaciele", "Special", "Telefon do miasta", "W grupie", "Zerówka", "Phone do Kursanta/Trenera", "Restauracja Kelner", "McDrive, DriveThru"};
 
+    private static JSONArray localDict(String[][] rows) {
+        JSONArray arr = new JSONArray();
+        try { for (String[] r : rows) arr.put(new JSONObject().put("id", r[0]).put("name", r[1])); } catch (Exception e) { }
+        return arr;
+    }
+
     private void loadDicts(Done done) {
+        if (local) {
+            feelings = localDict(new String[][]{{"f1", "wyśmienite"}, {"f2", "bardzo dobre"}, {"f3", "dobre"}, {"f4", "słabe"}, {"f5", "smutek"}});
+            String[][] ppl = {{"p1", "Rodzina"}, {"p2", "Praca / Szkoła"}, {"p3", "Znajomi"}, {"p4", "Obcy"}, {"p5", "Nikt"}};
+            talkPeople = localDict(ppl);
+            successPeople = localDict(ppl);
+            dictsLocal = true;
+            done.run(true);
+            return;
+        }
+        if (dictsLocal) { feelings = null; talkPeople = null; successPeople = null; dictsLocal = false; }
         if (feelings != null && feelings.length() > 0 && successPeople != null && successPeople.length() > 0 && talkPeople != null) { done.run(true); return; }
         NsClient.request("GET", "/talk_feelings", host.token(), host.email(), null, null, r1 -> {
             if (r1.isAuthError()) { host.onAuthExpired(); return; }
@@ -236,8 +277,54 @@ public class DiaryPage {
     }
 
     // Czy dzisiejszy wpis juz istnieje? Jesli tak — wczytujemy go (zapis = PUT, a nie nowy wpis).
+    private android.content.SharedPreferences prefs() {
+        return a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+    }
+
+    private static void strs(JSONArray arr, List<String> out) {
+        out.clear();
+        for (int i = 0; arr != null && i < arr.length(); i++) out.add(arr.optString(i, ""));
+    }
+
     private void checkToday(Runnable then) {
         if (draft.existingId != null) { then.run(); return; }
+        if (local) {
+            draft.existingId = "";
+            String js = prefs().getString("diary_local_" + draft.date, null);
+            if (js != null) {
+                try {
+                    JSONObject e = new JSONObject(js);
+                    draft.existingId = draft.date;
+                    ReminderReceiver.markDiary(a, draft.date);
+                    draft.jacobson = e.optInt("jacobson", 0);
+                    draft.scan = e.optInt("scan", 0);
+                    JSONObject sc = e.optJSONObject("success");
+                    if (sc != null) for (String[] q : SUCCESS_Q) if (sc.has(q[0])) draft.success.put(q[0], sc.optBoolean(q[0], false));
+                    draft.extraNote = e.optString("extraNote", "");
+                    draft.diffNote = e.optString("diffNote", "");
+                    strs(e.optJSONArray("successWho"), draft.successWho);
+                    strs(e.optJSONArray("talkNoRec"), draft.talkNoRec);
+                    strs(e.optJSONArray("phoneNoRec"), draft.phoneNoRec);
+                    if (e.has("controlLost")) draft.controlLost = e.optBoolean("controlLost", false);
+                    strs(e.optJSONArray("controlDetails"), draft.controlDetails);
+                    String fid = e.optString("feelingId", "");
+                    draft.feelingId = fid.isEmpty() ? null : fid;
+                    strs(e.optJSONArray("feelingContext"), draft.feelingContext);
+                    draft.city = e.optString("city", "");
+                    strs(e.optJSONArray("hard"), draft.hard);
+                    strs(e.optJSONArray("easy"), draft.easy);
+                    strs(e.optJSONArray("alcohol"), draft.alcohol);
+                    draft.tiredness = e.optInt("tiredness", 5);
+                    draft.motivation = e.optInt("motivation", 5);
+                    draft.coffee = e.optInt("coffee", 0);
+                    draft.sleep = e.optDouble("sleep", 7);
+                    String act = e.optString("activity", "");
+                    draft.activity = act.isEmpty() ? null : act;
+                } catch (Exception ex) { }
+            }
+            then.run();
+            return;
+        }
         NsClient.request("GET", "/diaries?sort_by=date&sort_order=desc&page_size=5", host.token(), host.email(), null, null, r -> {
             JSONArray list = collection(r);
             draft.existingId = "";
@@ -323,6 +410,11 @@ public class DiaryPage {
         LinearLayout replies = new LinearLayout(a);
         replies.setOrientation(LinearLayout.VERTICAL);
         root.addView(replies);
+        if (local) {
+            TextView li = Ui.text(a, "📱 " + L.t("Dziennik zapisuje się tylko w Twoim telefonie."), 12f, R.color.pr_muted);
+            li.setPadding(0, 0, 0, (int) (8 * d));
+            root.addView(li);
+        } else {
         loadTrainerReplies(replies);
         // Wyrazny przycisk: MONOLOG — PODSUMOWANIE DNIA
         Button mono = Ui.button(a, "🎙️  " + L.t("NAGRAJ MONOLOG — PODSUMOWANIE DNIA"), R.color.pr_pause, true);
@@ -331,6 +423,7 @@ public class DiaryPage {
         LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (56 * d));
         ml.bottomMargin = (int) (12 * d);
         root.addView(mono, ml);
+        }
         if (draft.locked) {
             TextView lock = Ui.text(a, L.t("🔒 Trener już sprawdził ten wpis — edycja zablokowana"), 12f, R.color.pr_pause);
             lock.setTypeface(Typeface.DEFAULT_BOLD);
@@ -781,7 +874,8 @@ public class DiaryPage {
             }
         }
         if (done.isEmpty()) return null;
-        return "✨ " + L.f("Część dziennika uzupełniona z dzisiejszych nagrań wysłanych do NewSpeech ({0}):", n) + " " + android.text.TextUtils.join(", ", done)
+        return "✨ " + (local ? L.f("Część dziennika uzupełniona z dzisiejszych opisanych nagrań ({0}):", n)
+                : L.f("Część dziennika uzupełniona z dzisiejszych nagrań wysłanych do NewSpeech ({0}):", n)) + " " + android.text.TextUtils.join(", ", done)
                 + ".\n" + L.t("Sprawdź i dokończ resztę — możesz wszystko zmienić.");
     }
 
@@ -861,6 +955,7 @@ public class DiaryPage {
                     .setMessage(android.text.TextUtils.join("\n", missing)).setPositiveButton("OK", null).show();
             return;
         }
+        if (local) { saveLocal(); return; }
         String notes = buildNotes();
         String comment = controlComment();
         String subst = feelingSubst();
@@ -930,6 +1025,87 @@ public class DiaryPage {
             btn.setEnabled(true);
             new AlertDialog.Builder(a).setTitle(L.t("Błąd")).setMessage(String.valueOf(e.getMessage())).setPositiveButton("OK", null).show();
         }
+    }
+
+    // Tryb lokalny: caly wpis jako JSON w telefonie (bez NewSpeech, backendu i Google Forms)
+    private void saveLocal() {
+        try {
+            JSONObject e = new JSONObject();
+            e.put("date", draft.date);
+            e.put("jacobson", draft.jacobson);
+            e.put("scan", draft.scan);
+            JSONObject sc = new JSONObject();
+            for (java.util.Map.Entry<String, Boolean> x : draft.success.entrySet()) if (x.getValue() != null) sc.put(x.getKey(), x.getValue().booleanValue());
+            e.put("success", sc);
+            e.put("extraNote", draft.extraNote);
+            e.put("diffNote", draft.diffNote);
+            e.put("successWho", new JSONArray(draft.successWho));
+            e.put("talkNoRec", new JSONArray(draft.talkNoRec));
+            e.put("phoneNoRec", new JSONArray(draft.phoneNoRec));
+            if (draft.controlLost != null) e.put("controlLost", draft.controlLost.booleanValue());
+            e.put("controlDetails", new JSONArray(draft.controlDetails));
+            e.put("feelingId", draft.feelingId == null ? "" : draft.feelingId);
+            e.put("feeling", labels(feelings, java.util.Collections.singletonList(draft.feelingId)));
+            e.put("feelingContext", new JSONArray(draft.feelingContext));
+            e.put("city", draft.city);
+            e.put("hard", new JSONArray(draft.hard));
+            e.put("easy", new JSONArray(draft.easy));
+            e.put("alcohol", new JSONArray(draft.alcohol));
+            e.put("tiredness", draft.tiredness);
+            e.put("motivation", draft.motivation);
+            e.put("coffee", draft.coffee);
+            e.put("sleep", draft.sleep);
+            e.put("activity", draft.activity == null ? "" : draft.activity);
+            e.put("notes", buildNotes());
+            boolean isUpdate = draft.existingId != null && !draft.existingId.isEmpty();
+            String dates = prefs().getString("diary_local_dates", "");
+            java.util.LinkedHashSet<String> ds = new java.util.LinkedHashSet<>();
+            ds.add(draft.date);
+            for (String x : dates.split(",")) if (!x.trim().isEmpty()) ds.add(x.trim());
+            prefs().edit().putString("diary_local_" + draft.date, e.toString())
+                    .putString("diary_local_dates", android.text.TextUtils.join(",", ds)).apply();
+            draft.existingId = draft.date;
+            ReminderReceiver.markDiary(a, draft.date);
+            new AlertDialog.Builder(a).setTitle(isUpdate ? L.t("Wpis dziennika zaktualizowany!") : L.t("Zapisano ✓"))
+                    .setMessage(L.t("Zapisano w telefonie") + " — " + draft.date).setPositiveButton("OK", null).show();
+        } catch (Exception ex) {
+            new AlertDialog.Builder(a).setTitle(L.t("Błąd zapisu dziennika")).setMessage(String.valueOf(ex.getMessage())).setPositiveButton("OK", null).show();
+        }
+    }
+
+    private void showLocalHistory() {
+        LinearLayout box = new LinearLayout(a);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int p = (int) (16 * d);
+        box.setPadding(p, p / 2, p, p);
+        String dates = prefs().getString("diary_local_dates", "");
+        List<String> ds = new ArrayList<>();
+        for (String x : dates.split(",")) if (!x.trim().isEmpty()) ds.add(x.trim());
+        java.util.Collections.sort(ds, java.util.Collections.reverseOrder());
+        int shown = 0;
+        for (String dt : ds) {
+            if (shown >= 60) break;
+            String js = prefs().getString("diary_local_" + dt, null);
+            if (js == null) continue;
+            try {
+                JSONObject e = new JSONObject(js);
+                String feel = e.optString("feeling", "");
+                TextView t = Ui.text(a, dt + (feel.isEmpty() ? "" : " · " + L.t(feel)), 13f, R.color.pr_text);
+                t.setTypeface(Typeface.DEFAULT_BOLD);
+                box.addView(t);
+                StringBuilder sb = new StringBuilder(e.optString("notes", ""));
+                JSONArray ea = e.optJSONArray("easy"), ha = e.optJSONArray("hard");
+                if (ea != null && ea.length() > 0) { List<String> l = new ArrayList<>(); strs(ea, l); sb.append(sb.length() > 0 ? "\n" : "").append(L.t("łatwe:")).append(' ').append(catList(l)); }
+                if (ha != null && ha.length() > 0) { List<String> l = new ArrayList<>(); strs(ha, l); sb.append(sb.length() > 0 ? "\n" : "").append(L.t("trudne:")).append(' ').append(catList(l)); }
+                if (sb.length() > 0) box.addView(Ui.text(a, sb.toString(), 12f, R.color.pr_muted));
+                box.addView(Ui.spacer(a, 10));
+                shown++;
+            } catch (Exception ex) { }
+        }
+        if (shown == 0) box.addView(Ui.text(a, L.t("Brak wcześniejszych wpisów dziennika."), 13f, R.color.pr_muted));
+        android.widget.ScrollView sv = new android.widget.ScrollView(a);
+        sv.addView(box);
+        new AlertDialog.Builder(a).setTitle(L.t("HISTORIA DZIENNIKA")).setView(sv).setPositiveButton(L.t("Zamknij"), null).show();
     }
 
     private static void form(StringBuilder f, String k, String v) {
@@ -1106,6 +1282,7 @@ public class DiaryPage {
     }
 
     private void showHistory() {
+        if (local) { showLocalHistory(); return; }
         NsClient.request("GET", "/diaries?sort_by=date&sort_order=desc&page_size=30", host.token(), host.email(), null, null, r -> {
             if (r.isAuthError()) { host.onAuthExpired(); return; }
             JSONArray list = collection(r);

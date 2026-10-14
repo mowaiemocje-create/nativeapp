@@ -76,6 +76,15 @@ public class MapActivity extends Activity {
         final String city = getIntent().getStringExtra("city");
         final long availUntil = getIntent().getLongExtra("availUntil", 0L);
 
+        // Pelna wersja Google Play bez konta: mapa wlasnych nagran z telefonu (bez danych innych osob)
+        final String localPoints = getIntent().getStringExtra("localPoints");
+        if (localPoints != null) {
+            web.setWebViewClient(new WebViewClient());
+            web.loadDataWithBaseURL("https://local.newspeech/", localMapHtml(localPoints,
+                    getIntent().getStringExtra("localTitle"), getIntent().getStringExtra("localEmpty")), "text/html", "UTF-8", null);
+            showMap(web, loading);
+            return;
+        }
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
@@ -155,6 +164,27 @@ public class MapActivity extends Activity {
         view.clearHistory();
         view.setVisibility(android.view.View.VISIBLE);
         loading.setVisibility(android.view.View.GONE);
+    }
+
+    static String localMapHtml(String pointsJson, String title, String empty) {
+        return "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                + "<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'>"
+                + "<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>"
+                + "<style>html,body,#m{margin:0;height:100%;font-family:sans-serif}#h{position:absolute;top:8px;left:8px;right:8px;z-index:999;"
+                + "background:rgba(255,255,255,.95);border-radius:12px;padding:8px 12px;font-size:13px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.2)}"
+                + "#h small{display:block;font-weight:400;color:#666;margin-top:2px}</style></head><body><div id='m'></div><div id='h'></div><script>"
+                + "var P=" + pointsJson + ",T=" + q(title) + ",E=" + q(empty) + ";"
+                + "var C={'Sklepy':'#E8820C','Rodzina':'#43A047','Przechodzień':'#1E88E5','Telefon do miasta':'#8E24AA','Telefon rodzina/znajomi':'#AB47BC',"
+                + "'Restauracja Kelner':'#F4511E','Praca / Szkoła':'#3949AB','Wystąpienie':'#D81B60','W grupie':'#00897B','Przyjaciele':'#7CB342','Miasto - inne':'#546E7A'};"
+                + "var m=L.map('m',{zoomControl:false}).setView([52,19],6);"
+                + "L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);"
+                + "var cnt={},b=[];P.forEach(function(p){var c=C[p.cat]||'#E8820C';cnt[p.label]=(cnt[p.label]||0)+1;b.push([p.lat,p.lon]);"
+                + "L.circleMarker([p.lat,p.lon],{radius:8,color:'#fff',weight:2,fillColor:c,fillOpacity:.9}).addTo(m)"
+                + ".bindPopup('<b>'+p.label+'</b><br>'+new Date(p.t).toLocaleString()+(p.emo?'<br>'+p.emo:''));});"
+                + "if(b.length)m.fitBounds(b,{padding:[40,40],maxZoom:15});"
+                + "var tp=Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];}).slice(0,4).map(function(k){return k+': '+cnt[k];}).join(' · ');"
+                + "document.getElementById('h').innerHTML='🗺 '+T+' ('+P.length+')'+(P.length?'<small>'+tp+'</small>':'<small>'+E+'</small>');"
+                + "</script></body></html>";
     }
 
     private static String q(String s) {

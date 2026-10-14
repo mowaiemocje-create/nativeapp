@@ -445,15 +445,19 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         // podstawowa: okienko z oferta pelnej wersji
         View st = findViewById(R.id.navStats);
         if (st != null && BuildConfig.PLAY) st.setVisibility(View.VISIBLE);
+        View dy = findViewById(R.id.navDiary); // dziennik w telefonie — pelna wersja Play
+        if (dy != null && BuildConfig.PLAY && Access.full(this)) dy.setVisibility(View.VISIBLE);
         if (!logged && !"expired".equals(nsAuthState)) nsAuthState = "none";
         // Bez logowania nie mozna zostac na stronie sekcji NS (wyjatek: statystyki z telefonu w pelnej wersji Play)
-        boolean localStats = "stats".equals(currentPage) && BuildConfig.PLAY && Access.full(this);
-        if (!logged && !localStats && ("fix".equals(currentPage) || "diary".equals(currentPage) || "stats".equals(currentPage))) showPage("daw");
+        boolean localPage = ("stats".equals(currentPage) || "diary".equals(currentPage)) && BuildConfig.PLAY && Access.full(this);
+        if (!logged && !localPage && ("fix".equals(currentPage) || "diary".equals(currentPage) || "stats".equals(currentPage))) showPage("daw");
     }
 
     // Zmiana stanu pelnej wersji (zakup / przywrocenie / zwrot) — odswiez, co trzeba
     private void onPremiumChanged() {
         if (isFinishing()) return;
+        LiveAudioData.full = Access.full(this);
+        if (pitchWaveView != null) pitchWaveView.invalidate();
         updateNavForLogin();
         if ("set".equals(currentPage)) renderSettingsPage();
         if ("recs".equals(currentPage)) renderRecsPage();
@@ -571,7 +575,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if ("rate".equals(pg)) { if (isLoggedIn() && oRec != null) openRating(oRec); else showPage("recs"); return; }
         if ("recs".equals(pg)) { showPage("recs"); return; }
         if ("inbox".equals(pg)) { if (isLoggedIn()) { prefs().edit().putString("stats_tab", "plan").apply(); openLoginOnlySection("stats", L.t("STATYSTYKI")); } return; }
-        if ("map".equals(pg)) { showPage("daw"); if (isLoggedIn()) openMap(); return; }
+        if ("map".equals(pg)) { showPage("daw"); if (isLoggedIn() || Access.full(this)) openMap(); return; }
         if ("diary".equals(pg) && isLoggedIn()) { openLoginOnlySection("diary", L.t("DZIENNIK")); return; }
         if ("fix".equals(pg) && isLoggedIn()) { openLoginOnlySection("fix", L.t("KOREKTA")); return; }
         if ("stats".equals(pg) && isLoggedIn()) { prefs().edit().putString("stats_tab", "plan").apply(); openLoginOnlySection("stats", L.t("STATYSTYKI")); return; }
@@ -863,6 +867,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Wejscie do sekcji wymagajacej konta: najpierw sprawdzamy sesje (jak w PWA) —
     // wygasla sesja = czytelny komunikat i przejscie do logowania, nie pusty ekran.
     private void openLoginOnlySection(String page, String title) {
+        // Google Play bez konta: dziennik zapisywany w telefonie (pelna wersja)
+        if (!isLoggedIn() && BuildConfig.PLAY && "diary".equals(page)) {
+            if (!Access.full(this)) { PremiumUi.offer(this, L.t("Dziennik jest w pełnej wersji."), this::onPremiumChanged); return; }
+            showPage(page);
+            android.widget.LinearLayout c = findViewById(R.id.nsContent);
+            c.removeAllViews();
+            new DiaryPage(this, c, diaryHost()).render();
+            return;
+        }
         if (!isLoggedIn() && BuildConfig.PLAY && "stats".equals(page)) {
             if (!Access.full(this)) { PremiumUi.offer(this, L.t("Statystyki są w pełnej wersji."), this::onPremiumChanged); return; }
             showPage(page);
@@ -1083,6 +1096,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void refreshAccountSection() {
         LiveAudioData.loggedIn = isLoggedIn();
+        LiveAudioData.full = Access.full(this);
         if (accountSection == null) return;
         accountSection.removeAllViews();
         float density = getResources().getDisplayMetrics().density;
@@ -1768,6 +1782,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void openMap() {
+        if (!isLoggedIn() && BuildConfig.PLAY && Access.full(this)) { openLocalMap(); return; }
+        if (!isLoggedIn() && BuildConfig.PLAY) { PremiumUi.offer(this, L.t("Mapa Twoich nagrań jest w pełnej wersji."), this::onPremiumChanged); return; }
         if (!isLoggedIn()) { promptLogin(L.t("Mapa nagrań jest dostępna po zalogowaniu do NewSpeech.")); return; }
         Intent i = new Intent(this, MapActivity.class);
         i.putExtra("token", nsToken());
@@ -1778,6 +1794,37 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         i.putExtra("city", prefs().getString("ns_city", ""));
         i.putExtra("availUntil", availOn() ? prefs().getLong("map_avail_until", 0L) : 0L);
         startActivityForResult(i, REQ_MAP);
+    }
+
+    // Pelna wersja Google Play bez konta: mapa WLASNYCH nagran (pozycja z czasu nagrania), tylko z telefonu
+    private void openLocalMap() {
+        org.json.JSONArray pts = new org.json.JSONArray();
+        File[] files = getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
+        if (files != null) for (File f : files) {
+            RecMeta m = RecMeta.load(this, f.getName());
+            if (!m.hasGps()) continue;
+            try {
+                org.json.JSONObject o = new org.json.JSONObject();
+                o.put("lat", m.lat); o.put("lon", m.lon);
+                o.put("cat", m.cat.isEmpty() ? "" : m.cat);
+                o.put("label", m.cat.isEmpty() ? L.t("bez opisu") : L.cat(m.cat));
+                o.put("emo", m.emotion > 0 && m.emotion < RecMeta.EMOTION_LABELS.length ? L.t(RecMeta.EMOTION_LABELS[m.emotion]) : "");
+                o.put("t", f.lastModified());
+                pts.put(o);
+            } catch (Exception e) { }
+        }
+        if (pts.length() == 0 && !GpsHelper.hasPermission(this)) {
+            new AlertDialog.Builder(this).setTitle("🗺 " + L.t("Mapa Twoich nagrań"))
+                    .setMessage(L.t("Na mapie pojawią się nagrania z miejscem, w którym je nagrałeś. Zezwól aplikacji na lokalizację — przy następnym nagraniu zapisze się pozycja."))
+                    .setPositiveButton(L.t("Zezwól"), (dd, w) -> requestLocationPermission(this))
+                    .setNegativeButton(L.t("Anuluj"), null).show();
+            return;
+        }
+        Intent i = new Intent(this, MapActivity.class);
+        i.putExtra("localPoints", pts.toString());
+        i.putExtra("localTitle", L.t("Mapa Twoich nagrań"));
+        i.putExtra("localEmpty", L.t("Brak nagrań z lokalizacją. Nagraj coś poza domem — punkt pojawi się na mapie."));
+        startActivity(i);
     }
 
     // Tytul okienka z logo "new speech" (jak w naglowku apki)
@@ -1908,12 +1955,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         mapBtn.setTextSize(14f);
         mapBtn.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
         mapBtn.setOnClickListener(v -> openMap());
-        if (logged) tiles.addView(mapBtn, Ui.weight(2f, 8 * d)); // mapa wymaga logowania NS
+        if (logged || Access.full(this)) tiles.addView(mapBtn, Ui.weight(2f, 8 * d)); // kursant: mapa kursu; pelna wersja Play: mapa wlasnych nagran
         Button normBtn = Ui.button(this, "🎯  " + L.t("NORMY"), R.color.pr_purple, false);
         normBtn.setTextSize(13f);
         normBtn.setPadding((int) (12 * d), (int) (16 * d), (int) (12 * d), (int) (16 * d));
         normBtn.setOnClickListener(v -> renderNormsPage());
-        if (logged) tiles.addView(normBtn, Ui.weight(1f, 0)); // normy tylko dla kursantow (po zalogowaniu)
+        if (Access.full(this)) tiles.addView(normBtn, Ui.weight(1f, 0)); // normy — pelna wersja (kursant / zakup)
         android.widget.LinearLayout.LayoutParams tlp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
         tlp.bottomMargin = (int) (8 * d);
         c.addView(tiles, tlp);
@@ -2046,15 +2093,23 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         // 3b) Podpowiedzi na wykresie i w statystykach
         android.widget.LinearLayout hints = section(c, "hints", "💡  " + L.t("PODPOWIEDZI") + "  ·  " + L.t("pauzy, strzałki, tempo"));
-        hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
-        // normy i strzalki — tylko dla zalogowanych kursantow
-        if (logged) hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
-        if (logged) hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
-        if (logged && LiveAudioData.showArrows) {
+        // pauzy, normy, strzalki, tempo — pelna wersja (kursant / zakup w Google Play)
+        final boolean fullV = Access.full(this);
+        if (!fullV) {
+            hints.addView(hint("🔒 " + L.t("Pauzy, ocena emisji wg norm, strzałki intonacji i tempo są w pełnej wersji. W wersji podstawowej: wykres DAW i linia pitch.")));
+            Button buyH = Ui.button(this, "⭐ " + L.t("Pełna wersja"), R.color.pr_accent, false);
+            buyH.setOnClickListener(v -> PremiumUi.offer(this, L.t("Normy i strzałki intonacji są w pełnej wersji."), this::onPremiumChanged));
+            hints.addView(buyH);
+        }
+        if (fullV) hints.addView(toggleRow("⏸ " + L.t("Pauzy na wykresie"), LiveAudioData.showPauses, on -> { LiveAudioData.showPauses = on; saveDawSettings(); }));
+        if (fullV) hints.addView(toggleRow("🎯 " + L.t("Ocena emisji wg norm"), LiveAudioData.showNorms, on -> { LiveAudioData.showNorms = on; saveDawSettings(); }));
+        if (fullV) hints.addView(toggleRow("↗ " + L.t("Strzałki intonacji"), LiveAudioData.showArrows, on -> { LiveAudioData.showArrows = on; saveDawSettings(); }));
+        if (fullV && LiveAudioData.showArrows) hints.addView(syllableTrainingHint());
+        if (fullV && LiveAudioData.showArrows) {
             hints.addView(normStepper("   " + L.t("Strzałka od zmiany tonu o"), LiveAudioData.arrowThresholdSt, 0.5f, 6f, 0.5f, "%.1f st", v -> { LiveAudioData.arrowThresholdSt = v; saveDawSettings(); }));
             hints.addView(hint(L.t("st = półton. Mniejsza zmiana tonu w sylabie nie daje strzałki; im większa zmiana, tym bardziej stroma strzałka.")));
         }
-        hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
+        if (fullV) hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
         hints.addView(toggleRow("📈 " + L.t("Licz pitch od razu przy otwieraniu nagrania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
         if (logged) hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
@@ -2198,6 +2253,23 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     // ── NORMY (jak train.html w PitchRec): czasy 4 faz emisji, prog ciszy, tolerancja,
     // stosunek szczyt/cisza; kalibracja z nagrania wzorcowego trenera ──
+    // Ćwiczenie dla strzałek intonacji: znaki interpunkcyjne = kierunek głosu w sylabie
+    private View syllableTrainingHint() {
+        float d = getResources().getDisplayMetrics().density;
+        TextView t = Ui.text(this, "🎯 " + L.t("Potrenuj sylaby:") + "\n"
+                + "?  ,   → " + L.t("głos w górę") + "  ↗\n"
+                + "!       → " + L.t("głos w dół") + "  ↘\n"
+                + ".       → " + L.t("płasko") + "  →\n"
+                + L.t("Powiedz sylabę z danym znakiem i sprawdź strzałkę na wykresie."), 12f, R.color.pr_text);
+        t.setPadding((int) (10 * d), (int) (8 * d), (int) (10 * d), (int) (8 * d));
+        t.setBackground(Ui.rounded((Ui.col(this, R.color.pr_accent) & 0x00FFFFFF) | 0x1A000000, Ui.col(this, R.color.pr_accent), d, 8 * d));
+        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, (int) (4 * d), 0, (int) (6 * d));
+        t.setLayoutParams(lp);
+        return t;
+    }
+
     private void renderNormsPage() {
         android.widget.LinearLayout c = findViewById(R.id.setContent);
         c.removeAllViews();
@@ -2207,6 +2279,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         back.setOnClickListener(v -> renderSettingsPage());
         head.addView(back);
         c.addView(head);
+        c.addView(syllableTrainingHint());
         c.addView(pageTitle("🎯 " + L.t("NORMY")));
 
         android.widget.LinearLayout info = Ui.card(this);
@@ -3014,10 +3087,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
         // GPS jak w PitchRec: pozycja z czasu NAGRYWANIA (zapisywana w opisie i nazwie pliku)
         GpsHelper.recordingFix = null;
-        if (GpsHelper.hasPermission(this)) {
+        // Google Play: GPS tylko w pelnej wersji (mapa wlasnych nagran); darmowa — bez lokalizacji
+        boolean wantGps = !BuildConfig.PLAY || Access.full(this);
+        String askKey = BuildConfig.PLAY ? "location_asked_full" : "location_asked";
+        if (wantGps && GpsHelper.hasPermission(this)) {
             GpsHelper.requestFix(this, loc -> { if (loc != null) GpsHelper.recordingFix = loc; });
-        } else if (!prefs().getBoolean("location_asked", false)) {
-            prefs().edit().putBoolean("location_asked", true).apply();
+        } else if (wantGps && !prefs().getBoolean(askKey, false)) {
+            prefs().edit().putBoolean(askKey, true).putBoolean("location_asked", true).apply();
             requestLocationPermission(this);
         }
 
@@ -3738,6 +3814,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         View coachRoot = findViewById(android.R.id.content);
         if (coachRoot != null) { coachRoot.removeCallbacks(coachPoll); coachRoot.post(coachPoll); }
         LiveAudioData.loggedIn = isLoggedIn();
+        LiveAudioData.full = Access.full(this);
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);

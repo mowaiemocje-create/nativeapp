@@ -614,7 +614,7 @@ public class PitchWaveView extends View {
             double visA = visibleStartSample / (double) LiveAudioData.SAMPLE_RATE;
             double visB = (visibleStartSample + visibleSampleRange) / (double) LiveAudioData.SAMPLE_RATE;
             for (LiveAudioData.Pause pa : LiveAudioData.pausesSnapshot()) { if (pa.end >= visA && pa.start <= visB) pz.add(pa); }
-            for (LiveAudioData.Pause pa : LiveAudioData.showPauses ? pz : new java.util.ArrayList<LiveAudioData.Pause>()) {
+            for (LiveAudioData.Pause pa : LiveAudioData.pausesOn() ? pz : new java.util.ArrayList<LiveAudioData.Pause>()) {
                 float x0 = (float) ((pa.start * LiveAudioData.SAMPLE_RATE - visibleStartSample) / visibleSampleRange * w);
                 float x1 = (float) ((pa.end * LiveAudioData.SAMPLE_RATE - visibleStartSample) / visibleSampleRange * w);
                 if (x1 < 0 || x0 > w) continue;
@@ -664,8 +664,8 @@ public class PitchWaveView extends View {
             }
             canvas.drawPath(pitchPath, pitchPaint);
 
-            if (LiveAudioData.normsOn() || LiveAudioData.showTempo) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
-            if (LiveAudioData.showTempo) drawSyllableTicks(canvas, w, h, rulerHeight, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.normsOn() || LiveAudioData.tempoOn()) drawNormLabels(canvas, w, rulerHeight, visibleStartSample, visibleSampleRange);
+            if (LiveAudioData.tempoOn()) drawSyllableTicks(canvas, w, h, rulerHeight, visibleStartSample, visibleSampleRange);
             if (LiveAudioData.arrowsOn()) drawArrows(canvas, w, h, rulerHeight, pitchPts, pz, visibleStartSample, visibleSampleRange);
         }
     }
@@ -869,7 +869,7 @@ public class PitchWaveView extends View {
                 normPaint.setColor(0x99B388FF);
                 canvas.drawRect(Math.max(0, scored ? xu : x0), top + dp(3), Math.min(w, x1), top + dp(4.5f), normPaint);
             }
-            String tempo = LiveAudioData.showTempo && sg.syllables >= 0 ? sg.syllables + " " + L.t("syl") + " · " + Math.round(sg.rate) + "/min" : "";
+            String tempo = LiveAudioData.tempoOn() && sg.syllables >= 0 ? sg.syllables + " " + L.t("syl") + " · " + Math.round(sg.rate) + "/min" : "";
             String lbl = scored ? (sg.fourPhase ? "4F " : "") + sg.result.score + "%" + (tempo.isEmpty() ? "" : "  " + tempo) : tempo;
             if (lbl.isEmpty()) continue;
             float tw = normTextPaint.measureText(lbl);
@@ -910,13 +910,13 @@ public class PitchWaveView extends View {
             String l2 = q + (r.shapeSimilarity != null ? "  ·  " + L.t("KSZTAŁT") + ": " + r.shapeSimilarity + "%" : "");
             y = hintBox(canvas, w, y, pad, l1, col, l2, 0xFFDDDDDD);
         }
-        if (LiveAudioData.showTempo && LiveAudioData.liveRate > 0) {
+        if (LiveAudioData.tempoOn() && LiveAudioData.liveRate > 0) {
             float avg = LiveAudioData.averageRate();
             String l = "🗣 " + L.t("TEMPO") + " " + Math.round(LiveAudioData.liveRate) + " " + L.t("sylab/min")
                     + (avg > 0 ? "  ·  " + L.t("średnio") + " " + Math.round(avg) : "");
             y = hintBox(canvas, w, y, pad, l, 0xFFB388FF, null, 0);
         }
-        if (LiveAudioData.showPauses) {
+        if (LiveAudioData.pausesOn()) {
             List<LiveAudioData.Pause> pz = LiveAudioData.pausesSnapshot();
             if (!pz.isEmpty()) {
                 LiveAudioData.Pause pa = pz.get(pz.size() - 1);
