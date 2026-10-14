@@ -112,6 +112,9 @@ public class StatsPage {
             TrainerInbox.markRead(a, null, null, TrainerInbox.T_CALLS, TrainerInbox.T_LIST);
             return;
         }
+        LinearLayout talk = Ui.card(a); // ⏱ Ile już mówisz — minuty i słowa z serwera
+        root.addView(talk);
+        TalkStats.fill(a, talk, host::isCurrent);
         LinearLayout improve = Ui.card(a);
         improve.setVisibility(View.GONE);
         root.addView(improve);
