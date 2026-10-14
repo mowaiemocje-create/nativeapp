@@ -8065,15 +8065,19 @@ function diarEnabled(env) {
 }
 __name(diarEnabled, "diarEnabled");
 async function deepgramWords(env, audioBuf, lang) {
-  const q = new URLSearchParams({ model: "nova-3", diarize: "true", punctuate: "true", smart_format: "false" });
-  if (lang) q.set("language", lang);
-  else q.set("detect_language", "true");
-  const r = await fetch("https://api.deepgram.com/v1/listen?" + q.toString(), {
-    method: "POST",
-    headers: { "Authorization": "Token " + env.DEEPGRAM_API_KEY, "Content-Type": "audio/mpeg" },
-    body: audioBuf
-  });
-  const d = await r.json().catch(() => null);
+  const call = /* @__PURE__ */ __name(async (diarParams) => {
+    const q = new URLSearchParams({ model: "nova-3", punctuate: "true", ...diarParams });
+    if (lang) q.set("language", lang);
+    else q.set("detect_language", "true");
+    const r2 = await fetch("https://api.deepgram.com/v1/listen?" + q.toString(), {
+      method: "POST",
+      headers: { "Authorization": "Token " + env.DEEPGRAM_API_KEY, "Content-Type": "audio/mpeg" },
+      body: audioBuf
+    });
+    return { r: r2, d: await r2.json().catch(() => null) };
+  }, "call");
+  let { r, d } = await call({ diarize: "true", diarize_model: "latest" });
+  if (r.status === 400) ({ r, d } = await call({ diarize: "true" }));
   if (!r.ok) throw new Error("Deepgram " + r.status + ": " + String(d && (d.err_msg || d.message) || "").slice(0, 120));
   const ch = d && d.results && d.results.channels && d.results.channels[0];
   return { words: ch && ch.alternatives && ch.alternatives[0] && ch.alternatives[0].words || [], dur: Number(d && d.metadata && d.metadata.duration) || 0 };
