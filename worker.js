@@ -5884,6 +5884,59 @@ var worker_default = {
       if (url.pathname === "/transcripts" && request.method === "GET") {
         return await handleTranscriptsGet(request, env, url);
       }
+      if (url.pathname === "/talk-stats" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(url.searchParams.get("student_id") || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        return json(await txTalkStats(env, sid));
+      }
+      if (url.pathname === "/talk-stats/mine" && request.method === "GET") {
+        const me = await coachStudentFromRequest(request, env, url, null);
+        if (!me) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (!me.id) return json({ ok: true, categories: [], totals: {}, weeks: [] });
+        return json(await txTalkStats(env, me.id));
+      }
+      if (url.pathname === "/trainer-uploader" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        await ensureTranscriptTables(env);
+        const sid = String(url.searchParams.get("student_id") || "");
+        const row = sid ? await env.DB.prepare("SELECT ns_user_id FROM trainer_uploader WHERE ns_user_id = ?").bind(sid).first() : null;
+        return json({ ok: true, on: !!row });
+      }
+      if (url.pathname === "/trainer-uploader/set" && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (e) {
+        }
+        const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        await ensureTranscriptTables(env);
+        const sid = String(body.student_id || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        if (body.on) await env.DB.prepare("INSERT INTO trainer_uploader (ns_user_id, set_by, created_at) VALUES (?, ?, ?) ON CONFLICT(ns_user_id) DO NOTHING").bind(sid, who.email || "", Math.floor(Date.now() / 1e3)).run();
+        else await env.DB.prepare("DELETE FROM trainer_uploader WHERE ns_user_id = ?").bind(sid).run();
+        await env.DB.prepare("UPDATE record_transcript SET speakers = NULL, spk_names = NULL, spk_src = NULL WHERE ns_student_id = ? AND spk_src LIKE 'ai-%'").bind(sid).run();
+        TX_TRAINER_SET = null;
+        return json({ ok: true, on: !!body.on });
+      }
+      if (url.pathname === "/transcripts/fix" && request.method === "POST") {
+        return await handleTranscriptFix(request, env);
+      }
+      if (url.pathname === "/transcripts/delete" && request.method === "POST") {
+        return await handleTranscriptDelete(request, env);
+      }
+      if (url.pathname === "/transcripts/summary" && request.method === "POST") {
+        return await handleTranscriptSummary(request, env);
+      }
+      if (url.pathname === "/transcripts/speakers" && request.method === "POST") {
+        return await handleTranscriptSpeakers(request, env);
+      }
       if (url.pathname === "/transcripts/day-monolog" && request.method === "GET") {
         return await handleTranscriptsDayMonolog(request, env, url);
       }
@@ -8044,6 +8097,30 @@ async function ensureTranscriptTables(env) {
     await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN diar TEXT").run();
   } catch (e) {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN spk_names TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN spk_src TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS llm_usage (day TEXT PRIMARY KEY, calls INTEGER)").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN summary TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE record_transcript ADD COLUMN fixed TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS trainer_uploader (ns_user_id TEXT PRIMARY KEY, set_by TEXT, created_at INTEGER)").run();
+  } catch (e) {
+  }
   TRANSCRIPT_TABLES_READY = true;
 }
 __name(ensureTranscriptTables, "ensureTranscriptTables");
@@ -8157,7 +8234,9 @@ function txLangForCountry(c) {
   if (c === "PL" || c === "POLSKA" || c === "POLAND") return "pl";
   if (c === "CZ" || c === "CZECH" || c === "CZECHY") return "cs";
   if (c === "SK" || c === "SLOVAKIA" || c === "S\u0141OWACJA") return "sk";
-  return "en";
+  if (c === "GB" || c === "UK" || c === "IE" || c === "US") return "en";
+  if (c === "DE" || c === "AT" || c === "CH") return "de";
+  return null;
 }
 __name(txLangForCountry, "txLangForCountry");
 __name2(txLangForCountry, "txLangForCountry");
@@ -8182,7 +8261,7 @@ function txSegmentOk(seg, prevTexts) {
 __name(txSegmentOk, "txSegmentOk");
 __name2(txSegmentOk, "txSegmentOk");
 var TX_PATH_DEFAULT = "/uploads/record/record_file/{uslug}/{cslug}/{file}";
-var TX_PATH_SQL_COLS = `to_jsonb(u) ->> 'slug' AS p_uslug, u.first_name AS p_fn, u.last_name AS p_ln, to_jsonb(rc) ->> 'slug' AS p_cslug_db, rc.name AS p_cname, rct.name AS p_cname_pl`;
+var TX_PATH_SQL_COLS = `to_jsonb(u) ->> 'slug' AS p_uslug, u.first_name AS p_fn, u.last_name AS p_ln, u.email AS p_email, to_jsonb(rc) ->> 'slug' AS p_cslug_db, rc.name AS p_cname, rct.name AS p_cname_pl`;
 function txSlugify(t) {
   return String(t || "").replace(/ł/g, "l").replace(/Ł/g, "L").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -8223,17 +8302,152 @@ async function txPathTpl(env) {
 }
 __name(txPathTpl, "txPathTpl");
 __name2(txPathTpl, "txPathTpl");
+var TX_TRAINER_NAME_RX = /(^|[^\p{L}])(tren(er|erka)|trainer|tr[ée]ner(ka)?)([^\p{L}]|$)/iu;
+var TX_TRAINER_SET = null;
+var TX_TRAINER_SET_AT = 0;
+async function txTrainerSet(env) {
+  if (TX_TRAINER_SET && Date.now() - TX_TRAINER_SET_AT < 6e4) return TX_TRAINER_SET;
+  try {
+    const rs = await env.DB.prepare("SELECT ns_user_id FROM trainer_uploader").all();
+    TX_TRAINER_SET = new Set((rs.results || []).map((x) => String(x.ns_user_id)));
+  } catch (e) {
+    TX_TRAINER_SET = /* @__PURE__ */ new Set();
+  }
+  TX_TRAINER_SET_AT = Date.now();
+  return TX_TRAINER_SET;
+}
+__name(txTrainerSet, "txTrainerSet");
+__name2(txTrainerSet, "txTrainerSet");
+function txTrainerEmails(env) {
+  return String(env.TRAINER_UPLOADER_EMAILS || "jakanie@gmail.com").toLowerCase().split(/[,;\s]+/).filter(Boolean);
+}
+__name(txTrainerEmails, "txTrainerEmails");
+async function txIsTrainerAcc(env, uid, first, last, email) {
+  if (TX_TRAINER_NAME_RX.test(((first || "") + " " + (last || "")).trim())) return true;
+  if (email && txTrainerEmails(env).indexOf(String(email).toLowerCase()) >= 0) return true;
+  return uid ? (await txTrainerSet(env)).has(String(uid)) : false;
+}
+__name(txIsTrainerAcc, "txIsTrainerAcc");
+__name2(txIsTrainerAcc, "txIsTrainerAcc");
+async function txTalkStats(env, sid) {
+  await ensureTranscriptTables(env);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let recs = [];
+  try {
+    recs = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.review_details, COALESCE(rct.name, rc.name) AS category
+      FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+      WHERE r.user_id::text = $1 AND r.deleted_at IS NULL AND r.record_file IS NOT NULL ORDER BY r.created_at DESC LIMIT 3000`, [String(sid)])).rows;
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  recs = recs.filter((r) => !isNotCountedReview(r.review_details));
+  const tx = {};
+  for (let i = 0; i < recs.length; i += 90) {
+    const chunk = recs.slice(i, i + 90).map((r) => r.id);
+    const rs = await env.DB.prepare(`SELECT ns_record_id, dur, words, speakers, spk_src FROM record_transcript WHERE dur > 0 AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    for (const x of rs.results || []) tx[x.ns_record_id] = x;
+  }
+  const now = /* @__PURE__ */ new Date(), dayMs = 864e5;
+  const ymd = /* @__PURE__ */ __name((d) => (d instanceof Date ? d.toISOString() : String(d || "")).slice(0, 10), "ymd");
+  const today = ymd(now), d7 = ymd(new Date(now - 6 * dayMs)), d30 = ymd(new Date(now - 29 * dayMs));
+  const p7 = ymd(new Date(now - 13 * dayMs)), p30 = ymd(new Date(now - 59 * dayMs));
+  const weekKey = /* @__PURE__ */ __name((s) => {
+    const d = /* @__PURE__ */ new Date(s + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+    return d.toISOString().slice(0, 10);
+  }, "weekKey");
+  const z = /* @__PURE__ */ __name(() => ({ min: 0, words: 0, n: 0 }), "z");
+  const cats = {}, weeks = {}, tot = { all: z(), d30: z(), d7: z(), today: z(), prev7: z(), prev30: z() };
+  let noText = 0;
+  for (const r of recs) {
+    const t = tx[r.id];
+    const d = ymd(r.d);
+    if (!t) {
+      noText++;
+      continue;
+    }
+    const min = (Number(t.dur) || 0) / 60;
+    let words = 0, wc = [];
+    try {
+      wc = JSON.parse(t.words || "[]");
+    } catch (e) {
+    }
+    let sp = null;
+    try {
+      sp = t.speakers ? JSON.parse(t.speakers) : null;
+    } catch (e) {
+    }
+    const persons = sp && sp.length === wc.length ? new Set(sp).size : 1;
+    if (persons < 2) {
+      if (txIsMonolog(r.category)) words = wc.length;
+    } else if (t.spk_src === "ai-text") words = sp.filter((x) => x === 0).length;
+    const c = cats[r.category || "(bez kategorii)"] = cats[r.category || "(bez kategorii)"] || { category: r.category || "(bez kategorii)", n: 0, min: 0, words: 0, n30: 0, min30: 0, words30: 0, n7: 0, min7: 0, words7: 0 };
+    c.n++;
+    c.min += min;
+    c.words += words;
+    if (d >= d30) {
+      c.n30++;
+      c.min30 += min;
+      c.words30 += words;
+    }
+    if (d >= d7) {
+      c.n7++;
+      c.min7 += min;
+      c.words7 += words;
+    }
+    const add = /* @__PURE__ */ __name((o) => {
+      o.n++;
+      o.min += min;
+      o.words += words;
+    }, "add");
+    add(tot.all);
+    if (d >= d30) add(tot.d30);
+    if (d >= d7) add(tot.d7);
+    if (d === today) add(tot.today);
+    if (d >= p7 && d < d7) add(tot.prev7);
+    if (d >= p30 && d < d30) add(tot.prev30);
+    const wk = weekKey(d);
+    const w = weeks[wk] = weeks[wk] || { week: wk, min: 0, words: 0, n: 0 };
+    add(w);
+  }
+  const r1 = /* @__PURE__ */ __name((x) => Math.round(x * 10) / 10, "r1");
+  const fix = /* @__PURE__ */ __name((o) => ({ n: o.n, min: r1(o.min), words: o.words }), "fix");
+  return {
+    ok: true,
+    totals: { all: fix(tot.all), d30: fix(tot.d30), d7: fix(tot.d7), today: fix(tot.today), prev7: fix(tot.prev7), prev30: fix(tot.prev30) },
+    categories: Object.values(cats).map((c) => ({ category: c.category, n: c.n, min: r1(c.min), words: c.words, n30: c.n30, min30: r1(c.min30), words30: c.words30, n7: c.n7, min7: r1(c.min7), words7: c.words7 })).sort((a, b) => b.min - a.min),
+    recordings_total: recs.length,
+    weeks: Object.values(weeks).sort((a, b) => a.week.localeCompare(b.week)).slice(-12).map((w) => ({ week: w.week, n: w.n, min: r1(w.min), words: w.words })),
+    without_text: noText,
+    note: "Minuty: nagrania z tekstem. S\u0142owa: monologi z jednym g\u0142osem + s\u0142owa kursanta w rozmowach podzielonych przez AI."
+  };
+}
+__name(txTalkStats, "txTalkStats");
+__name2(txTalkStats, "txTalkStats");
 async function txRecordInfo(env, rid) {
   if (!rid || !env.HYPERDRIVE) return {};
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   try {
     await pg.connect();
-    const r = await pg.query(`SELECT u.country, u.id::text AS uid, r.record_file, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS} FROM records r LEFT JOIN users u ON u.id = r.user_id
+    const r = await pg.query(`SELECT u.country, u.id::text AS uid, u.first_name AS fn, u.last_name AS ln, r.record_file, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS} FROM records r LEFT JOIN users u ON u.id = r.user_id
       LEFT JOIN record_categories rc ON rc.id = r.record_category_id
       LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
       WHERE r.id::text = $1`, [String(rid)]);
     const x = r.rows[0] || {};
-    return { lang: txLangForCountry(x.country), category: x.category || null, uid: x.uid || null, file: x.record_file || null, vars: txPathVars(x, String(rid), x.uid, x.record_file) };
+    return {
+      lang: txLangForCountry(x.country),
+      category: x.category || null,
+      uid: x.uid || null,
+      file: x.record_file || null,
+      vars: txPathVars(x, String(rid), x.uid, x.record_file),
+      trainerAcc: await txIsTrainerAcc(env, x.uid, x.fn, x.ln, x.p_email),
+      studentName: ((x.fn || "") + " " + (x.ln || "")).trim()
+    };
   } catch (e) {
     return {};
   } finally {
@@ -8300,14 +8514,180 @@ __name(abToBase64, "abToBase64");
 __name2(abToBase64, "abToBase64");
 function transcriptOut(r) {
   if (!r) return null;
-  return { record_id: r.ns_record_id, status: r.status, text: r.text, lang: r.lang, dur: r.dur, words: r.words ? JSON.parse(r.words) : [], speakers: r.speakers ? JSON.parse(r.speakers) : null, created_at: r.created_at, error: r.error || null };
+  return {
+    record_id: r.ns_record_id,
+    status: r.status,
+    text: r.text,
+    lang: r.lang,
+    dur: r.dur,
+    words: r.words ? JSON.parse(r.words) : [],
+    speakers: r.speakers ? JSON.parse(r.speakers) : null,
+    spk_names: r.spk_names ? JSON.parse(r.spk_names) : null,
+    spk_src: r.spk_src || null,
+    summary: (() => {
+      try {
+        return r.summary ? JSON.parse(r.summary) : null;
+      } catch (e) {
+        return null;
+      }
+    })(),
+    fixed: (() => {
+      try {
+        return r.fixed ? JSON.parse(r.fixed) : null;
+      } catch (e) {
+        return null;
+      }
+    })(),
+    created_at: r.created_at,
+    error: r.error || null
+  };
 }
 __name(transcriptOut, "transcriptOut");
 __name2(transcriptOut, "transcriptOut");
+var TX_LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+function txAiDailyLimit(env) {
+  const v = parseFloat(env.AI_SPEAKERS_DAILY);
+  return isFinite(v) && v >= 0 ? v : 3e3;
+}
+__name(txAiDailyLimit, "txAiDailyLimit");
+function txSentences(words) {
+  const out = [];
+  let cur = null;
+  for (let i = 0; i < words.length; i++) {
+    if (!cur) {
+      cur = { from: i, to: i };
+      out.push(cur);
+    } else cur.to = i;
+    if (/(?<!\.)[.?!]["”»)]*$/.test(String(words[i][0] || "")) || i - cur.from > 60) cur = null;
+  }
+  return out.map((c) => ({ from: c.from, to: c.to, text: words.slice(c.from, c.to + 1).map((w) => w[0]).join(" ").replace(/\s+/g, " ").trim() }));
+}
+__name(txSentences, "txSentences");
+__name2(txSentences, "txSentences");
+function txParseJson(t) {
+  if (t && typeof t === "object") return t;
+  t = String(t || "");
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  try {
+    return JSON.parse(t.slice(a, b + 1));
+  } catch (e) {
+    return null;
+  }
+}
+__name(txParseJson, "txParseJson");
+__name2(txParseJson, "txParseJson");
+var TX_LLM_BEST = "@cf/openai/gpt-oss-120b";
+function txLlmText(res) {
+  if (!res) return "";
+  if (typeof res === "string") return res;
+  if (typeof res.response === "string") return res.response;
+  if (res.response && typeof res.response === "object") return JSON.stringify(res.response);
+  if (typeof res.output_text === "string") return res.output_text;
+  if (Array.isArray(res.output)) {
+    const parts = [];
+    for (const o of res.output) if (o && o.type === "message" && Array.isArray(o.content)) {
+      for (const c of o.content) if (c && typeof c.text === "string") parts.push(c.text);
+    }
+    if (parts.length) return parts.join("\n");
+  }
+  if (res.choices && res.choices[0] && res.choices[0].message) return String(res.choices[0].message.content || "");
+  return "";
+}
+__name(txLlmText, "txLlmText");
+__name2(txLlmText, "txLlmText");
+async function txLlm(env, sys, user, maxTokens) {
+  let text = "";
+  try {
+    const r1 = await env.AI.run(TX_LLM_BEST, { input: [{ role: "developer", content: sys }, { role: "user", content: user }], reasoning: { effort: "low" }, max_output_tokens: (maxTokens || 1500) + 2e3 });
+    text = txLlmText(r1);
+  } catch (e) {
+    console.log("gpt-oss", String(e && e.message || e).slice(0, 200));
+  }
+  if (!text) {
+    const inp = { messages: [{ role: "system", content: sys }, { role: "user", content: user }], max_tokens: maxTokens || 1500, temperature: 0.2 };
+    let res;
+    try {
+      res = await env.AI.run(TX_LLM_MODEL, inp);
+    } catch (e) {
+      res = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", inp);
+    }
+    text = txLlmText(res);
+  }
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  try {
+    await env.DB.prepare("INSERT INTO llm_usage (day, calls) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET calls = calls + 1").bind(day).run();
+  } catch (e) {
+  }
+  return text;
+}
+__name(txLlm, "txLlm");
+__name2(txLlm, "txLlm");
+async function txAiSpeakers(env, words, category, lang, force, trainerAcc) {
+  if (!env.AI) return { speakers: null, src: "ai-err", note: "brak Workers AI" };
+  if (txIsMonolog(category) && !force) return { speakers: null, src: "ai-one", note: "monolog" };
+  const sents = txSentences(words);
+  if (sents.length < 2) return { speakers: null, src: "ai-one", note: "jedno zdanie" };
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const u = await env.DB.prepare("SELECT calls FROM llm_usage WHERE day = ?").bind(day).first();
+  if (u && u.calls >= txAiDailyLimit(env)) return { speakers: null, src: null, note: "dzienny limit AI wyczerpany" };
+  const who = trainerAcc ? "Nagrywa TRENER programu Nowa Mowa \u2014 to jego rozmowa z kursantem (cz\u0119sto przez telefon). Trener prowadzi, dopytuje, chwali, daje wskaz\xF3wki o systemach mowy (zer\xF3wka, \u0142\u0105cznik, jedynka\u2026). Osoba 1 = trener, osoba 2 = kursant." : "Nagrywa kursant programu Nowa Mowa, kt\xF3ry \u0107wiczy codzienne rozmowy (sklep, telefon, urz\u0105d, ulica, praca). Zwykle zaczyna rozmow\u0119: wita si\u0119, pyta, prosi. Osoba 1 = kursant, osoba 2 = rozm\xF3wca (np. sprzedawczyni).";
+  const sys = "Dzielisz zapis rozmowy (z rozpoznawania mowy, mog\u0105 by\u0107 b\u0142\u0119dy) na wypowiedzi os\xF3b. " + who + ' ZASADY: jedna osoba zwykle m\xF3wi kilka zda\u0144 z rz\u0119du \u2014 zmieniaj osob\u0119 tylko, gdy wynika to z sensu (pytanie \u2192 odpowied\u017A, reakcja na to, co powiedzia\u0142 rozm\xF3wca, kr\xF3tkie \u201EMhm\u201D, \u201ETak\u201D, \u201ENo\u201D, \u201EO, widzisz\u201D wtr\u0105cone w opowie\u015B\u0107 drugiej osoby, po\u017Cegnanie i odpowied\u017A na nie). Opowie\u015B\u0107 w 1. osobie (\u201Eja\u201D, \u201Eby\u0142am\u201D) ci\u0105gnie si\u0119 u tej samej osoby. Zwykle s\u0105 DOK\u0141ADNIE 2 osoby. Osoba 3 tylko wtedy, gdy wyra\u017Anie odzywa si\u0119 kto\u015B trzeci (np. kto\u015B w tle zwraca si\u0119 do rozm\xF3wc\xF3w) \u2014 nie u\u017Cywaj jej do \u201Eniepewnych\u201D zda\u0144. Odpowiedz WY\u0141\u0104CZNIE JSON-em: {"roles":{"1":"' + (trainerAcc ? "trener" : "kursant") + '","2":"kr\xF3tka rola i imi\u0119, je\u015Bli pada"},"zmiany":[[numer_zdania, osoba], \u2026]} \u2014 lista miejsc, w kt\xF3rych zaczyna m\xF3wi\u0107 kolejna osoba (pierwszy element dotyczy zdania 1).';
+  const BATCH = 120, labels = [], roles = { "1": trainerAcc ? "trener" : "kursant" };
+  for (let i = 0; i < sents.length; i += BATCH) {
+    const part = sents.slice(i, i + BATCH);
+    const prevN = Math.min(8, i);
+    const ctx = prevN ? "Koniec poprzedniego fragmentu (ju\u017C przypisane):\n" + sents.slice(i - prevN, i).map((x, k) => "[osoba " + labels[i - prevN + k] + "] " + x.text).join("\n") + "\n\n" : "";
+    const user = "Kategoria nagrania: " + (category || "\u2014") + ". J\u0119zyk: " + (lang || "?") + ".\n" + ctx + "Zdania (" + part.length + "):\n" + part.map((x, k) => k + 1 + ". " + x.text).join("\n");
+    let txt;
+    try {
+      txt = await txLlm(env, sys, user, 300 + part.length * 3);
+    } catch (e) {
+      return { speakers: null, src: "ai-err", note: "AI: " + String(e && e.message || e).slice(0, 120) };
+    }
+    const j = txParseJson(txt);
+    let ch = j && Array.isArray(j.zmiany) ? j.zmiany : j && Array.isArray(j.s) ? j.s.map((x, k) => [k + 1, x]) : null;
+    if (!ch || !ch.length) return { speakers: null, src: "ai-err", note: "AI: nieczytelna odpowied\u017A" };
+    const arr = new Array(part.length).fill(0);
+    ch = ch.map((c) => Array.isArray(c) ? [parseInt(c[0], 10), parseInt(c[1], 10)] : [parseInt(c.zdanie || c.nr, 10), parseInt(c.osoba, 10)]).filter((c) => c[0] >= 1 && c[0] <= part.length && c[1] >= 1 && c[1] <= 3).sort((a, b) => a[0] - b[0]);
+    let cur = ch.length && ch[0][0] === 1 ? ch[0][1] : labels.length ? labels[labels.length - 1] : 1, ci = 0;
+    for (let k = 0; k < part.length; k++) {
+      while (ci < ch.length && ch[ci][0] === k + 1) {
+        cur = ch[ci][1];
+        ci++;
+      }
+      arr[k] = cur;
+    }
+    labels.push(...arr);
+    if (j.roles && typeof j.roles === "object") {
+      for (const k of ["1", "2", "3"]) if (j.roles[k] && (k !== "1" ? true : !roles[k])) roles[k] = String(j.roles[k]).slice(0, 40);
+    }
+  }
+  const n3 = labels.filter((x) => x === 3).length;
+  if (n3 && n3 < labels.length * 0.05) {
+    for (let k = 0; k < labels.length; k++) if (labels[k] === 3) labels[k] = 2;
+  }
+  const speakers = new Array(words.length).fill(0);
+  sents.forEach((x, k) => {
+    for (let w = x.from; w <= x.to; w++) speakers[w] = labels[k] - 1;
+  });
+  const n = new Set(speakers).size;
+  if (n < 2) return { speakers: null, src: "ai-one", note: "AI: jedna osoba" };
+  const names = {};
+  for (const k of [...new Set(speakers)]) names[k] = roles[String(k + 1)] || (k === 0 ? trainerAcc ? "trener" : "kursant" : trainerAcc && k === 1 ? "kursant" : "rozm\xF3wca " + k);
+  return { speakers, names, src: "ai-text", note: "AI z tre\u015Bci: osoby " + n };
+}
+__name(txAiSpeakers, "txAiSpeakers");
+__name2(txAiSpeakers, "txAiSpeakers");
 async function txDiarize(env, rid, audioBuf, lang, words, category, dur) {
   const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
   if (!diarEnabled(env)) return { speakers: null, note: null };
   if (txIsMonolog(category)) return { speakers: null, note: "monolog \u2014 bez rozpoznawania g\u0142os\xF3w" };
+  return await txDiarizeAudio(env, rid, audioBuf, lang, words, category, dur, day);
+}
+__name(txDiarize, "txDiarize");
+__name2(txDiarize, "txDiarize");
+async function txDiarizeAudio(env, rid, audioBuf, lang, words, category, dur, day) {
   if (words.length <= 3) return { speakers: null, note: "za ma\u0142o s\u0142\xF3w" };
   let speakers = null, note = null;
   try {
@@ -8325,11 +8705,11 @@ async function txDiarize(env, rid, audioBuf, lang, words, category, dur) {
     await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('diar_last', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind((/* @__PURE__ */ new Date()).toISOString().slice(0, 16) + " " + note).run();
   } catch (e) {
   }
-  return { speakers, note };
+  return { speakers, note, src: speakers ? "deepgram" : null };
 }
-__name(txDiarize, "txDiarize");
-__name2(txDiarize, "txDiarize");
-async function transcribeAndStore(env, rid, sid, audioBuf, forcedLang, category) {
+__name(txDiarizeAudio, "txDiarizeAudio");
+__name2(txDiarizeAudio, "txDiarizeAudio");
+async function transcribeAndStore(env, rid, sid, audioBuf, forcedLang, category, trainerAcc) {
   await ensureTranscriptTables(env);
   const now = Math.floor(Date.now() / 1e3);
   const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -8370,16 +8750,24 @@ async function transcribeAndStore(env, rid, sid, audioBuf, forcedLang, category)
   }
   const info = { language: lang, duration: dur };
   const text = texts.join(" ").replace(/\s+/g, " ").trim();
-  let speakers = null, diarNote = null;
+  let speakers = null, diarNote = null, spkNames = null, spkSrc = null;
   if (status === "ok") {
     const dz = await txDiarize(env, rid, audioBuf, lang, words, category, dur);
     speakers = dz.speakers;
     diarNote = dz.note;
+    spkSrc = dz.src || null;
+    if (!speakers && (!txIsMonolog(category) || trainerAcc) && words.length >= 6) {
+      const ai = await txAiSpeakers(env, words, category, lang, !!trainerAcc, trainerAcc);
+      speakers = ai.speakers;
+      spkNames = ai.names || null;
+      spkSrc = ai.src;
+      diarNote = (diarNote ? diarNote + " \xB7 " : "") + ai.note;
+    }
   }
-  await env.DB.prepare(`INSERT INTO record_transcript (ns_record_id, ns_student_id, status, text, lang, dur, words, speakers, diar, model, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(ns_record_id) DO UPDATE SET status=excluded.status, text=excluded.text, lang=excluded.lang, dur=excluded.dur, words=excluded.words, speakers=excluded.speakers, diar=excluded.diar, model=excluded.model, error=excluded.error, created_at=excluded.created_at`).bind(rid, sid ? String(sid) : null, status, text, info.language || null, dur, JSON.stringify(words), speakers ? JSON.stringify(speakers) : null, diarNote, WHISPER_MODEL + "|" + TX_VERSION, err, now).run();
+  await env.DB.prepare(`INSERT INTO record_transcript (ns_record_id, ns_student_id, status, text, lang, dur, words, speakers, diar, spk_names, spk_src, model, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(ns_record_id) DO UPDATE SET status=excluded.status, text=excluded.text, lang=excluded.lang, dur=excluded.dur, words=excluded.words, speakers=excluded.speakers, diar=excluded.diar, spk_names=excluded.spk_names, spk_src=excluded.spk_src, model=excluded.model, error=excluded.error, created_at=excluded.created_at`).bind(rid, sid ? String(sid) : null, status, text, info.language || null, dur, JSON.stringify(words), speakers ? JSON.stringify(speakers) : null, diarNote, spkNames ? JSON.stringify(spkNames) : null, spkSrc, WHISPER_MODEL + "|" + TX_VERSION, err, now).run();
   if (status === "ok" && dur) await env.DB.prepare("INSERT INTO transcript_usage (day, minutes) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET minutes = minutes + excluded.minutes").bind(day, dur / 60).run();
-  return { ns_record_id: rid, ns_student_id: sid, status, text, lang: info.language || null, dur, words: JSON.stringify(words), speakers: speakers ? JSON.stringify(speakers) : null, created_at: now, error: err, diar: diarNote };
+  return { ns_record_id: rid, ns_student_id: sid, status, text, lang: info.language || null, dur, words: JSON.stringify(words), speakers: speakers ? JSON.stringify(speakers) : null, spk_names: spkNames ? JSON.stringify(spkNames) : null, spk_src: spkSrc, created_at: now, error: err, diar: diarNote };
 }
 __name(transcribeAndStore, "transcribeAndStore");
 __name2(transcribeAndStore, "transcribeAndStore");
@@ -8409,19 +8797,69 @@ async function transcribeTick(env) {
   const state = {};
   for (let i = 0; i < rows.length; i += 90) {
     const chunk = rows.slice(i, i + 90).map((r) => r.id);
-    const rs = await env.DB.prepare(`SELECT ns_record_id, status, model, created_at, (speakers IS NOT NULL) AS has_sp, diar FROM record_transcript WHERE ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    const rs = await env.DB.prepare(`SELECT ns_record_id, status, model, created_at, (speakers IS NOT NULL) AS has_sp, diar, spk_src, (summary IS NOT NULL) AS has_sum, (fixed IS NOT NULL) AS has_fix FROM record_transcript WHERE ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
     for (const x of rs.results || []) state[x.ns_record_id] = x;
   }
   const nowS = Math.floor(Date.now() / 1e3);
   const missing = rows.filter((r) => !state[r.id] || state[r.id].status === "error" && nowS - state[r.id].created_at > 6 * 3600);
-  const outdated = rows.filter((r) => state[r.id] && state[r.id].status === "ok" && !String(state[r.id].model || "").endsWith(TX_VERSION));
+  const outdated = rows.filter((r) => state[r.id] && state[r.id].status === "ok" && !/\|v[345]-/.test(String(state[r.id].model || "")));
+  const tset = await txTrainerSet(env);
+  const trMails = txTrainerEmails(env);
+  const isTr = /* @__PURE__ */ __name((r) => TX_TRAINER_NAME_RX.test(((r.p_fn || "") + " " + (r.p_ln || "")).trim()) || tset.has(String(r.user_id)) || trMails.indexOf(String(r.p_email || "").toLowerCase()) >= 0, "isTr");
+  const aiQueue = rows.filter((r) => {
+    const x = state[r.id];
+    return x && x.status === "ok" && !x.has_sp && !x.spk_src && (!txIsMonolog(r.category) || isTr(r));
+  }).slice(0, 15);
+  for (const r of aiQueue) {
+    if (Date.now() - t0 > 2e4) break;
+    const t = await env.DB.prepare("SELECT words, lang FROM record_transcript WHERE ns_record_id = ?").bind(r.id).first();
+    let words = [];
+    try {
+      words = JSON.parse(t && t.words || "[]");
+    } catch (e) {
+    }
+    if (words.length < 6) {
+      await env.DB.prepare("UPDATE record_transcript SET spk_src = 'ai-one' WHERE ns_record_id = ?").bind(r.id).run();
+      continue;
+    }
+    const ai = await txAiSpeakers(env, words, r.category, t && t.lang, txIsMonolog(r.category), await txIsTrainerAcc(env, r.user_id, r.p_fn, r.p_ln, r.p_email));
+    if (ai.src === null) break;
+    await env.DB.prepare("UPDATE record_transcript SET speakers = ?, spk_names = ?, spk_src = ?, diar = ? WHERE ns_record_id = ?").bind(ai.speakers ? JSON.stringify(ai.speakers) : null, ai.names ? JSON.stringify(ai.names) : null, ai.src, ai.note, r.id).run();
+  }
+  const autoSum = rows.filter((r) => {
+    const x = state[r.id];
+    return x && x.status === "ok" && x.spk_src && !x.has_sum && isTr(r);
+  }).slice(0, 1);
+  for (const r of autoSum) {
+    if (Date.now() - t0 > 25e3) break;
+    try {
+      let t = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(r.id).first();
+      const ri = { lang: txLangForCountry(r.country), category: r.category, trainerAcc: true, studentName: ((r.p_fn || "") + " " + (r.p_ln || "")).trim() };
+      if (!t.fixed) {
+        const f = await txFixText(env, t, r.category);
+        if (f) {
+          await env.DB.prepare("UPDATE record_transcript SET fixed = ? WHERE ns_record_id = ?").bind(JSON.stringify(f), r.id).run();
+          t.fixed = JSON.stringify(f);
+        }
+      }
+      const sm = await txMakeSummary(env, r.id, t, ri);
+      await env.DB.prepare("UPDATE record_transcript SET summary = ? WHERE ns_record_id = ?").bind(JSON.stringify(sm.summary || { error: sm.error, created_at: Math.floor(Date.now() / 1e3) }), r.id).run();
+    } catch (e) {
+      console.log("autoSum", r.id, String(e && e.message || e).slice(0, 200));
+    }
+  }
   const diarRetry = !diarEnabled(env) ? [] : rows.filter((r) => {
     const x = state[r.id];
-    return x && x.status === "ok" && String(x.model || "").endsWith(TX_VERSION) && !x.has_sp && !txIsMonolog(r.category) && (!x.diar || /^BŁĄD/.test(x.diar));
+    return x && x.status === "ok" && String(x.model || "").endsWith(TX_VERSION) && !x.has_sp && !x.spk_src && !txIsMonolog(r.category) && (!x.diar || /^BŁĄD/.test(x.diar));
   }).slice(0, 4);
   for (const r of diarRetry) r._diarOnly = true;
   const queue = diarRetry.concat(missing, outdated);
   const pathTpl = await txPathTpl(env);
+  const ar0 = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'ai_spk_v'").first();
+  if (!ar0 || ar0.v !== "2") {
+    await env.DB.prepare("UPDATE record_transcript SET speakers = NULL, spk_names = NULL, spk_src = NULL WHERE spk_src IN ('ai-text', 'ai-one', 'ai-err')").run();
+    await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('ai_spk_v', '2') ON CONFLICT(k) DO UPDATE SET v = excluded.v").run();
+  }
   const dr0 = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'diar_reset'").first();
   if (!dr0 || dr0.v !== "1") {
     await env.DB.prepare("UPDATE record_transcript SET diar = NULL WHERE speakers IS NULL AND diar LIKE 'Nova: brak%'").run();
@@ -8453,7 +8891,7 @@ async function transcribeTick(env) {
       await env.DB.prepare("UPDATE record_transcript SET speakers = ?, diar = ? WHERE ns_record_id = ?").bind(dz.speakers ? JSON.stringify(dz.speakers) : null, dz.note, next.id).run();
       continue;
     }
-    await transcribeAndStore(env, next.id, next.user_id, await a.arrayBuffer(), txLangForCountry(next.country), next.category);
+    await transcribeAndStore(env, next.id, next.user_id, await a.arrayBuffer(), txLangForCountry(next.country), next.category, await txIsTrainerAcc(env, next.user_id, next.p_fn, next.p_ln, next.p_email));
   }
 }
 __name(transcribeTick, "transcribeTick");
@@ -8485,7 +8923,7 @@ async function handleTranscriptsDayMonolog(request, env, url) {
   await pg.connect();
   let rows = [];
   try {
-    rows = (await pg.query(`SELECT r.id::text AS id, r.record_file, r.created_at, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS} FROM records r
+    rows = (await pg.query(`SELECT r.id::text AS id, r.record_file, r.created_at, r.reviewed_at, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS} FROM records r
       LEFT JOIN users u ON u.id = r.user_id
       LEFT JOIN record_categories rc ON rc.id = r.record_category_id
       LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
@@ -8501,7 +8939,7 @@ async function handleTranscriptsDayMonolog(request, env, url) {
   const items = [], tpl = await txPathTpl(env);
   for (const r of rows) {
     const t = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(r.id).first();
-    items.push({ record_id: r.id, category: r.category, created_at: r.created_at, path: txPathFill(tpl, txPathVars(r, r.id, sid, r.record_file)), transcript: t && t.status === "ok" ? transcriptOut(t) : null });
+    items.push({ record_id: r.id, category: r.category, created_at: r.created_at, reviewed: !!r.reviewed_at, path: txPathFill(tpl, txPathVars(r, r.id, sid, r.record_file)), transcript: t && t.status === "ok" ? transcriptOut(t) : null });
   }
   return json({ ok: true, items });
 }
@@ -8577,7 +9015,7 @@ async function handleTranscriptsCorpus(request, env, url) {
   try {
     const q = await pg.query(
       `SELECT r.id::text AS id, r.date, r.created_at, r.record_file, r.is_correct, r.reviewed_at, r.review_details,
-              u.id::text AS uid, u.first_name, u.last_name, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS}
+              u.id::text AS uid, u.first_name, u.last_name, u.country AS country, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS}
        FROM records r JOIN users u ON u.id = r.user_id
        LEFT JOIN record_categories rc ON rc.id = r.record_category_id
        LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
@@ -8600,7 +9038,7 @@ async function handleTranscriptsCorpus(request, env, url) {
   const ids = Object.keys(meta), rows = [];
   for (let i = 0; i < ids.length; i += 90) {
     const chunk = ids.slice(i, i + 90);
-    const rs = await env.DB.prepare(`SELECT ns_record_id, ns_student_id, text, lang, dur, words, created_at FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    const rs = await env.DB.prepare(`SELECT ns_record_id, ns_student_id, text, lang, dur, words, speakers, spk_names, spk_src, summary, fixed, created_at FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
     for (const r of rs.results || []) rows.push(r);
   }
   const tpl = await txPathTpl(env);
@@ -8626,7 +9064,39 @@ async function handleTranscriptsCorpus(request, env, url) {
       }
     }
     const span = words.length ? Math.max(0.1, words[words.length - 1][2] - words[0][1]) : r.dur || 0;
+    let turns = null, names = null;
+    try {
+      const sp = r.speakers ? JSON.parse(r.speakers) : null;
+      if (sp && sp.length === words.length) {
+        turns = [];
+        for (let i = 0; i < words.length; i++) {
+          const last = turns[turns.length - 1];
+          if (last && last[0] === sp[i]) last[1] += " " + words[i][0];
+          else turns.push([sp[i], words[i][0]]);
+        }
+        names = r.spk_names ? JSON.parse(r.spk_names) : null;
+      }
+    } catch (e) {
+      turns = null;
+    }
+    let summary = null, fixed = null;
+    try {
+      summary = r.summary ? JSON.parse(r.summary) : null;
+    } catch (e) {
+    }
+    try {
+      fixed = r.fixed ? JSON.parse(r.fixed) : null;
+    } catch (e) {
+    }
+    if (summary && summary.error) summary = null;
     items.push({
+      country: m.country || "",
+      turns,
+      speaker_names: names,
+      spk_src: r.spk_src || null,
+      summary,
+      fixed,
+      trainer_acc: await txIsTrainerAcc(env, m.uid, m.first_name, m.last_name, m.p_email),
       record_id: r.ns_record_id,
       student_id: m.uid,
       student: ((m.first_name || "") + " " + (m.last_name || "")).trim(),
@@ -8661,6 +9131,223 @@ async function handleTranscriptsStudent(request, env, url) {
 }
 __name(handleTranscriptsStudent, "handleTranscriptsStudent");
 __name2(handleTranscriptsStudent, "handleTranscriptsStudent");
+async function handleTranscriptSpeakers(request, env) {
+  let body = {};
+  try {
+    body = await request.json();
+  } catch (e) {
+  }
+  const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+  const rid = String(body.record_id || "");
+  if (!rid) return json({ error: "Brak record_id" }, 400);
+  await ensureTranscriptTables(env);
+  const t = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first();
+  if (!t || t.status !== "ok") return json({ error: "To nagranie nie ma jeszcze tekstu" }, 404);
+  let words = [];
+  try {
+    words = JSON.parse(t.words || "[]");
+  } catch (e) {
+  }
+  const ri = await txRecordInfo(env, rid);
+  const ai = await txAiSpeakers(env, words, ri.category, t.lang, true, ri.trainerAcc);
+  if (ai.src) await env.DB.prepare("UPDATE record_transcript SET speakers = ?, spk_names = ?, spk_src = ?, diar = ? WHERE ns_record_id = ?").bind(ai.speakers ? JSON.stringify(ai.speakers) : null, ai.names ? JSON.stringify(ai.names) : null, ai.src, ai.note, rid).run();
+  const now = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first();
+  return json({ ok: !!ai.speakers, note: ai.note, item: transcriptOut(now) });
+}
+__name(handleTranscriptSpeakers, "handleTranscriptSpeakers");
+__name2(handleTranscriptSpeakers, "handleTranscriptSpeakers");
+var TX_LANG_NAME = { pl: "polskim", cs: "czeskim", sk: "s\u0142owackim", en: "angielskim" };
+function txDialogText(t) {
+  let words = [];
+  try {
+    words = JSON.parse(t.words || "[]");
+  } catch (e) {
+  }
+  let sp = null;
+  try {
+    sp = t.speakers ? JSON.parse(t.speakers) : null;
+  } catch (e) {
+  }
+  let names = null;
+  try {
+    names = t.spk_names ? JSON.parse(t.spk_names) : null;
+  } catch (e) {
+  }
+  if (!sp || sp.length !== words.length) return String(t.text || "");
+  const out = [];
+  let cur = null, buf = [];
+  const flush = /* @__PURE__ */ __name(() => {
+    if (buf.length) out.push((names && names[cur] ? names[cur] : "Osoba " + (cur + 1)) + ": " + buf.join(" "));
+    buf = [];
+  }, "flush");
+  for (let i = 0; i < words.length; i++) {
+    if (sp[i] !== cur) {
+      flush();
+      cur = sp[i];
+    }
+    buf.push(words[i][0]);
+  }
+  flush();
+  return out.join("\n");
+}
+__name(txDialogText, "txDialogText");
+__name2(txDialogText, "txDialogText");
+async function txFixText(env, t, category) {
+  let words = [];
+  try {
+    words = JSON.parse(t.words || "[]");
+  } catch (e) {
+  }
+  let sp = null;
+  try {
+    sp = t.speakers ? JSON.parse(t.speakers) : null;
+  } catch (e) {
+  }
+  if (sp && sp.length !== words.length) sp = null;
+  const sents = txSentences(words);
+  if (!sents.length) return null;
+  const sys = 'Poprawiasz zapis z automatycznego rozpoznawania mowy (polski/czeski/s\u0142owacki). M\xF3wi\u0105 osoby, kt\xF3re si\u0119 j\u0105kaj\u0105 \u2014 w zapisie bywaj\u0105 urwane i powt\xF3rzone sylaby (\u201EZ...ra... Trancji\u201D), przekr\u0119cone s\u0142owa i brak ko\u0144c\xF3wek. Popraw KA\u017BDE zdanie tak, by brzmia\u0142o jak to, co osoba najpewniej powiedzia\u0142a: usu\u0144 urwane fragmenty i powt\xF3rzenia, popraw przekr\u0119cone s\u0142owa i gramatyk\u0119, zachowaj sens, styl i s\u0142ownictwo m\xF3wi\u0105cego. Nie dodawaj nowych tre\u015Bci, nie streszczaj, nie \u0142\u0105cz ani nie dziel zda\u0144. Je\u015Bli zdanie jest niezrozumia\u0142e \u2014 zostaw je mo\u017Cliwie blisko orygina\u0142u. Odpowiedz WY\u0141\u0104CZNIE JSON-em {"z":["poprawione zdanie 1", \u2026]} \u2014 dok\u0142adnie tyle zda\u0144, ile dosta\u0142e\u015B, w tej samej kolejno\u015Bci.';
+  const out = [], BATCH = 60;
+  for (let i = 0; i < sents.length; i += BATCH) {
+    const part = sents.slice(i, i + BATCH);
+    let fixedPart = null;
+    try {
+      const j = txParseJson(await txLlm(env, sys, "Kategoria: " + (category || "\u2014") + "\nZdania (" + part.length + "):\n" + part.map((x, k) => k + 1 + ". " + x.text).join("\n"), 200 + part.length * 40));
+      if (j && Array.isArray(j.z) && j.z.length === part.length) fixedPart = j.z.map((x) => String(x || "").trim());
+    } catch (e) {
+    }
+    part.forEach((x, k) => out.push([sp ? sp[x.from] : null, fixedPart && fixedPart[k] ? fixedPart[k] : x.text]));
+  }
+  return out;
+}
+__name(txFixText, "txFixText");
+__name2(txFixText, "txFixText");
+function txFixedDialog(t) {
+  let f = null;
+  try {
+    f = t.fixed ? JSON.parse(t.fixed) : null;
+  } catch (e) {
+  }
+  if (!f || !f.length) return null;
+  let names = null;
+  try {
+    names = t.spk_names ? JSON.parse(t.spk_names) : null;
+  } catch (e) {
+  }
+  const out = [];
+  let cur, buf = [];
+  const flush = /* @__PURE__ */ __name(() => {
+    if (buf.length) out.push((cur === null || cur === void 0 ? "" : (names && names[cur] ? names[cur] : "Osoba " + (cur + 1)) + ": ") + buf.join(" "));
+    buf = [];
+  }, "flush");
+  for (const [k, txt] of f) {
+    if (k !== cur) {
+      flush();
+      cur = k;
+    }
+    buf.push(txt);
+  }
+  flush();
+  return out.join("\n");
+}
+__name(txFixedDialog, "txFixedDialog");
+__name2(txFixedDialog, "txFixedDialog");
+async function txMakeSummary(env, rid, t, ri) {
+  const slang = ri.lang || t.lang || "pl";
+  let dialog = (txFixedDialog(t) || txDialogText(t)).trim();
+  if (dialog.split(/\s+/).length < 25) return { error: "Za kr\xF3tkie nagranie na podsumowanie" };
+  const LIM = 28e3;
+  if (dialog.length > LIM) {
+    const parts = [];
+    for (let i = 0; i < dialog.length; i += LIM) parts.push(dialog.slice(i, i + LIM));
+    const notes = [];
+    for (let k = 0; k < parts.length; k++) {
+      notes.push(String(await txLlm(
+        env,
+        "Streszczasz fragment zapisu rozmowy (rozpoznawanie mowy, mog\u0105 by\u0107 b\u0142\u0119dy). Wypisz po polsku w punktach wszystkie wa\u017Cne fakty, w\u0105tki, ustalenia, rady i osoby (kto co m\xF3wi). Bez wst\u0119p\xF3w.",
+        "Fragment " + (k + 1) + " z " + parts.length + ":\n" + parts[k],
+        900
+      ) || ""));
+    }
+    dialog = "(Notatki z kolejnych cz\u0119\u015Bci d\u0142ugiej rozmowy)\n" + notes.join("\n\n");
+  }
+  const recorder = ri.trainerAcc ? "Nagranie wgra\u0142 TRENER ze swojego konta \u2014 to rozmowa trenera z kursantem (lub kursantami)." : "Nagranie wgra\u0142 kursant " + (ri.studentName || "") + " (to on nagrywa). Rozm\xF3wc\u0105 mo\u017Ce by\u0107 osoba z zewn\u0105trz (np. sprzedawca) albo inny kursant (np. w kategorii telefon do kursanta).";
+  const sys = "Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D, np. zer\xF3wka, \u0142\u0105cznik, jedynka, oraz rozmowy w codziennych sytuacjach). Dostajesz zapis nagrania z rozpoznawania mowy \u2014 mog\u0105 by\u0107 b\u0142\u0119dy i przekr\u0119cone imiona/nazwy. " + recorder + ' Nie wymy\u015Blaj fakt\xF3w, kt\xF3rych nie ma w zapisie. Nigdy nie u\u017Cywaj s\u0142owa \u201Eterapia\u201D. Odpowiedz WY\u0141\u0104CZNIE JSON-em o polach: {"rozmowcy":[{"kto":"np. Trener / Karola (kursantka)","punkty":["\u2026"]}],"osoby":[{"kto":"\u2026","rola":"\u2026"}],"temat":"jedno zdanie","ustalenia":["najwa\u017Cniejsze wnioski i ustalenia, 3\u20138 punkt\xF3w"],"watki":["dodatkowe w\u0105tki"],"wniosek":"2\u20133 zdania","wiadomosci":[{"dla":"kursant nagrywaj\u0105cy | rozm\xF3wca-kursant","imie":"imi\u0119 tej osoby, je\u015Bli znane","tekst":"\u2026"}]}. Wszystko po polsku, opr\xF3cz tekst\xF3w wiadomo\u015Bci. \u201Ewiadomosci\u201D: osobna kr\xF3tka, ciep\u0142a wiadomo\u015B\u0107 od trenera dla KA\u017BDEGO kursanta bior\u0105cego udzia\u0142 w rozmowie (nie dla trenera i nie dla os\xF3b z zewn\u0105trz, np. sprzedawcy) \u2014 w j\u0119zyku ' + (TX_LANG_NAME[slang] || "polskim") + ", per \u201ETy\u201D, 3\u20136 punkt\xF3w: co posz\u0142o dobrze, nad czym pracowa\u0107, konkretne nast\u0119pne kroki. Pomi\u0144 sprawy zdrowotne, rodzinne, szczeg\xF3\u0142y o innych ludziach i wszystko prywatne \u2014 tylko mowa, \u0107wiczenia, post\u0119py i plan. Je\u015Bli m\xF3wi jedna osoba (monolog), rozmowcy ma jedn\u0105 pozycj\u0119, a wiadomosci jedn\u0105 \u2014 dla nagrywaj\u0105cego.";
+  const raw = await txLlm(env, sys, "Kategoria nagrania: " + (ri.category || "\u2014") + "\n\nZapis:\n" + dialog, 2600);
+  const j = txParseJson(raw);
+  if (!j || !j.ustalenia && !j.temat) return { error: "AI nie zwr\xF3ci\u0142o czytelnego podsumowania \u2014 spr\xF3buj ponownie" };
+  if (!Array.isArray(j.wiadomosci)) j.wiadomosci = j.dla_kursanta ? [{ dla: ri.trainerAcc ? "kursant" : "kursant nagrywaj\u0105cy", imie: j.kursant_imie || "", tekst: Array.isArray(j.dla_kursanta) ? j.dla_kursanta.map((x) => "\u2022 " + x).join("\n") : String(j.dla_kursanta) }] : [];
+  j.wiadomosci = j.wiadomosci.map((m) => ({ dla: String(m.dla || ""), imie: String(m.imie || ""), tekst: Array.isArray(m.tekst) ? m.tekst.map((x) => "\u2022 " + x).join("\n") : String(m.tekst || "") })).filter((m) => m.tekst);
+  return { summary: { ...j, lang: slang, trainer_acc: !!ri.trainerAcc, owner_name: ri.studentName || "", created_at: Math.floor(Date.now() / 1e3) } };
+}
+__name(txMakeSummary, "txMakeSummary");
+__name2(txMakeSummary, "txMakeSummary");
+async function txAuthBody(request, env) {
+  let body = {};
+  try {
+    body = await request.json();
+  } catch (e) {
+  }
+  const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+  if (!who) return { err: json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401) };
+  if (who.forbidden) return { err: json({ error: "Tylko trener/admin" }, 403) };
+  return { body, who };
+}
+__name(txAuthBody, "txAuthBody");
+__name2(txAuthBody, "txAuthBody");
+async function handleTranscriptSummary(request, env) {
+  const { body, err } = await txAuthBody(request, env);
+  if (err) return err;
+  const rid = String(body.record_id || "");
+  if (!rid) return json({ error: "Brak record_id" }, 400);
+  if (!env.AI) return json({ error: "Brak Workers AI" }, 500);
+  await ensureTranscriptTables(env);
+  const t = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first();
+  if (!t || t.status !== "ok") return json({ error: "To nagranie nie ma jeszcze tekstu" }, 404);
+  if (t.summary && !body.force) {
+    try {
+      const c = JSON.parse(t.summary);
+      if (!c.error) return json({ ok: true, summary: c, cached: true });
+    } catch (e) {
+    }
+  }
+  const ri = await txRecordInfo(env, rid);
+  const r = await txMakeSummary(env, rid, t, ri);
+  if (r.error) return json({ error: r.error }, r.error.indexOf("kr\xF3tkie") > 0 ? 400 : 502);
+  await env.DB.prepare("UPDATE record_transcript SET summary = ? WHERE ns_record_id = ?").bind(JSON.stringify(r.summary), rid).run();
+  return json({ ok: true, summary: r.summary });
+}
+__name(handleTranscriptSummary, "handleTranscriptSummary");
+__name2(handleTranscriptSummary, "handleTranscriptSummary");
+async function handleTranscriptFix(request, env) {
+  const { body, err } = await txAuthBody(request, env);
+  if (err) return err;
+  const rid = String(body.record_id || "");
+  if (!rid) return json({ error: "Brak record_id" }, 400);
+  await ensureTranscriptTables(env);
+  const t = await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first();
+  if (!t || t.status !== "ok") return json({ error: "To nagranie nie ma jeszcze tekstu" }, 404);
+  const ri = await txRecordInfo(env, rid);
+  const f = await txFixText(env, t, ri.category);
+  if (!f) return json({ error: "Brak tekstu do poprawy" }, 400);
+  await env.DB.prepare("UPDATE record_transcript SET fixed = ? WHERE ns_record_id = ?").bind(JSON.stringify(f), rid).run();
+  return json({ ok: true, item: transcriptOut(await env.DB.prepare("SELECT * FROM record_transcript WHERE ns_record_id = ?").bind(rid).first()) });
+}
+__name(handleTranscriptFix, "handleTranscriptFix");
+__name2(handleTranscriptFix, "handleTranscriptFix");
+async function handleTranscriptDelete(request, env) {
+  const { body, err } = await txAuthBody(request, env);
+  if (err) return err;
+  const rid = String(body.record_id || "");
+  if (!rid) return json({ error: "Brak record_id" }, 400);
+  await ensureTranscriptTables(env);
+  await env.DB.prepare("UPDATE record_transcript SET status = 'deleted', text = '', words = '[]', speakers = NULL, spk_names = NULL, spk_src = 'deleted', summary = NULL, fixed = NULL, error = ? WHERE ns_record_id = ?").bind("usuni\u0119ty przez " + (body.ns_email || "trenera"), rid).run();
+  return json({ ok: true });
+}
+__name(handleTranscriptDelete, "handleTranscriptDelete");
+__name2(handleTranscriptDelete, "handleTranscriptDelete");
 async function handleTranscriptRun(request, env) {
   let body = {};
   try {
@@ -8686,7 +9373,7 @@ async function handleTranscriptRun(request, env) {
     }
   } catch (e) {
   }
-  const item = await transcribeAndStore(env, rid, body.student_id, await a.arrayBuffer(), ri.lang, ri.category);
+  const item = await transcribeAndStore(env, rid, body.student_id, await a.arrayBuffer(), ri.lang, ri.category, ri.trainerAcc);
   if (item.status !== "ok") return json({ ok: false, error: item.error, item: transcriptOut(item) }, item.status === "limit" ? 429 : 502);
   return json({ ok: true, item: transcriptOut(item), diar: item.diar || null, category: ri.category || null });
 }
