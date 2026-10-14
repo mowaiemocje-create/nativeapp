@@ -92,7 +92,7 @@ public final class TalkStats {
         StringBuilder mot = new StringBuilder();
         JSONObject cur = weeks.isEmpty() ? null : weeks.get(weeks.size() - 1);
         JSONObject prev = weeks.size() < 2 ? null : weeks.get(weeks.size() - 2);
-        if (cur != null && cur.optDouble("words", 0) > 0) mot.append(L.f("W tym tygodniu powiedziałeś już {0} słów 💪", num(cur.optDouble("words", 0))));
+        if (cur != null && cur.optDouble("min", 0) > 0) mot.append(L.f("W tym tygodniu przeprowadziłeś już {0} rozmowy 💪", min(cur.optDouble("min", 0))));
         if (cur != null && prev != null && prev.optDouble("min", 0) > 0 && cur.optDouble("min", 0) > prev.optDouble("min", 0)) {
             if (mot.length() > 0) mot.append("\n");
             mot.append(L.f("+{0}% minut względem zeszłego tygodnia", Math.round((cur.optDouble("min", 0) - prev.optDouble("min", 0)) / prev.optDouble("min", 1) * 100)));
