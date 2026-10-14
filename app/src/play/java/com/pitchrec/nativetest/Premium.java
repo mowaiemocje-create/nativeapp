@@ -38,6 +38,7 @@ public final class Premium {
     private static ProductDetails details;
     private static Runnable onChangeAfterBuy;
     private static final Handler main = new Handler(Looper.getMainLooper());
+    private static String lastErr = ""; // diagnostyka: kod odpowiedzi Google Play przy braku produktu
 
     private Premium() { }
 
@@ -70,6 +71,7 @@ public final class Premium {
                 List<Runnable> run;
                 synchronized (waiting) { connecting = false; run = new ArrayList<>(waiting); waiting.clear(); }
                 boolean ok = r.getResponseCode() == BillingClient.BillingResponseCode.OK;
+                if (!ok) lastErr = "setup " + r.getResponseCode() + " " + r.getDebugMessage();
                 main.post(() -> {
                     if (ok) for (Runnable x : run) x.run();
                     else if (fail != null) fail.run();
@@ -102,9 +104,11 @@ public final class Premium {
             if (details != null) { launch(a, onChange); return; }
             loadDetails(() -> {
                 if (details != null) launch(a, onChange);
-                else Toast.makeText(a, L.t("Zakup jest chwilowo niedostępny. Spróbuj ponownie za chwilę."), Toast.LENGTH_LONG).show();
+                else if (!a.isFinishing()) new android.app.AlertDialog.Builder(a)
+                        .setMessage(L.t("Zakup jest chwilowo niedostępny. Spróbuj ponownie za chwilę.") + "\n\n(" + lastErr + ")")
+                        .setPositiveButton("OK", null).show();
             });
-        }, () -> Toast.makeText(a, L.t("Brak połączenia ze Sklepem Google Play."), Toast.LENGTH_LONG).show());
+        }, () -> Toast.makeText(a, L.t("Brak połączenia ze Sklepem Google Play.") + " (" + lastErr + ")", Toast.LENGTH_LONG).show());
     }
 
     private static void launch(Activity a, Runnable onChange) {
@@ -127,6 +131,13 @@ public final class Premium {
         client.queryProductDetailsAsync(q, (r, res) -> main.post(() -> {
             try {
                 List<ProductDetails> l = res == null ? null : res.getProductDetailsList();
+                StringBuilder dg = new StringBuilder("code " + r.getResponseCode());
+                if (r.getDebugMessage() != null && !r.getDebugMessage().isEmpty()) dg.append(" ").append(r.getDebugMessage());
+                if (res != null && res.getUnfetchedProductList() != null)
+                    for (com.android.billingclient.api.UnfetchedProduct u : res.getUnfetchedProductList())
+                        dg.append(", ").append(u.getProductId()).append(" status ").append(u.getStatusCode());
+                if (l == null || l.isEmpty()) dg.append(", 0 products");
+                lastErr = dg.toString();
                 if (r.getResponseCode() == BillingClient.BillingResponseCode.OK && l != null && !l.isEmpty()) {
                     details = l.get(0);
                     ProductDetails.OneTimePurchaseOfferDetails o = details.getOneTimePurchaseOfferDetails();
