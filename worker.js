@@ -5884,6 +5884,43 @@ var worker_default = {
       if (url.pathname === "/transcripts" && request.method === "GET") {
         return await handleTranscriptsGet(request, env, url);
       }
+      if (url.pathname === "/student-report" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        await ensureTranscriptTables(env);
+        try {
+          await env.DB.prepare("CREATE TABLE IF NOT EXISTS student_report (ns_student_id TEXT, period TEXT, report TEXT, created_at INTEGER, PRIMARY KEY (ns_student_id, period))").run();
+        } catch (e) {
+        }
+        const sid = String(url.searchParams.get("student_id") || "");
+        const row = await env.DB.prepare("SELECT report FROM student_report WHERE ns_student_id = ? ORDER BY created_at DESC LIMIT 1").bind(sid).first();
+        let rep = null;
+        try {
+          rep = row ? JSON.parse(row.report) : null;
+        } catch (e) {
+        }
+        await srJobTable(env);
+        const job = await env.DB.prepare("SELECT status, days, error, created_at, started_at, finished_at FROM student_report_job WHERE ns_student_id = ?").bind(sid).first();
+        return json({ ok: true, report: rep, job: job || null });
+      }
+      if (url.pathname === "/student-report/run" && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (e) {
+        }
+        const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(body.student_id || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        await srJobTable(env);
+        const days = Math.min(180, Math.max(7, Number(body.days) || 30)), now = Math.floor(Date.now() / 1e3);
+        const extra = JSON.stringify({ tasks: Array.isArray(body.tasks) ? body.tasks.slice(0, 60) : [] }).slice(0, 6e4);
+        await env.DB.prepare("INSERT INTO student_report_job (ns_student_id, days, status, error, requested_by, created_at, started_at, finished_at, tries, extra) VALUES (?, ?, 'queued', NULL, ?, ?, NULL, NULL, 0, ?) ON CONFLICT(ns_student_id) DO UPDATE SET days = excluded.days, status = 'queued', error = NULL, requested_by = excluded.requested_by, created_at = excluded.created_at, started_at = NULL, finished_at = NULL, tries = 0, extra = excluded.extra").bind(sid, days, String(who.email || ""), now, extra).run();
+        return json({ ok: true, queued: true, job: { status: "queued", days, created_at: now } });
+      }
       if (url.pathname === "/talk-stats" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -6419,6 +6456,8 @@ var worker_default = {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(pollPostgresChanges(env));
     ctx.waitUntil(transcribeTick(env).catch(() => {
+    }));
+    ctx.waitUntil(srJobTick(env).catch(() => {
     }));
   }
 };
@@ -8344,16 +8383,45 @@ async function txIsTrainerAcc(env, uid, first, last, email) {
 }
 __name(txIsTrainerAcc, "txIsTrainerAcc");
 __name2(txIsTrainerAcc, "txIsTrainerAcc");
+async function txPrioGet(env) {
+  try {
+    const r = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'prio_sids'").first();
+    const o = r && r.v ? JSON.parse(r.v) : {};
+    const now = Date.now();
+    for (const k of Object.keys(o)) if (now - o[k] > 2 * 864e5) delete o[k];
+    return o;
+  } catch (e) {
+    return {};
+  }
+}
+__name(txPrioGet, "txPrioGet");
+__name2(txPrioGet, "txPrioGet");
+async function txPrioAdd(env, sid) {
+  const o = await txPrioGet(env);
+  if (o[String(sid)] && Date.now() - o[String(sid)] < 36e5) return;
+  o[String(sid)] = Date.now();
+  const keys = Object.keys(o).sort((a, b) => o[b] - o[a]).slice(0, 10);
+  const n = {};
+  for (const k of keys) n[k] = o[k];
+  await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('prio_sids', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(JSON.stringify(n)).run();
+}
+__name(txPrioAdd, "txPrioAdd");
+__name2(txPrioAdd, "txPrioAdd");
 async function txTalkStats(env, sid) {
   await ensureTranscriptTables(env);
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
-  let recs = [];
+  let recs = [], first = "";
   try {
     recs = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.review_details, COALESCE(rct.name, rc.name) AS category
       FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
       LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
       WHERE r.user_id::text = $1 AND r.deleted_at IS NULL AND r.record_file IS NOT NULL ORDER BY r.created_at DESC LIMIT 3000`, [String(sid)])).rows;
+    try {
+      const u = (await pg.query("SELECT first_name FROM users WHERE id::text = $1", [String(sid)])).rows[0];
+      first = String(u && u.first_name || "").trim().toLowerCase();
+    } catch (e) {
+    }
   } finally {
     try {
       await pg.end();
@@ -8364,7 +8432,7 @@ async function txTalkStats(env, sid) {
   const tx = {};
   for (let i = 0; i < recs.length; i += 90) {
     const chunk = recs.slice(i, i + 90).map((r) => r.id);
-    const rs = await env.DB.prepare(`SELECT ns_record_id, dur, words, speakers, spk_src FROM record_transcript WHERE dur > 0 AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    const rs = await env.DB.prepare(`SELECT ns_record_id, dur, words, speakers, spk_src, spk_names, spk_people FROM record_transcript WHERE dur > 0 AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
     for (const x of rs.results || []) tx[x.ns_record_id] = x;
   }
   const now = /* @__PURE__ */ new Date(), dayMs = 864e5;
@@ -8379,44 +8447,60 @@ async function txTalkStats(env, sid) {
   const z = /* @__PURE__ */ __name(() => ({ min: 0, words: 0, n: 0 }), "z");
   const cats = {}, weeks = {}, tot = { all: z(), d30: z(), d7: z(), today: z(), prev7: z(), prev30: z() };
   let noText = 0;
+  const J = /* @__PURE__ */ __name((x, def) => {
+    try {
+      return x ? JSON.parse(x) : def;
+    } catch (e) {
+      return def;
+    }
+  }, "J");
   for (const r of recs) {
     const t = tx[r.id];
     const d = ymd(r.d);
-    if (!t) {
-      noText++;
-      continue;
+    const has = t ? 1 : 0;
+    if (!t) noText++;
+    const min = t ? (Number(t.dur) || 0) / 60 : 0;
+    let words = 0;
+    if (t) {
+      const wc = J(t.words, []), sp = J(t.speakers, null), names = J(t.spk_names, {}) || {}, people = J(t.spk_people, {}) || {};
+      const spOk = sp && sp.length === wc.length;
+      const persons = spOk ? new Set(sp).size : 1;
+      if (persons < 2) {
+        if (txIsMonolog(r.category) || t.spk_src === "ai-one") words = wc.length;
+      } else {
+        let idx = null;
+        for (const k of Object.keys(people)) if (String(people[k]) === String(sid)) idx = Number(k);
+        if (idx === null) for (const k of Object.keys(names)) {
+          const nm = String(names[k] || "").toLowerCase();
+          if (/kursant|kurzist|student/.test(nm) || first && nm.indexOf(first) >= 0) {
+            idx = Number(k);
+            break;
+          }
+        }
+        if (idx === null && t.spk_src === "ai-text") idx = 0;
+        if (idx !== null) words = sp.filter((x) => x === idx).length;
+      }
     }
-    const min = (Number(t.dur) || 0) / 60;
-    let words = 0, wc = [];
-    try {
-      wc = JSON.parse(t.words || "[]");
-    } catch (e) {
-    }
-    let sp = null;
-    try {
-      sp = t.speakers ? JSON.parse(t.speakers) : null;
-    } catch (e) {
-    }
-    const persons = sp && sp.length === wc.length ? new Set(sp).size : 1;
-    if (persons < 2) {
-      if (txIsMonolog(r.category)) words = wc.length;
-    } else if (t.spk_src === "ai-text") words = sp.filter((x) => x === 0).length;
-    const c = cats[r.category || "(bez kategorii)"] = cats[r.category || "(bez kategorii)"] || { category: r.category || "(bez kategorii)", n: 0, min: 0, words: 0, n30: 0, min30: 0, words30: 0, n7: 0, min7: 0, words7: 0 };
+    const c = cats[r.category || "(bez kategorii)"] = cats[r.category || "(bez kategorii)"] || { category: r.category || "(bez kategorii)", n: 0, min: 0, words: 0, n30: 0, min30: 0, words30: 0, n7: 0, min7: 0, words7: 0, t: 0, t30: 0, t7: 0 };
     c.n++;
+    c.t += has;
     c.min += min;
     c.words += words;
     if (d >= d30) {
       c.n30++;
+      c.t30 += has;
       c.min30 += min;
       c.words30 += words;
     }
     if (d >= d7) {
       c.n7++;
+      c.t7 += has;
       c.min7 += min;
       c.words7 += words;
     }
     const add = /* @__PURE__ */ __name((o) => {
       o.n++;
+      o.t = (o.t || 0) + has;
       o.min += min;
       o.words += words;
     }, "add");
@@ -8431,19 +8515,479 @@ async function txTalkStats(env, sid) {
     add(w);
   }
   const r1 = /* @__PURE__ */ __name((x) => Math.round(x * 10) / 10, "r1");
-  const fix = /* @__PURE__ */ __name((o) => ({ n: o.n, min: r1(o.min), words: o.words }), "fix");
+  const fix = /* @__PURE__ */ __name((o) => ({ n: o.n, with_text: o.t || 0, min: r1(o.min), words: o.words }), "fix");
+  if (noText) {
+    try {
+      await txPrioAdd(env, sid);
+    } catch (e) {
+    }
+  }
   return {
     ok: true,
     totals: { all: fix(tot.all), d30: fix(tot.d30), d7: fix(tot.d7), today: fix(tot.today), prev7: fix(tot.prev7), prev30: fix(tot.prev30) },
-    categories: Object.values(cats).map((c) => ({ category: c.category, n: c.n, min: r1(c.min), words: c.words, n30: c.n30, min30: r1(c.min30), words30: c.words30, n7: c.n7, min7: r1(c.min7), words7: c.words7 })).sort((a, b) => b.min - a.min),
+    categories: Object.values(cats).map((c) => ({ category: c.category, n: c.n, t: c.t, min: r1(c.min), words: c.words, n30: c.n30, t30: c.t30, min30: r1(c.min30), words30: c.words30, n7: c.n7, t7: c.t7, min7: r1(c.min7), words7: c.words7 })).sort((a, b) => b.min - a.min),
     recordings_total: recs.length,
-    weeks: Object.values(weeks).sort((a, b) => a.week.localeCompare(b.week)).slice(-12).map((w) => ({ week: w.week, n: w.n, min: r1(w.min), words: w.words })),
+    weeks: Object.values(weeks).sort((a, b) => a.week.localeCompare(b.week)).slice(-12).map((w) => ({ week: w.week, n: w.n, with_text: w.t || 0, min: r1(w.min), words: w.words })),
     without_text: noText,
-    note: "Minuty: nagrania z tekstem. S\u0142owa: monologi z jednym g\u0142osem + s\u0142owa kursanta w rozmowach podzielonych przez AI."
+    note: "Nagrania: wszystkie. Minuty i s\u0142owa: tylko nagrania z tekstem (reszta przepisywana w tle). S\u0142owa: monologi z jednym g\u0142osem + s\u0142owa kursanta w rozmowach podzielonych na osoby."
   };
 }
 __name(txTalkStats, "txTalkStats");
 __name2(txTalkStats, "txTalkStats");
+var SR_MOOD = { luz: 1, komfortowo: 2, neutralnie: 3, niekomfortowo: 4, stres: 5 };
+var SR_POLITE = [
+  ["powitanie", /(?<![\p{L}])(dzień dobry|dobry wieczór|cześć|witam|dobrý den|ahoj|hello)(?![\p{L}])/giu],
+  ["prosz\u0119", /(?<![\p{L}])(proszę|poproszę|prosím|please)(?![\p{L}])/giu],
+  ["dzi\u0119kuj\u0119", /(?<![\p{L}])(dziękuję|dzięki|děkuji|děkuju|ďakujem|thank you|thanks)(?![\p{L}])/giu],
+  ["przepraszam", /(?<![\p{L}])(przepraszam|promiňte|prepáčte|sorry|excuse me)(?![\p{L}])/giu],
+  ["po\u017Cegnanie", /(?<![\p{L}])(do widzenia|do zobaczenia|na shledanou|dovidenia|goodbye|bye)(?![\p{L}])/giu]
+];
+function srMedian(a) {
+  if (!a.length) return 0;
+  const b = a.slice().sort((x, y) => x - y);
+  const m = Math.floor(b.length / 2);
+  return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+}
+__name(srMedian, "srMedian");
+__name2(srMedian, "srMedian");
+function srTokens(t) {
+  return String(t || "").toLowerCase().replace(/[^\p{L}\s-]/gu, " ").split(/\s+/).filter((w) => w && w.length > 0);
+}
+__name(srTokens, "srTokens");
+__name2(srTokens, "srTokens");
+async function txStudentReport(env, sid, days, extra) {
+  await ensureTranscriptTables(env);
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS student_report (ns_student_id TEXT, period TEXT, report TEXT, created_at INTEGER, PRIMARY KEY (ns_student_id, period))").run();
+  } catch (e) {
+  }
+  days = Math.max(7, Math.min(180, parseInt(days, 10) || 30));
+  const now = /* @__PURE__ */ new Date(), from = new Date(now - (days - 1) * 864e5).toISOString().slice(0, 10), to = now.toISOString().slice(0, 10);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let me = {}, own = [];
+  const catSql = `LEFT JOIN record_categories rc ON rc.id = r.record_category_id LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'`;
+  try {
+    me = (await pg.query("SELECT id::text AS id, first_name, last_name, country FROM users WHERE id::text = $1", [String(sid)])).rows[0] || {};
+    own = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.record_file, r.review_details, COALESCE(rct.name, rc.name) AS category
+      FROM records r ${catSql} WHERE r.user_id::text = $1 AND r.deleted_at IS NULL AND r.record_file IS NOT NULL
+      AND COALESCE(r.date, r.created_at::date) BETWEEN $2::date AND $3::date ORDER BY r.created_at`, [String(sid), from, to])).rows;
+  } catch (e) {
+    try {
+      await pg.end();
+    } catch (e2) {
+    }
+    throw e;
+  }
+  const first = String(me.first_name || "").trim(), last = String(me.last_name || "").trim();
+  const full = (first + " " + last).trim().toLowerCase();
+  const tset = await txTrainerSet(env);
+  const conds = ["spk_people LIKE ?"], binds = ['%"' + String(sid) + '"%'];
+  if (first && last) {
+    conds.push("LOWER(COALESCE(text,'') || ' ' || COALESCE(fixed,'') || ' ' || COALESCE(spk_names,'') || ' ' || COALESCE(summary,'')) LIKE ?");
+    binds.push("%" + full + "%");
+  }
+  let extraT = [];
+  try {
+    extraT = (await env.DB.prepare(`SELECT * FROM record_transcript WHERE status = 'ok' AND COALESCE(ns_student_id,'') != ? AND (${conds.join(" OR ")}) LIMIT 400`).bind(String(sid), ...binds).all()).results || [];
+    if (first) {
+      const trIds = [...tset];
+      const tr = (await env.DB.prepare(`SELECT * FROM record_transcript WHERE status = 'ok' AND COALESCE(ns_student_id,'') != ? AND LOWER(COALESCE(spk_names,'') || ' ' || COALESCE(summary,'')) LIKE ? LIMIT 400`).bind(String(sid), "%" + first.toLowerCase() + "%").all()).results || [];
+      extraT = extraT.concat(tr.filter((x) => !extraT.some((y) => y.ns_record_id === x.ns_record_id)).map((x) => ({ ...x, _byFirst: true, _trIds: trIds })));
+    }
+  } catch (e) {
+  }
+  let extraMeta = {};
+  if (extraT.length) {
+    try {
+      const rows = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.record_file, r.review_details, COALESCE(rct.name, rc.name) AS category,
+          u.id::text AS uid, u.first_name, u.last_name, u.email FROM records r JOIN users u ON u.id = r.user_id ${catSql}
+        WHERE r.id::text = ANY($1) AND r.deleted_at IS NULL AND COALESCE(r.date, r.created_at::date) BETWEEN $2::date AND $3::date`, [extraT.map((x) => x.ns_record_id), from, to])).rows;
+      for (const m of rows) extraMeta[m.id] = m;
+    } catch (e) {
+    }
+  }
+  try {
+    await pg.end();
+  } catch (e) {
+  }
+  const ownT = {};
+  const ownIds = own.filter((r) => !isNotCountedReview(r.review_details)).map((r) => r.id);
+  for (let i = 0; i < ownIds.length; i += 90) {
+    const ch = ownIds.slice(i, i + 90);
+    const rs = await env.DB.prepare(`SELECT * FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${ch.map(() => "?").join(",")})`).bind(...ch).all();
+    for (const x of rs.results || []) ownT[x.ns_record_id] = x;
+  }
+  const J = /* @__PURE__ */ __name((v, d) => {
+    try {
+      return v ? JSON.parse(v) : d;
+    } catch (e) {
+      return d;
+    }
+  }, "J");
+  const ymd = /* @__PURE__ */ __name((d) => (d instanceof Date ? d.toISOString() : String(d || "")).slice(0, 10), "ymd");
+  const recs = [];
+  const build = /* @__PURE__ */ __name((meta, t, isOwn) => {
+    const arr = /* @__PURE__ */ __name((x) => Array.isArray(x) ? x : null, "arr"), obj = /* @__PURE__ */ __name((x) => x && typeof x === "object" && !Array.isArray(x) ? x : {}, "obj");
+    const words = (arr(J(t.words, [])) || []).filter((w) => Array.isArray(w)), sp = arr(J(t.speakers, null)), names = obj(J(t.spk_names, {})), people = obj(J(t.spk_people, {})), fixed = arr(J(t.fixed, null)) || null;
+    const spOk = sp && sp.length === words.length;
+    let idx = null;
+    for (const k of Object.keys(people)) if (String(people[k]) === String(sid)) idx = Number(k);
+    if (idx === null && first) for (const k of Object.keys(names)) {
+      const n = String(names[k] || "").toLowerCase();
+      if (n.indexOf(first.toLowerCase()) >= 0 && (!last || n.indexOf(last.toLowerCase()) >= 0 || !isOwn)) {
+        idx = Number(k);
+        break;
+      }
+    }
+    const trainerAcc = !isOwn && (tset.has(String(meta.uid)) || TX_TRAINER_NAME_RX.test(((meta.first_name || "") + " " + (meta.last_name || "")).trim()) || txTrainerEmails(env).indexOf(String(meta.email || "").toLowerCase()) >= 0);
+    if (idx === null && isOwn && spOk && t.spk_src === "ai-text") idx = 0;
+    const persons = spOk ? new Set(sp).size : 1;
+    const solo = persons < 2 && isOwn;
+    let kText = "";
+    if (solo) kText = fixed && fixed.length ? fixed.map((f) => f[1]).join(" ") : words.map((w) => w[0]).join(" ");
+    else if (idx !== null) kText = fixed && fixed.length && fixed.some((f) => f[0] !== null && f[0] !== void 0) ? fixed.filter((f) => f[0] === idx).map((f) => f[1]).join(" ") : spOk ? words.filter((w, i) => sp[i] === idx).map((w) => w[0]).join(" ") : "";
+    const label = /* @__PURE__ */ __name((k) => k === idx ? "KURSANT " + (first || "") : names[k] || "Osoba " + (Number(k) + 1), "label");
+    let dialog = "";
+    if (fixed && fixed.length) {
+      let cur, buf = [], out = [];
+      for (const [k, tx] of fixed) {
+        if (k !== cur) {
+          if (buf.length) out.push((cur === null || cur === void 0 ? "" : label(cur) + ": ") + buf.join(" "));
+          buf = [];
+          cur = k;
+        }
+        buf.push(tx);
+      }
+      if (buf.length) out.push((cur === null || cur === void 0 ? "" : label(cur) + ": ") + buf.join(" "));
+      dialog = out.join("\n");
+    } else if (spOk) {
+      let cur = null, buf = [], out = [];
+      words.forEach((w, i) => {
+        if (sp[i] !== cur) {
+          if (buf.length) out.push(label(cur) + ": " + buf.join(" "));
+          buf = [];
+          cur = sp[i];
+        }
+        buf.push(w[0]);
+      });
+      if (buf.length) out.push(label(cur) + ": " + buf.join(" "));
+      dialog = out.join("\n");
+    } else dialog = String(t.text || "");
+    let ex = 0;
+    if (spOk) {
+      for (let i = 1; i < sp.length; i++) if (sp[i] !== sp[i - 1]) ex++;
+    }
+    let pauses = 0, longest = 0;
+    for (let i = 1; i < words.length; i++) {
+      const g = words[i][1] - words[i - 1][2];
+      if (g >= 1) {
+        pauses++;
+        if (g > longest) longest = g;
+      }
+    }
+    const file = String(meta.record_file || "");
+    const tm = file.match(/_(\d{2})h-(\d{2})m-(\d{2})s_/), gps = file.match(/_GPS(-?\d+\.\d+)_(-?\d+\.\d+)/), ter2 = file.match(/teren-(\d+(?:\.\d+)?)km/), dom = /_dom(\.|_|$)/.test(file);
+    const core = file.replace(/\.(mp3|m4a|wav|ogg|webm|aac)$/i, "").replace(/_(GPS|teren|dom)[\s\S]*$/i, "");
+    const mm = core.match(/_-([A-Za-z][A-Za-z0-9]*)-([a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+)$/);
+    const moodW = isOwn && mm ? mm[2].toLowerCase() : null, moodL = moodW ? SR_MOOD[moodW] || null : null;
+    const otherIdx = Object.keys(names).concat(Object.keys(people)).map(Number).filter((k, i, a) => k !== idx && a.indexOf(k) === i);
+    const otherSids = Object.keys(people).filter((k) => Number(k) !== idx && String(people[k]) !== String(sid)).map((k) => String(people[k]));
+    const withTrainer = trainerAcc || otherIdx.some((k) => /tren|trainer|tréner/i.test(String(names[k] || "")));
+    const withStudent = otherSids.length > 0 || !trainerAcc && otherIdx.some((k) => /kursant|kurzist/i.test(String(names[k] || "")));
+    recs.push({
+      rid: t.ns_record_id,
+      own: isOwn,
+      mood: moodW,
+      level: moodL,
+      otherSids,
+      withTrainer,
+      withStudent,
+      owner: isOwn ? "" : ((meta.first_name || "") + " " + (meta.last_name || "")).trim(),
+      trainerAcc,
+      d: ymd(meta.d),
+      cat: meta.category || "(bez kategorii)",
+      dur: Number(t.dur) || 0,
+      nWords: words.length,
+      kText,
+      solo,
+      persons,
+      idx,
+      ex,
+      pauses,
+      longest,
+      hour: tm ? Number(tm[1]) : null,
+      gps: gps ? [Number(gps[1]), Number(gps[2])] : null,
+      teren: ter2 ? Number(ter2[1]) : null,
+      dom,
+      partners: Object.keys(names).filter((k) => Number(k) !== idx).map((k) => String(names[k])).filter((n) => n && !/^osoba|^rozmówca|^kursant$/i.test(n)),
+      dialog
+    });
+  }, "build");
+  for (const r of own) {
+    const t = ownT[r.id];
+    if (t) {
+      try {
+        build(r, t, true);
+      } catch (e) {
+      }
+    }
+  }
+  const ownNoText = own.filter((r) => !ownT[r.id]).length;
+  if (ownNoText) {
+    try {
+      await txPrioAdd(env, sid);
+    } catch (e) {
+    }
+  }
+  for (const t of extraT) {
+    const m = extraMeta[t.ns_record_id];
+    if (!m) continue;
+    if (t._byFirst && !(t._trIds || []).includes(String(m.uid)) && !TX_TRAINER_NAME_RX.test(((m.first_name || "") + " " + (m.last_name || "")).trim()) && txTrainerEmails(env).indexOf(String(m.email || "").toLowerCase()) < 0) continue;
+    try {
+      build(m, t, false);
+    } catch (e) {
+    }
+  }
+  if (!recs.length) return { ok: false, error: "Brak przepisanych nagra\u0144 kursanta w tym okresie" };
+  const ownR = recs.filter((r) => r.own), durs = recs.map((r) => r.dur);
+  const totalDur = durs.reduce((s, x) => s + x, 0);
+  const byLen = recs.slice().sort((a, b) => a.dur - b.dur);
+  const cats = {};
+  for (const r of recs) {
+    const c = cats[r.cat] = cats[r.cat] || { cat: r.cat, n: 0, dur: 0, tokens: [], ex: [], words: 0 };
+    c.n++;
+    c.dur += r.dur;
+    c.words += r.nWords;
+    if (r.persons >= 2) c.ex.push(r.ex);
+    c.tokens.push(...srTokens(r.kText));
+  }
+  const catRows = Object.values(cats).map((c) => ({
+    cat: c.cat,
+    n: c.n,
+    dur: Math.round(c.dur),
+    avg: Math.round(c.dur / c.n * 10) / 10,
+    share: totalDur ? Math.round(c.dur * 1e3 / totalDur) / 10 : 0,
+    ttr: c.tokens.length >= 30 ? Math.round(new Set(c.tokens).size * 100 / c.tokens.length) / 100 : null,
+    kWords: c.tokens.length,
+    secPerWord: c.words ? Math.round(c.dur / c.words * 100) / 100 : null,
+    exAvg: c.ex.length ? Math.round(c.ex.reduce((s, x) => s + x, 0) / c.ex.length * 10) / 10 : null
+  })).sort((a, b) => b.dur - a.dur);
+  const daysM = {};
+  for (const r of recs) {
+    const x = daysM[r.d] = daysM[r.d] || { d: r.d, n: 0, dur: 0, cats: {} };
+    x.n++;
+    x.dur += r.dur;
+    x.cats[r.cat] = (x.cats[r.cat] || 0) + r.dur;
+  }
+  const dayRows = Object.values(daysM).sort((a, b) => a.d.localeCompare(b.d)).map((x) => ({ d: x.d, n: x.n, dur: Math.round(x.dur), avg: Math.round(x.dur / x.n * 10) / 10, main: Object.keys(x.cats).sort((a, b) => x.cats[b] - x.cats[a])[0] }));
+  const allTok = recs.flatMap((r) => srTokens(r.kText));
+  const polite = {};
+  const kAll = recs.map((r) => r.kText).join(" \n ");
+  for (const [n, rx] of SR_POLITE) polite[n] = (kAll.match(rx) || []).length;
+  const prolong = {};
+  for (const w of allTok) if (/([aąeęioóuy])\1{2,}/u.test(w)) prolong[w] = (prolong[w] || 0) + 1;
+  const monoRows = ownR.filter((r) => r.solo && /monolog|czytani|podsumowanie dnia/i.test(r.cat)).map((r) => ({ d: r.d, dur: Math.round(r.dur * 10) / 10, words: r.nWords }));
+  const hours = { "rano (6\u20139)": 0, "przedpo\u0142udnie (10\u201312)": 0, "popo\u0142udnie (13\u201317)": 0, "wiecz\xF3r (18\u201321)": 0, "noc (22\u20135)": 0 };
+  for (const r of recs) {
+    if (r.hour === null) continue;
+    const h = r.hour;
+    const k = h >= 6 && h <= 9 ? "rano (6\u20139)" : h >= 10 && h <= 12 ? "przedpo\u0142udnie (10\u201312)" : h >= 13 && h <= 17 ? "popo\u0142udnie (13\u201317)" : h >= 18 && h <= 21 ? "wiecz\xF3r (18\u201321)" : "noc (22\u20135)";
+    hours[k]++;
+  }
+  const gpsSet = new Set(recs.filter((r) => r.gps).map((r) => r.gps.map((x) => x.toFixed(3)).join(",")));
+  const ter = recs.filter((r) => r.teren !== null).map((r) => r.teren);
+  const partners = {};
+  for (const r of recs) for (const p of r.partners) partners[p] = (partners[p] || 0) + 1;
+  const isConv = /* @__PURE__ */ __name((r) => !r.solo || r.persons >= 2 || !/monolog|czytani|podsumowanie dnia/i.test(r.cat), "isConv");
+  const r1 = /* @__PURE__ */ __name((x) => Math.round(x * 10) / 10, "r1");
+  const wkKey = /* @__PURE__ */ __name((d) => {
+    const x = /* @__PURE__ */ new Date(d + "T12:00:00Z");
+    x.setUTCDate(x.getUTCDate() - (x.getUTCDay() + 6) % 7);
+    return x.toISOString().slice(0, 10);
+  }, "wkKey");
+  const wks = {};
+  for (const r of recs) {
+    const w = wks[wkKey(r.d)] = wks[wkKey(r.d)] || { week: wkKey(r.d), n: 0, dur: 0, convN: 0, convDur: 0, ml: [] };
+    w.n++;
+    w.dur += r.dur;
+    if (isConv(r)) {
+      w.convN++;
+      w.convDur += r.dur;
+    }
+    if (r.level) w.ml.push(r.level);
+  }
+  const weekRows = Object.values(wks).sort((a, b) => a.week.localeCompare(b.week)).map((w) => ({ week: w.week, n: w.n, min: r1(w.dur / 60), convN: w.convN, convMin: r1(w.convDur / 60), moodAvg: w.ml.length ? Math.round(w.ml.reduce((a, b) => a + b, 0) / w.ml.length * 10) / 10 : null }));
+  const mid = new Date(((/* @__PURE__ */ new Date(from + "T00:00:00Z")).getTime() + (/* @__PURE__ */ new Date(to + "T00:00:00Z")).getTime()) / 2).toISOString().slice(0, 10);
+  const half = /* @__PURE__ */ __name((arr, dLen) => {
+    const conv = arr.filter(isConv), ml = arr.filter((r) => r.level).map((r) => r.level), ad = new Set(arr.map((r) => r.d)).size;
+    return {
+      days: dLen,
+      n: arr.length,
+      min: r1(arr.reduce((s, r) => s + r.dur, 0) / 60),
+      convN: conv.length,
+      convMin: r1(conv.reduce((s, r) => s + r.dur, 0) / 60),
+      convAvgMin: conv.length ? r1(conv.reduce((s, r) => s + r.dur, 0) / 60 / conv.length) : null,
+      activeDays: ad,
+      cats: new Set(arr.map((r) => r.cat)).size,
+      moodAvg: ml.length ? r1(ml.reduce((a, b) => a + b, 0) / ml.length) : null,
+      moodGood: ml.length ? Math.round(ml.filter((x) => x <= 2).length * 100 / ml.length) : null,
+      withStudents: arr.filter((r) => r.withStudent).length,
+      kWords: arr.reduce((s, r) => s + srTokens(r.kText).length, 0)
+    };
+  }, "half");
+  const dA = Math.round((new Date(mid) - new Date(from)) / 864e5) + 1, dB = days - dA;
+  const growth = { mid, a: half(recs.filter((r) => r.d <= mid), dA), b: half(recs.filter((r) => r.d > mid), dB) };
+  const convCats = {};
+  for (const r of recs.filter(isConv)) {
+    const c = convCats[r.cat] = convCats[r.cat] || { cat: r.cat, n: 0, dur: 0, ex: [], byDay: {} };
+    c.n++;
+    c.dur += r.dur;
+    if (r.persons >= 2) c.ex.push(r.ex);
+    c.byDay[r.d] = (c.byDay[r.d] || 0) + 1;
+  }
+  const convRows = Object.values(convCats).map((c) => {
+    const best = Object.keys(c.byDay).sort((a, b) => c.byDay[b] - c.byDay[a])[0];
+    return { cat: c.cat, n: c.n, min: r1(c.dur / 60), avgMin: r1(c.dur / 60 / c.n), exAvg: c.ex.length ? r1(c.ex.reduce((a, b) => a + b, 0) / c.ex.length) : null, bestDay: best ? { d: best, n: c.byDay[best] } : null };
+  }).sort((a, b) => b.min - a.min);
+  const phoneR = recs.filter((r) => /phone|telefon/i.test(r.cat));
+  const phone = { n: phoneR.length, min: r1(phoneR.reduce((s, r) => s + r.dur, 0) / 60), trener: phoneR.filter((r) => r.withTrainer).length, kursanci: phoneR.filter((r) => !r.withTrainer).length };
+  const sidCount = {};
+  for (const r of recs) for (const x of r.otherSids) sidCount[x] = (sidCount[x] || 0) + 1;
+  let studentNames = {};
+  if (Object.keys(sidCount).length) {
+    const pg2 = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    try {
+      await pg2.connect();
+      for (const u of (await pg2.query("SELECT id::text AS id, first_name, last_name FROM users WHERE id::text = ANY($1)", [Object.keys(sidCount)])).rows) studentNames[u.id] = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+    } catch (e) {
+    }
+    try {
+      await pg2.end();
+    } catch (e) {
+    }
+  }
+  const contacts = {
+    withTrainer: recs.filter((r) => r.withTrainer).length,
+    withStudents: recs.filter((r) => r.withStudent).length,
+    students: Object.keys(sidCount).sort((a, b) => sidCount[b] - sidCount[a]).map((x) => ({ name: studentNames[x] || "kursant", n: sidCount[x] }))
+  };
+  const moodR = recs.filter((r) => r.level);
+  const moodDist = { luz: 0, komfortowo: 0, neutralnie: 0, niekomfortowo: 0, stres: 0 };
+  for (const r of moodR) moodDist[r.mood] = (moodDist[r.mood] || 0) + 1;
+  const moodCat = {};
+  for (const r of moodR) {
+    const c = moodCat[r.cat] = moodCat[r.cat] || { cat: r.cat, n: 0, s: 0, good: 0 };
+    c.n++;
+    c.s += r.level;
+    if (r.level <= 2) c.good++;
+  }
+  const mood = {
+    n: moodR.length,
+    avg: moodR.length ? r1(moodR.reduce((s, r) => s + r.level, 0) / moodR.length) : null,
+    dist: moodDist,
+    byCat: Object.values(moodCat).map((c) => ({ cat: c.cat, n: c.n, avg: r1(c.s / c.n), good: Math.round(c.good * 100 / c.n) })).sort((a, b) => b.n - a.n)
+  };
+  const tasks = (Array.isArray(extra && extra.tasks) ? extra.tasks : []).slice(0, 60).map((x) => ({
+    code: String(x.code || ""),
+    title: String(x.title || "").slice(0, 120),
+    desc: String(x.desc || "").slice(0, 300),
+    note: String(x.note || "").slice(0, 300),
+    done: x.done_at ? new Date(Number(x.done_at) * (Number(x.done_at) < 1e12 ? 1e3 : 1)).toISOString().slice(0, 10) : null
+  })).map((x) => ({ ...x, inPeriod: !!(x.done && x.done >= from && x.done <= to) }));
+  const stats = {
+    student: (first + " " + last).trim(),
+    from,
+    to,
+    days,
+    total: {
+      n: recs.length,
+      own: ownR.length,
+      other: recs.length - ownR.length,
+      dur: Math.round(totalDur),
+      avg: Math.round(totalDur / recs.length * 10) / 10,
+      median: Math.round(srMedian(durs) * 10) / 10,
+      shortest: { dur: Math.round(byLen[0].dur * 10) / 10, cat: byLen[0].cat, d: byLen[0].d },
+      longest: { dur: Math.round(byLen[byLen.length - 1].dur * 10) / 10, cat: byLen[byLen.length - 1].cat, d: byLen[byLen.length - 1].d },
+      activeDays: dayRows.length,
+      wordsAll: recs.reduce((s, r) => s + r.nWords, 0),
+      wordsKursant: allTok.length
+    },
+    categories: catRows,
+    daysTable: dayRows,
+    vocab: {
+      tokens: allTok.length,
+      unique: new Set(allTok).size,
+      ttr: allTok.length ? Math.round(new Set(allTok).size * 100 / allTok.length) / 100 : null,
+      polite,
+      prolongations: Object.keys(prolong).sort((a, b) => prolong[b] - prolong[a]).slice(0, 12).map((w) => ({ w, n: prolong[w] }))
+    },
+    monologs: monoRows,
+    hours,
+    gps: { points: gpsSet.size, dom: recs.filter((r) => r.dom).length, terenMin: ter.length ? Math.min(...ter) : null, terenMax: ter.length ? Math.max(...ter) : null },
+    partners: Object.keys(partners).sort((a, b) => partners[b] - partners[a]).slice(0, 20).map((p) => ({ p, n: partners[p] })),
+    ownWithoutText: ownNoText,
+    weeks: weekRows,
+    growth,
+    conv: convRows,
+    phone,
+    contacts,
+    mood,
+    tasks,
+    otherRecs: recs.filter((r) => !r.own).map((r) => ({ d: r.d, cat: r.cat, owner: r.owner, dur: Math.round(r.dur), trainerAcc: r.trainerAcc }))
+  };
+  const budget = 6e4, per = Math.max(250, Math.floor(budget / recs.length));
+  const corpus = recs.slice().sort((a, b) => a.d.localeCompare(b.d)).map((r) => "### " + r.d + " \xB7 " + r.cat + (r.own ? "" : " \xB7 (nagranie z konta: " + r.owner + ")") + " \xB7 " + Math.round(r.dur) + " s\n" + r.dialog.slice(0, per)).join("\n\n");
+  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzeteln\u0105 analiz\u0119 dla trenera \u2014 jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami. Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"partnerzy":[{"grupa":"\u2026","kto":"\u2026"}],"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
+  const statsBrief = JSON.stringify({ ...stats, otherRecs: void 0, tasks: tasks.map((x) => ({ zadanie: x.code + " " + x.title, opis: x.desc, notatka: x.note, wykonane: x.done, w_okresie: x.inPeriod })) });
+  let ai = null;
+  try {
+    ai = txParseJson(await txLlm(env, sys, "LICZBY (wyliczone dok\u0142adnie):\n" + statsBrief + "\n\nTEKSTY NAGRA\u0143:\n" + corpus, 9e3));
+  } catch (e) {
+  }
+  const report = { stats, ai: ai || null, ai_error: ai ? null : "AI nie zwr\xF3ci\u0142o opisu \u2014 spr\xF3buj ponownie", created_at: Math.floor(Date.now() / 1e3), version: 2 };
+  await env.DB.prepare("INSERT INTO student_report (ns_student_id, period, report, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(ns_student_id, period) DO UPDATE SET report = excluded.report, created_at = excluded.created_at").bind(String(sid), String(days), JSON.stringify(report), report.created_at).run();
+  return { ok: true, report };
+}
+__name(txStudentReport, "txStudentReport");
+__name2(txStudentReport, "txStudentReport");
+async function srJobTable(env) {
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS student_report_job (ns_student_id TEXT PRIMARY KEY, days INTEGER, status TEXT, error TEXT, requested_by TEXT, created_at INTEGER, started_at INTEGER, finished_at INTEGER, tries INTEGER DEFAULT 0, extra TEXT)").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE student_report_job ADD COLUMN extra TEXT").run();
+  } catch (e) {
+  }
+}
+__name(srJobTable, "srJobTable");
+__name2(srJobTable, "srJobTable");
+async function srJobTick(env) {
+  if (!env.HYPERDRIVE) return;
+  await srJobTable(env);
+  const now = Math.floor(Date.now() / 1e3);
+  await env.DB.prepare("UPDATE student_report_job SET status = 'error', error = 'Raport nie powsta\u0142 (przekroczony czas) \u2014 spr\xF3buj ponownie', finished_at = ? WHERE status = 'running' AND started_at < ? AND tries >= 2").bind(now, now - 720).run();
+  const job = await env.DB.prepare("SELECT * FROM student_report_job WHERE status = 'queued' OR (status = 'running' AND started_at < ? AND tries < 2) ORDER BY created_at LIMIT 1").bind(now - 720).first();
+  if (!job) return;
+  const claim = await env.DB.prepare("UPDATE student_report_job SET status = 'running', started_at = ?, tries = tries + 1 WHERE ns_student_id = ? AND created_at = ? AND status = ?").bind(now, job.ns_student_id, job.created_at, job.status).run();
+  if (!claim.meta || !claim.meta.changes) return;
+  let r;
+  try {
+    await ensureTranscriptTables(env);
+    let ex = null;
+    try {
+      ex = job.extra ? JSON.parse(job.extra) : null;
+    } catch (e) {
+    }
+    r = await txStudentReport(env, job.ns_student_id, job.days, ex);
+  } catch (e) {
+    r = { ok: false, error: String(e && e.message || e).slice(0, 300) };
+  }
+  await env.DB.prepare("UPDATE student_report_job SET status = ?, error = ?, finished_at = ? WHERE ns_student_id = ? AND created_at = ?").bind(r.ok ? "done" : "error", r.ok ? r.report && r.report.ai_error || null : r.error || "B\u0142\u0105d", Math.floor(Date.now() / 1e3), job.ns_student_id, job.created_at).run();
+}
+__name(srJobTick, "srJobTick");
+__name2(srJobTick, "srJobTick");
 async function txRecordInfo(env, rid) {
   if (!rid || !env.HYPERDRIVE) return {};
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
@@ -8829,6 +9373,20 @@ async function transcribeTick(env) {
        WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL AND r.created_at > now() - interval '90 days'
        ORDER BY r.created_at DESC LIMIT 8000`
     )).rows;
+    const prio = Object.keys(await txPrioGet(env));
+    if (prio.length) {
+      const pr = (await pg.query(
+        `SELECT r.id::text AS id, r.user_id::text AS user_id, r.record_file, u.country, COALESCE(rct.name, rc.name) AS category, ${TX_PATH_SQL_COLS} FROM records r
+         LEFT JOIN users u ON u.id = r.user_id
+         LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+         LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+         WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL AND r.user_id::text = ANY($1)
+         ORDER BY r.created_at DESC LIMIT 3000`,
+        [prio]
+      )).rows;
+      const seen = new Set(pr.map((r) => r.id));
+      rows = pr.concat(rows.filter((r) => !seen.has(r.id)));
+    }
   } finally {
     try {
       await pg.end();
