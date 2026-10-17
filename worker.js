@@ -8647,7 +8647,8 @@ async function txStudentReport(env, sid, days, extra) {
     let kText = "";
     if (solo) kText = fixed && fixed.length ? fixed.map((f) => f[1]).join(" ") : words.map((w) => w[0]).join(" ");
     else if (idx !== null) kText = fixed && fixed.length && fixed.some((f) => f[0] !== null && f[0] !== void 0) ? fixed.filter((f) => f[0] === idx).map((f) => f[1]).join(" ") : spOk ? words.filter((w, i) => sp[i] === idx).map((w) => w[0]).join(" ") : "";
-    const label = /* @__PURE__ */ __name((k) => k === idx ? "KURSANT " + (first || "") : names[k] || "Osoba " + (Number(k) + 1), "label");
+    const plain = words.map((w) => w[0]).join(" ") + " " + (t.text || "");
+    const label = /* @__PURE__ */ __name((k) => k === idx ? "KURSANT " + (first || "") : people[k] !== void 0 ? names[k] || "Osoba " + (Number(k) + 1) : names[k] ? txCleanRole(String(names[k]), plain) : "Osoba " + (Number(k) + 1), "label");
     let dialog = "";
     if (fixed && fixed.length) {
       let cur, buf = [], out = [];
@@ -8720,7 +8721,7 @@ async function txStudentReport(env, sid, days, extra) {
       gps: gps ? [Number(gps[1]), Number(gps[2])] : null,
       teren: ter2 ? Number(ter2[1]) : null,
       dom,
-      partners: Object.keys(names).filter((k) => Number(k) !== idx).map((k) => String(names[k])).filter((n) => n && !/^osoba|^rozmówca|^kursant$/i.test(n)),
+      partners: Object.keys(names).filter((k) => Number(k) !== idx && people[k] === void 0).flatMap((k) => txCleanRole(String(names[k]), words.map((w) => w[0]).join(" ") + " " + (t.text || "")).split(/\s*,\s*/)).map((n) => n.toLowerCase().replace(/^przechodnia$/, "przechodzie\u0144").replace(/^przechodnie$/, "przechodzie\u0144").trim()).filter((n) => n && !/^osoba|^rozmówca|^kursant|^drugi|^trzeci/i.test(n)),
       dialog
     });
   }, "build");
@@ -8938,7 +8939,7 @@ async function txStudentReport(env, sid, days, extra) {
   };
   const budget = 6e4, per = Math.max(250, Math.floor(budget / recs.length));
   const corpus = recs.slice().sort((a, b) => a.d.localeCompare(b.d)).map((r) => "### " + r.d + " \xB7 " + r.cat + (r.own ? "" : " \xB7 (nagranie z konta: " + r.owner + ")") + " \xB7 " + Math.round(r.dur) + " s\n" + r.dialog.slice(0, per)).join("\n\n");
-  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzeteln\u0105 analiz\u0119 dla trenera \u2014 jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami. Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"partnerzy":[{"grupa":"\u2026","kto":"\u2026"}],"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
+  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzeteln\u0105 analiz\u0119 dla trenera \u2014 jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Nie podawaj imion sprzedawc\xF3w, przechodni\xF3w ani innych obcych rozm\xF3wc\xF3w \u2014 znamy tylko ich role (chyba \u017Ce imi\u0119 wyra\u017Anie pada w tek\u015Bcie). Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami. Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"partnerzy":[{"grupa":"\u2026","kto":"\u2026"}],"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
   const statsBrief = JSON.stringify({ ...stats, otherRecs: void 0, tasks: tasks.map((x) => ({ zadanie: x.code + " " + x.title, opis: x.desc, notatka: x.note, wykonane: x.done, w_okresie: x.inPeriod })) });
   let ai = null;
   try {
@@ -9191,6 +9192,60 @@ async function txLlm(env, sys, user, maxTokens) {
 }
 __name(txLlm, "txLlm");
 __name2(txLlm, "txLlm");
+var TX_ROLE_RX = /^(sprzedaw|kasjer|pracownik|przechod|urzędni|urzedni|recepcj|kelner|trener|kursant|operator|lekarz|farmaceut|aptek|klient|konsultant|kierowc|pani|pan|mama|tata|matk|ojciec|brat|siostr|babci|dziad|koleg|koleżank|przyjaci|rodzin|nauczyciel|szef|znajom|sąsiad|ochroniarz|barman|fryzjer|doradc|rozmówc|osoba|mąż|żona|syn|córk|wujek|ciocia|ekspedient|obsług|portier|policjant|przewodnik|uczeń|uczennic|student)/iu;
+function txCleanRole(role, text) {
+  const r = String(role || "").trim();
+  if (!r) return r;
+  const low = " " + String(text || "").toLowerCase().replace(/[^\p{L}]+/gu, " ") + " ";
+  const toks = r.split(/(\s+|,\s*)/);
+  const out = [];
+  let first = true;
+  for (const t of toks) {
+    if (!/\p{L}/u.test(t)) {
+      out.push(t);
+      continue;
+    }
+    const isCap = /^\p{Lu}/u.test(t);
+    if (isCap && !first) {
+      const stem = t.toLowerCase().slice(0, Math.max(3, t.length - 2));
+      if (low.indexOf(" " + stem) < 0) {
+        out.push("");
+        continue;
+      }
+    }
+    out.push(first && isCap && toks.filter((x) => /\p{L}/u.test(x)).length > 1 ? t.toLowerCase() : t);
+    first = false;
+  }
+  const res = out.join("").replace(/\s*,\s*(,\s*)*/g, ", ").replace(/^[\s,]+|[\s,]+$/g, "").replace(/\s{2,}/g, " ");
+  if (!res) return "rozm\xF3wca";
+  if (/^\p{Lu}\p{Ll}+$/u.test(res) && TX_ROLE_RX.test(res)) return res.toLowerCase();
+  if (/^\p{Lu}\p{Ll}+$/u.test(res)) {
+    const stem = res.toLowerCase().slice(0, Math.max(3, res.length - 2));
+    if (low.indexOf(" " + stem) < 0) return "rozm\xF3wca";
+  }
+  return res;
+}
+__name(txCleanRole, "txCleanRole");
+__name2(txCleanRole, "txCleanRole");
+function txCleanNames(namesJson, text) {
+  let n = null;
+  try {
+    n = namesJson ? JSON.parse(namesJson) : null;
+  } catch (e) {
+    return null;
+  }
+  if (!n || typeof n !== "object") return null;
+  let ch = false;
+  const o = {};
+  for (const k of Object.keys(n)) {
+    const v = txCleanRole(n[k], text);
+    if (v !== n[k]) ch = true;
+    o[k] = v;
+  }
+  return ch ? JSON.stringify(o) : null;
+}
+__name(txCleanNames, "txCleanNames");
+__name2(txCleanNames, "txCleanNames");
 async function txAiSpeakers(env, words, category, lang, force, trainerAcc) {
   if (!env.AI) return { speakers: null, src: "ai-err", note: "brak Workers AI" };
   if (txIsMonolog(category) && !force) return { speakers: null, src: "ai-one", note: "monolog" };
@@ -9200,7 +9255,7 @@ async function txAiSpeakers(env, words, category, lang, force, trainerAcc) {
   const u = await env.DB.prepare("SELECT calls FROM llm_usage WHERE day = ?").bind(day).first();
   if (u && u.calls >= txAiDailyLimit(env)) return { speakers: null, src: null, note: "dzienny limit AI wyczerpany" };
   const who = trainerAcc ? "Nagrywa TRENER programu Nowa Mowa \u2014 to jego rozmowa z kursantem (cz\u0119sto przez telefon). Trener prowadzi, dopytuje, chwali, daje wskaz\xF3wki o systemach mowy (zer\xF3wka, \u0142\u0105cznik, jedynka\u2026). Osoba 1 = trener, osoba 2 = kursant." : "Nagrywa kursant programu Nowa Mowa, kt\xF3ry \u0107wiczy codzienne rozmowy (sklep, telefon, urz\u0105d, ulica, praca). Zwykle zaczyna rozmow\u0119: wita si\u0119, pyta, prosi. Osoba 1 = kursant, osoba 2 = rozm\xF3wca (np. sprzedawczyni).";
-  const sys = "Dzielisz zapis rozmowy (z rozpoznawania mowy, mog\u0105 by\u0107 b\u0142\u0119dy) na wypowiedzi os\xF3b. " + who + ' ZASADY: jedna osoba zwykle m\xF3wi kilka zda\u0144 z rz\u0119du \u2014 zmieniaj osob\u0119 tylko, gdy wynika to z sensu (pytanie \u2192 odpowied\u017A, reakcja na to, co powiedzia\u0142 rozm\xF3wca, kr\xF3tkie \u201EMhm\u201D, \u201ETak\u201D, \u201ENo\u201D, \u201EO, widzisz\u201D wtr\u0105cone w opowie\u015B\u0107 drugiej osoby, po\u017Cegnanie i odpowied\u017A na nie). Opowie\u015B\u0107 w 1. osobie (\u201Eja\u201D, \u201Eby\u0142am\u201D) ci\u0105gnie si\u0119 u tej samej osoby. Zwykle s\u0105 DOK\u0141ADNIE 2 osoby. Osoba 3 tylko wtedy, gdy wyra\u017Anie odzywa si\u0119 kto\u015B trzeci (np. kto\u015B w tle zwraca si\u0119 do rozm\xF3wc\xF3w) \u2014 nie u\u017Cywaj jej do \u201Eniepewnych\u201D zda\u0144. Odpowiedz WY\u0141\u0104CZNIE JSON-em: {"roles":{"1":"' + (trainerAcc ? "trener" : "kursant") + '","2":"kr\xF3tka rola i imi\u0119, je\u015Bli pada"},"zmiany":[[numer_zdania, osoba], \u2026]} \u2014 lista miejsc, w kt\xF3rych zaczyna m\xF3wi\u0107 kolejna osoba (pierwszy element dotyczy zdania 1).';
+  const sys = "Dzielisz zapis rozmowy (z rozpoznawania mowy, mog\u0105 by\u0107 b\u0142\u0119dy) na wypowiedzi os\xF3b. " + who + ' ZASADY: jedna osoba zwykle m\xF3wi kilka zda\u0144 z rz\u0119du \u2014 zmieniaj osob\u0119 tylko, gdy wynika to z sensu (pytanie \u2192 odpowied\u017A, reakcja na to, co powiedzia\u0142 rozm\xF3wca, kr\xF3tkie \u201EMhm\u201D, \u201ETak\u201D, \u201ENo\u201D, \u201EO, widzisz\u201D wtr\u0105cone w opowie\u015B\u0107 drugiej osoby, po\u017Cegnanie i odpowied\u017A na nie). Opowie\u015B\u0107 w 1. osobie (\u201Eja\u201D, \u201Eby\u0142am\u201D) ci\u0105gnie si\u0119 u tej samej osoby. Zwykle s\u0105 DOK\u0141ADNIE 2 osoby. Osoba 3 tylko wtedy, gdy wyra\u017Anie odzywa si\u0119 kto\u015B trzeci (np. kto\u015B w tle zwraca si\u0119 do rozm\xF3wc\xF3w) \u2014 nie u\u017Cywaj jej do \u201Eniepewnych\u201D zda\u0144. Odpowiedz WY\u0141\u0104CZNIE JSON-em: {"roles":{"1":"' + (trainerAcc ? "trener" : "kursant") + '","2":"kr\xF3tka rola, np. sprzedawczyni"},"zmiany":[[numer_zdania, osoba], \u2026]} \u2014 lista miejsc, w kt\xF3rych zaczyna m\xF3wi\u0107 kolejna osoba (pierwszy element dotyczy zdania 1). Imi\u0119 dopisz do roli TYLKO, gdy dok\u0142adnie pada w rozmowie (np. kto\u015B si\u0119 przedstawia) \u2014 nigdy go nie wymy\u015Blaj.';
   const BATCH = 120, labels = [], roles = { "1": trainerAcc ? "trener" : "kursant" };
   for (let i = 0; i < sents.length; i += BATCH) {
     const part = sents.slice(i, i + BATCH);
@@ -9256,6 +9311,8 @@ async function txAiSpeakers(env, words, category, lang, force, trainerAcc) {
   });
   const n = new Set(speakers).size;
   if (n < 2) return { speakers: null, src: "ai-one", note: "AI: jedna osoba" };
+  const allText = words.map((w) => w[0]).join(" ");
+  for (const k of Object.keys(roles)) roles[k] = txCleanRole(roles[k], allText);
   const names = {};
   for (const k of [...new Set(speakers)]) names[k] = roles[String(k + 1)] || (k === 0 ? trainerAcc ? "trener" : "kursant" : trainerAcc && k === 1 ? "kursant" : "rozm\xF3wca " + k);
   return { speakers, names, src: "ai-text", note: "AI z tre\u015Bci: osoby " + n };
@@ -9436,6 +9493,22 @@ async function transcribeTick(env) {
     const ai = await txAiSpeakers(env, words, r.category, t && t.lang, txIsMonolog(r.category), await txIsTrainerAcc(env, r.user_id, r.p_fn, r.p_ln, r.p_email));
     if (ai.src === null) break;
     await env.DB.prepare("UPDATE record_transcript SET speakers = ?, spk_names = ?, spk_src = ?, diar = ? WHERE ns_record_id = ?").bind(ai.speakers ? JSON.stringify(ai.speakers) : null, ai.names ? JSON.stringify(ai.names) : null, ai.src, ai.note, r.id).run();
+  }
+  try {
+    const cur = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'names_clean_v1'").first();
+    if (!cur || cur.v !== "done") {
+      const after = Number(cur && cur.v || 0);
+      const rs = (await env.DB.prepare("SELECT rowid AS rid, ns_record_id, spk_names, text FROM record_transcript WHERE rowid > ? AND spk_names IS NOT NULL ORDER BY rowid LIMIT 400").bind(after).all()).results || [];
+      const ups = [];
+      for (const x of rs) {
+        const nn = txCleanNames(x.spk_names, x.text);
+        if (nn) ups.push(env.DB.prepare("UPDATE record_transcript SET spk_names = ? WHERE ns_record_id = ?").bind(nn, x.ns_record_id));
+      }
+      for (let i = 0; i < ups.length; i += 50) await env.DB.batch(ups.slice(i, i + 50));
+      const next = rs.length < 400 ? "done" : String(rs[rs.length - 1].rid);
+      await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('names_clean_v1', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(next).run();
+    }
+  } catch (e) {
   }
   const autoSum = rows.filter((r) => {
     const x = state[r.id];
