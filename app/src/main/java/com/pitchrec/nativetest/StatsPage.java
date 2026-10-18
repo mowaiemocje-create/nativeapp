@@ -115,6 +115,9 @@ public class StatsPage {
         LinearLayout talk = Ui.card(a); // ⏱ Ile już mówisz — minuty i słowa z serwera
         root.addView(talk);
         TalkStats.fill(a, talk, host::isCurrent);
+        LinearLayout rate = Ui.card(a); // 🗣 Tempo mowy w monologach — z tekstu AI, całe nagranie
+        root.addView(rate);
+        SpeechRate.fill(a, rate, host::isCurrent);
         LinearLayout improve = Ui.card(a);
         improve.setVisibility(View.GONE);
         root.addView(improve);

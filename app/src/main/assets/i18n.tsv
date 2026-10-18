@@ -968,3 +968,22 @@ Dziennik jest w pełnej wersji.	The diary is in the full version.	Deník je v pl
 Dziennik zapisuje się tylko w Twoim telefonie.	The diary is saved only on your phone.	Deník se ukládá jen ve tvém telefonu.	Denník sa ukladá len v tvojom telefóne.	Das Tagebuch wird nur auf deinem Handy gespeichert.	El diario se guarda solo en tu teléfono.	A napló csak a telefonodon tárolódik.
 Zapisano w telefonie	Saved on your phone	Uloženo v telefonu	Uložené v telefóne	Auf dem Handy gespeichert	Guardado en el teléfono	Elmentve a telefonon
 Część dziennika uzupełniona z dzisiejszych opisanych nagrań ({0}):	Part of the diary was filled in from today's described recordings ({0}):	Část deníku byla vyplněna z dnešních popsaných nahrávek ({0}):	Časť denníka bola vyplnená z dnešných popísaných nahrávok ({0}):	Ein Teil des Tagebuchs wurde aus den heute beschriebenen Aufnahmen ausgefüllt ({0}):	Parte del diario se ha rellenado con las grabaciones descritas hoy ({0}):	A napló egy részét a mai leírt felvételek alapján töltöttük ki ({0}):
+TEMPO MOWY W MONOLOGACH	SPEECH RATE IN MONOLOGUES	TEMPO ŘEČI V MONOLOZÍCH	TEMPO REČI V MONOLÓGOCH	SPRECHTEMPO IN MONOLOGEN	VELOCIDAD DEL HABLA EN MONÓLOGOS	BESZÉDTEMPÓ A MONOLÓGOKBAN
+ostatnie 7 dni	last 7 days	posledních 7 dní	posledných 7 dní	letzte 7 Tage	últimos 7 días	utolsó 7 nap
+ostatnie 30 dni	last 30 days	posledních 30 dní	posledných 30 dní	letzte 30 Tage	últimos 30 días	utolsó 30 nap
+wszystkie monologi	all monologues	všechny monology	všetky monológy	alle Monologe	todos los monólogos	összes monológ
+Tempo mowy	Speech rate	Tempo řeči	Tempo reči	Sprechtempo	Velocidad del habla	Beszédtempó
+słów/min	words/min	slov/min	slov/min	Wörter/Min.	palabras/min	szó/perc
+Z pauzami	With pauses	S pauzami	S pauzami	Mit Pausen	Con pausas	Szünetekkel
+Pauzy	Pauses	Pauzy	Pauzy	Pausen	Pausas	Szünetek
+nagrania	of recording	nahrávky	nahrávky	der Aufnahme	de la grabación	a felvételből
+Mediana: {0} · monologów: {1}	Median: {0} · monologues: {1}	Medián: {0} · monologů: {1}	Medián: {0} · monológov: {1}	Median: {0} · Monologe: {1}	Mediana: {0} · monólogos: {1}	Medián: {0} · monológok: {1}
+Tempo mowy takie samo jak tydzień wcześniej	Speech rate same as the week before	Tempo řeči stejné jako před týdnem	Tempo reči rovnaké ako pred týždňom	Sprechtempo wie in der Vorwoche	Velocidad igual que la semana anterior	A beszédtempó ugyanaz, mint egy héttel korábban
+Tempo mowy +{0} sylab/min względem zeszłego tygodnia	Speech rate +{0} syllables/min vs last week	Tempo řeči +{0} slabik/min oproti minulému týdnu	Tempo reči +{0} slabík/min oproti minulému týždňu	Sprechtempo +{0} Silben/Min. gegenüber Vorwoche	Velocidad +{0} sílabas/min respecto a la semana pasada	Beszédtempó +{0} szótag/perc az előző héthez képest
+Tempo mowy −{0} sylab/min względem zeszłego tygodnia	Speech rate −{0} syllables/min vs last week	Tempo řeči −{0} slabik/min oproti minulému týdnu	Tempo reči −{0} slabík/min oproti minulému týždňu	Sprechtempo −{0} Silben/Min. gegenüber Vorwoche	Velocidad −{0} sílabas/min respecto a la semana pasada	Beszédtempó −{0} szótag/perc az előző héthez képest
+Ostatnie monologi	Recent monologues	Poslední monology	Posledné monológy	Letzte Monologe	Monólogos recientes	Legutóbbi monológok
+syl/min	syl/min	slab/min	slab/min	Silb./Min.	síl/min	szótag/p
+sł/min	w/min	sl/min	sl/min	W/Min.	pal/min	szó/p
+pauzy	pauses	pauzy	pauzy	Pausen	pausas	szünet
+Tempo mowy w tygodniach (sylab/min)	Speech rate by week (syllables/min)	Tempo řeči po týdnech (slabik/min)	Tempo reči po týždňoch (slabík/min)	Sprechtempo pro Woche (Silben/Min.)	Velocidad por semanas (sílabas/min)	Beszédtempó hetente (szótag/perc)
+Liczone z całego nagrania po przepisaniu tekstu (monologi od 1 minuty). Tempo mowy — bez pauz.	Calculated from the whole recording after transcription (monologues from 1 minute). Speech rate excludes pauses.	Počítáno z celé nahrávky po přepisu textu (monology od 1 minuty). Tempo řeči — bez pauz.	Počítané z celej nahrávky po prepise textu (monológy od 1 minúty). Tempo reči — bez páuz.	Aus der ganzen Aufnahme nach der Transkription berechnet (Monologe ab 1 Minute). Sprechtempo ohne Pausen.	Calculado con toda la grabación tras la transcripción (monólogos de 1 minuto o más). Velocidad del habla sin pausas.	A teljes felvételből számolva az átírás után (legalább 1 perces monológok). A beszédtempó szünetek nélkül.
