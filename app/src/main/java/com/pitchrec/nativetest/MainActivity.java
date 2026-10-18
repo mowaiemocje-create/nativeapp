@@ -283,12 +283,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         Push.register(this);            // powiadomienia push "Chcę porozmawiać" (od razu)
         ContactList.refresh(this, false, null); // lista telefonow od trenera (kategoria Phone do Kursanta)
         CallDays.check(this, null);             // dni telefonu do trenera (powiadomienia)
+        // od razu przy starcie: mikrofon, lokalizacja (wersja kursantow — bez niej nie ma nagrywania), powiadomienia
         askNotificationPermissionOnce();
-        // wersja kursantow: zgoda na lokalizacje od razu przy pierwszym uruchomieniu (bez niej nie ma nagrywania)
-        if (!BuildConfig.PLAY && !GpsHelper.hasPermission(this) && !prefs().getBoolean("location_asked", false)) {
-            prefs().edit().putBoolean("location_asked", true).apply();
-            requestLocationPermission(this);
-        }
         UpdateChecker.check(this, false);      // nowa wersja aplikacji (GitHub Releases)
         openPageFromIntent(getIntent());
         // Dotkniecie paska statusu w trybie poprawki = anulowanie poprawki
@@ -585,13 +581,32 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // Android 13+: bez tej zgody NIE dochodzi zadne powiadomienie (przypomnienia, oceny trenera,
     // "Chcę porozmawiać"). Wczesniej pytalismy tylko raz w zyciu aplikacji — kto wtedy odmowil
     // albo zamknal okienko, nie dostawal nic. Teraz: ponownie co 3 dni, dopoki nie ma zgody.
+    // Przy starcie: od razu systemowe okienka zgód na wszystko, czego brakuje (mikrofon, lokalizacja
+    // w wersji kursantów, powiadomienia) — żeby kursant nie musiał wchodzić w ustawienia telefonu.
+    private static final int REQUEST_STARTUP_PERMS = 7302;
     private void askNotificationPermissionOnce() {
-        if (android.os.Build.VERSION.SDK_INT < 33) return;
-        if (ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) return;
-        long last = prefs().getLong("notif_asked_at", 0L);
-        if (System.currentTimeMillis() - last < 3L * 24 * 60 * 60 * 1000) return;
-        prefs().edit().putLong("notif_asked_at", System.currentTimeMillis()).apply();
-        ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 7301);
+        java.util.List<String> need = new java.util.ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) need.add(Manifest.permission.RECORD_AUDIO);
+        if (!BuildConfig.PLAY && !GpsHelper.hasPermission(this) && !prefs().getBoolean("loc_blocked", false)) {
+            need.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            need.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
+                && System.currentTimeMillis() - prefs().getLong("notif_asked_at", 0L) >= 3L * 24 * 60 * 60 * 1000) {
+            prefs().edit().putLong("notif_asked_at", System.currentTimeMillis()).apply();
+            need.add("android.permission.POST_NOTIFICATIONS");
+        }
+        if (need.isEmpty()) return;
+        ActivityCompat.requestPermissions(this, need.toArray(new String[0]), REQUEST_STARTUP_PERMS);
+    }
+
+    // Po odpowiedzi na okienko lokalizacji: odmowa z „Nie pytaj ponownie” (system już nie pokaże okienka)
+    // — dopiero wtedy kierujemy do ustawień.
+    private void noteLocationAnswer() {
+        boolean has = GpsHelper.hasPermission(this);
+        boolean blocked = !has && !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION);
+        prefs().edit().putBoolean("loc_blocked", blocked).apply();
+        if (has) GpsHelper.requestFix(this, null);
     }
 
     private void openNotificationSettings() {
@@ -2999,8 +3014,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     private boolean gpsReadyForRecording() {
         if (BuildConfig.PLAY) return true; // wersja Google Play: lokalizacja nieobowiazkowa
         if (!GpsHelper.hasPermission(this)) {
-            boolean askedBefore = prefs().getBoolean("location_asked", false);
-            boolean canAsk = !askedBefore || ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION);
+            boolean canAsk = !prefs().getBoolean("loc_blocked", false);
+            if (canAsk) {
+                // bez własnego okienka — od razu systemowe pytanie o zgodę; po zgodzie nagrywanie rusza samo
+                prefs().edit().putBoolean("location_asked", true).apply();
+                recAfterLocation = true;
+                requestLocationPermission(this);
+                return false;
+            }
             new AlertDialog.Builder(this)
                     .setTitle("📍 " + L.t("Nagrywanie wymaga lokalizacji"))
                     .setMessage(L.t("Każde nagranie zapisuje miejsce, w którym powstało (mapa, opis dla trenera). Bez zgody na lokalizację nie można nagrywać.")
@@ -3075,8 +3096,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         hidePitchButton();
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
+            // od razu systemowe okienka: mikrofon (+ lokalizacja w wersji kursantów) — jedno po drugim
+            boolean loc = !BuildConfig.PLAY && !GpsHelper.hasPermission(this) && !prefs().getBoolean("loc_blocked", false);
+            ActivityCompat.requestPermissions(this, loc
+                    ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}
+                    : new String[]{Manifest.permission.RECORD_AUDIO}, REQUEST_MIC_PERMISSION);
             return;
         }
 
@@ -3237,16 +3261,27 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_LOCATION_PERMISSION) {
-            if (GpsHelper.hasPermission(this)) GpsHelper.requestFix(this, null);
+            noteLocationAnswer();
             boolean go = recAfterLocation && GpsHelper.hasPermission(this) && !isRecording;
             recAfterLocation = false;
             if (go) startRecordingFlow(); // zgoda dana z przycisku REC — nagrywamy od razu
+            else if (!GpsHelper.hasPermission(this) && !BuildConfig.PLAY) Toast.makeText(this, L.t("Bez zgody na lokalizację nie można nagrywać."), Toast.LENGTH_LONG).show();
+            if ("set".equals(currentPage)) renderSettingsPage();
+            return;
+        }
+        if (requestCode == REQUEST_STARTUP_PERMS) {
+            for (String p : permissions) if (Manifest.permission.ACCESS_FINE_LOCATION.equals(p)) { noteLocationAnswer(); break; }
             if ("set".equals(currentPage)) renderSettingsPage();
             return;
         }
         if (requestCode == CallRecUi.REQ_PERMS || requestCode == 7301) { CallRecUi.refreshOpenSetup(); return; } // kreator nagrywania rozmow / powiadomienia
+        if (requestCode == REQUEST_MIC_PERMISSION && permissions.length > 1) noteLocationAnswer();
         if (requestCode == REQUEST_MIC_PERMISSION && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (!BuildConfig.PLAY && !GpsHelper.hasPermission(this) && permissions.length > 1) {
+                Toast.makeText(this, L.t("Bez zgody na lokalizację nie można nagrywać."), Toast.LENGTH_LONG).show();
+                return;
+            }
             startRecordingFlow();
         } else {
             Toast.makeText(this, L.t("Brak zgody na mikrofon"), Toast.LENGTH_SHORT).show();
