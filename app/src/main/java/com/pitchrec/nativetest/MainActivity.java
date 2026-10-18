@@ -4032,6 +4032,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             String desc = rec.optString("description", "").trim();
             if (desc.isEmpty() || "null".equals(desc)) desc = meta.note;
             if (desc != null && !desc.isEmpty()) infoRow(box, L.t("Opis"), desc);
+            SpeechRate.recordInto(this, box, recordId); // 🗣 tempo tego nagrania (z tekstu AI)
 
             // ── OCENA TRENERA: wszystkie kryteria w kolejnosci trenera ──
             org.json.JSONArray rates = rec.optJSONArray("record_rates");

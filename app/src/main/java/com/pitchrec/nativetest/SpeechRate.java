@@ -131,6 +131,45 @@ public final class SpeechRate {
         card.setVisibility(View.VISIBLE);
     }
 
+    // Szczegóły nagrania: tempo TEGO nagrania (worker /speech-rate/record) — dopisywane do okna, gdy przyjdzie
+    public static void recordInto(Activity a, LinearLayout box, String recordId) {
+        SharedPreferences p = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
+        String token = p.getString("ns_token", null), email = p.getString("ns_email", "");
+        if (token == null || recordId == null || recordId.isEmpty()) return;
+        float dp = a.getResources().getDisplayMetrics().density;
+        LinearLayout sec = new LinearLayout(a);
+        sec.setOrientation(LinearLayout.VERTICAL);
+        TextView l = Ui.label(a, "🗣 " + L.t("TEMPO MOWY"));
+        l.setPadding(0, (int) (14 * dp), 0, (int) (2 * dp));
+        sec.addView(l);
+        TextView wait = Ui.text(a, "⏳ " + L.t("Liczę tempo…"), 12f, R.color.pr_muted);
+        sec.addView(wait);
+        box.addView(sec);
+        String q = "/speech-rate/record?record_id=" + NsClient.enc(recordId) + "&ns_token=" + NsClient.enc(token) + "&ns_email=" + NsClient.enc(email) + "&ns_server=new";
+        NsClient.backend("GET", q, null, r -> {
+            sec.removeView(wait);
+            JSONObject d = null;
+            try { if (r.ok && r.body != null) d = new JSONObject(r.body); } catch (Exception e) { }
+            if (d == null || !d.optBoolean("ok", false)) { sec.addView(Ui.text(a, L.t("Nie udało się policzyć tempa — spróbuj później."), 12f, R.color.pr_muted)); return; }
+            if (d.optBoolean("pending", false)) { sec.addView(Ui.text(a, "⏳ " + L.t("Tekst nagrania jest jeszcze przepisywany — tempo pojawi się za kilka minut."), 12f, R.color.pr_muted)); return; }
+            if (d.optBoolean("short", false) || !d.has("syl_min_speech")) { sec.addView(Ui.text(a, L.t("Nagranie za krótkie, by policzyć tempo."), 12f, R.color.pr_muted)); return; }
+            if (!d.optBoolean("monolog", false)) {
+                TextView w = Ui.text(a, "ℹ️ " + L.t("To rozmowa — w tekście są też słowa rozmówcy, więc tempo jest tylko orientacyjne. Dokładne tempo: monologi i czytanie."), 11f, R.color.pr_pause);
+                w.setPadding(0, 0, 0, (int) (4 * dp));
+                sec.addView(w);
+            }
+            LinearLayout tiles = Ui.row(a);
+            tiles.addView(tile(a, L.t("Tempo mowy"), d.optInt("syl_min_speech", 0) + "", L.t("sylab/min") + "\n" + d.optInt("wpm_speech", 0) + " " + L.t("słów/min")), Ui.weight(1f, 3 * dp));
+            tiles.addView(tile(a, L.t("Z pauzami"), d.optInt("syl_min", 0) + "", L.t("sylab/min") + "\n" + d.optInt("wpm", 0) + " " + L.t("słów/min")), Ui.weight(1f, 3 * dp));
+            tiles.addView(tile(a, L.t("Pauzy"), d.optInt("pause_pct", 0) + "%", L.t("nagrania")), Ui.weight(1f, 3 * dp));
+            sec.addView(tiles);
+            TextView det = Ui.text(a, L.f("{0} sylab · {1} słów · mowa {2} s · pauzy {3} s (dłuższych niż 1 s: {4})",
+                    d.optInt("syl", 0), d.optInt("words", 0), Math.round(d.optDouble("speech_sec", 0)), Math.round(d.optDouble("pause_sec", 0)), d.optInt("pauses_1s", 0)), 10f, R.color.pr_muted);
+            det.setPadding(0, (int) (6 * dp), 0, 0);
+            sec.addView(det);
+        });
+    }
+
     private static View tile(Activity a, String label, String big, String small) {
         float dp = a.getResources().getDisplayMetrics().density;
         LinearLayout tile = new LinearLayout(a);
