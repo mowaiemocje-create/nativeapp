@@ -5935,6 +5935,27 @@ var worker_default = {
         if (!me.id) return json({ ok: true, categories: [], totals: {}, weeks: [] });
         return json(await txTalkStats(env, me.id));
       }
+      if (url.pathname === "/speech-rate" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(url.searchParams.get("student_id") || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        return json(await txSpeechRate(env, sid));
+      }
+      if (url.pathname === "/speech-rate/record" && request.method === "GET") {
+        const me = await coachStudentFromRequest(request, env, url, null);
+        if (!me) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        const rid = String(url.searchParams.get("record_id") || "");
+        if (!rid || !me.id) return json({ error: "Brak record_id" }, 400);
+        return json(await txSpeechRateRecord(env, me.id, rid));
+      }
+      if (url.pathname === "/speech-rate/mine" && request.method === "GET") {
+        const me = await coachStudentFromRequest(request, env, url, null);
+        if (!me) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (!me.id) return json({ ok: true, items: [], weeks: [], d7: { n: 0 }, prev7: { n: 0 }, d30: { n: 0 }, all: { n: 0 } });
+        return json(await txSpeechRate(env, me.id));
+      }
       if (url.pathname === "/trainer-uploader" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -8534,6 +8555,170 @@ async function txTalkStats(env, sid) {
 }
 __name(txTalkStats, "txTalkStats");
 __name2(txTalkStats, "txTalkStats");
+var SR_VOW = "a\u0105e\u0119io\xF3uy\xE1\xE9\u011B\xED\xFA\u016F\xFD\xE4\xF4";
+function srSyl(w) {
+  const x = String(w || "").toLowerCase().replace(/[^\p{L}]/gu, "").replace(/(\p{L})\1+/gu, "$1");
+  let n = 0;
+  for (let i = 0; i < x.length; i++) {
+    const c = x[i];
+    if (SR_VOW.indexOf(c) < 0) continue;
+    if (c === "i" && i > 0 && SR_VOW.indexOf(x[i - 1]) < 0 && i + 1 < x.length && SR_VOW.indexOf(x[i + 1]) >= 0) continue;
+    n++;
+  }
+  return n;
+}
+__name(srSyl, "srSyl");
+__name2(srSyl, "srSyl");
+function srMeasure(words, dur, minDur) {
+  const W = [];
+  for (const w of words || []) {
+    if (Array.isArray(w)) W.push([String(w[0] || ""), Number(w[1]), Number(w[2])]);
+    else if (w && typeof w === "object") W.push([String(w.word || w.w || w.text || ""), Number(w.start != null ? w.start : w.s), Number(w.end != null ? w.end : w.e)]);
+  }
+  const ok = W.filter((w) => isFinite(w[1]) && isFinite(w[2]) && w[2] >= w[1]);
+  if (ok.length < 10) return null;
+  let syl = 0, speech = 0, nPause = 0;
+  for (let i = 0; i < ok.length; i++) {
+    syl += srSyl(ok[i][0]);
+    speech += ok[i][2] - ok[i][1];
+    if (i > 0) {
+      const g = ok[i][1] - ok[i - 1][2];
+      if (g > 0 && g < 0.3) speech += g;
+      else if (g >= 1) nPause++;
+    }
+  }
+  const total = Math.max(Number(dur) || 0, ok[ok.length - 1][2]);
+  if (total < (minDur == null ? 60 : minDur) || speech < 5 || !syl) return null;
+  const r1 = /* @__PURE__ */ __name((v) => Math.round(v * 10) / 10, "r1");
+  return {
+    dur: r1(total),
+    words: ok.length,
+    syl,
+    speech_sec: r1(speech),
+    pause_sec: r1(Math.max(0, total - speech)),
+    pause_pct: Math.round(Math.max(0, total - speech) / total * 100),
+    pauses_1s: nPause,
+    syl_min: Math.round(syl / total * 60),
+    syl_min_speech: Math.round(syl / speech * 60),
+    wpm: Math.round(ok.length / total * 60),
+    wpm_speech: Math.round(ok.length / speech * 60)
+  };
+}
+__name(srMeasure, "srMeasure");
+__name2(srMeasure, "srMeasure");
+async function txSpeechRate(env, sid) {
+  await ensureTranscriptTables(env);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let recs = [];
+  try {
+    recs = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.review_details, COALESCE(rct.name, rc.name) AS category
+      FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+      WHERE r.user_id::text = $1 AND r.deleted_at IS NULL AND r.record_file IS NOT NULL ORDER BY r.created_at DESC LIMIT 3000`, [String(sid)])).rows;
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  recs = recs.filter((r) => txIsMonolog(r.category) && !isNotCountedReview(r.review_details));
+  const tx = {};
+  for (let i = 0; i < recs.length; i += 90) {
+    const chunk = recs.slice(i, i + 90).map((r) => r.id);
+    if (!chunk.length) break;
+    const rs = await env.DB.prepare(`SELECT ns_record_id, dur, words, speakers FROM record_transcript WHERE dur > 0 AND ns_record_id IN (${chunk.map(() => "?").join(",")})`).bind(...chunk).all();
+    for (const x of rs.results || []) tx[x.ns_record_id] = x;
+  }
+  const ymd = /* @__PURE__ */ __name((d) => (d instanceof Date ? d.toISOString() : String(d || "")).slice(0, 10), "ymd");
+  const weekKey = /* @__PURE__ */ __name((s) => {
+    const d = /* @__PURE__ */ new Date(s + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+    return d.toISOString().slice(0, 10);
+  }, "weekKey");
+  const items = [];
+  let noText = 0;
+  for (const r of recs) {
+    const t = tx[r.id];
+    if (!t) {
+      noText++;
+      continue;
+    }
+    let words = [], sp = null;
+    try {
+      words = JSON.parse(t.words || "[]");
+    } catch (e) {
+    }
+    try {
+      sp = t.speakers ? JSON.parse(t.speakers) : null;
+    } catch (e) {
+    }
+    if (sp && sp.length === words.length && new Set(sp).size > 1) continue;
+    const m = srMeasure(words, t.dur);
+    if (!m) continue;
+    items.push(Object.assign({ record_id: r.id, date: ymd(r.d), category: r.category || "" }, m));
+  }
+  items.sort((a, b) => b.date.localeCompare(a.date));
+  const med = /* @__PURE__ */ __name((arr) => {
+    if (!arr.length) return null;
+    const a = arr.slice().sort((x, y) => x - y), k = a.length >> 1;
+    return a.length % 2 ? a[k] : Math.round((a[k - 1] + a[k]) / 2);
+  }, "med");
+  const sum = /* @__PURE__ */ __name((l) => l.length ? { n: l.length, syl_min: med(l.map((x) => x.syl_min)), syl_min_speech: med(l.map((x) => x.syl_min_speech)), wpm: med(l.map((x) => x.wpm)), wpm_speech: med(l.map((x) => x.wpm_speech)), pause_pct: med(l.map((x) => x.pause_pct)) } : { n: 0 }, "sum");
+  const now = Date.now(), dd = /* @__PURE__ */ __name((n) => new Date(now - n * 864e5).toISOString().slice(0, 10), "dd");
+  const weeks = {};
+  for (const x of items) {
+    const k = weekKey(x.date);
+    (weeks[k] = weeks[k] || []).push(x);
+  }
+  if (noText) {
+    try {
+      await txPrioAdd(env, sid);
+    } catch (e) {
+    }
+  }
+  return {
+    ok: true,
+    d7: sum(items.filter((x) => x.date >= dd(6))),
+    prev7: sum(items.filter((x) => x.date >= dd(13) && x.date < dd(6))),
+    d30: sum(items.filter((x) => x.date >= dd(29))),
+    all: sum(items),
+    weeks: Object.keys(weeks).sort().slice(-12).map((k) => Object.assign({ week: k }, sum(weeks[k]))),
+    items: items.slice(0, 30),
+    without_text: noText,
+    note: "Tylko monologi/czytanie od 1 minuty. Sylaby i s\u0142owa z tekstu AI, czas m\xF3wienia z czas\xF3w s\u0142\xF3w (przerwy < 0,3 s wliczone do mowy). Mediany."
+  };
+}
+__name(txSpeechRate, "txSpeechRate");
+__name2(txSpeechRate, "txSpeechRate");
+async function txSpeechRateRecord(env, sid, rid) {
+  await ensureTranscriptTables(env);
+  const ri = await txRecordInfo(env, rid);
+  if (!ri.uid || String(ri.uid) !== String(sid)) return { ok: false, error: "Nie twoje nagranie" };
+  const monolog = txIsMonolog(ri.category);
+  const t = await env.DB.prepare("SELECT dur, words, speakers, status FROM record_transcript WHERE ns_record_id = ?").bind(String(rid)).first();
+  if (!t || !(Number(t.dur) > 0)) {
+    try {
+      await txPrioAdd(env, sid);
+    } catch (e) {
+    }
+    return { ok: true, pending: true, monolog, category: ri.category || "" };
+  }
+  let words = [], sp = null;
+  try {
+    words = JSON.parse(t.words || "[]");
+  } catch (e) {
+  }
+  try {
+    sp = t.speakers ? JSON.parse(t.speakers) : null;
+  } catch (e) {
+  }
+  const voices = sp && sp.length === words.length ? new Set(sp).size : 1;
+  const m = srMeasure(words, t.dur, 20);
+  return Object.assign({ ok: true, record_id: String(rid), category: ri.category || "", monolog: monolog && voices < 2, voices, short: !m && (Number(t.dur) || 0) < 20 }, m || { dur: Number(t.dur) || 0 });
+}
+__name(txSpeechRateRecord, "txSpeechRateRecord");
+__name2(txSpeechRateRecord, "txSpeechRateRecord");
 var SR_MOOD = { luz: 1, komfortowo: 2, neutralnie: 3, niekomfortowo: 4, stres: 5 };
 var SR_POLITE = [
   ["powitanie", /(?<![\p{L}])(dzień dobry|dobry wieczór|cześć|witam|dobrý den|ahoj|hello)(?![\p{L}])/giu],
