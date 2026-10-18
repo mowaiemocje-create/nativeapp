@@ -129,6 +129,7 @@ public class RecMeta {
             n++;
         }
         if (!dest.equals(f) && f.renameTo(dest)) {
+            LocalTempo.renamed(c, f.getName(), dest.getName());
             delete(c, f.getName());
             m.save(c, dest.getName());
             return dest;

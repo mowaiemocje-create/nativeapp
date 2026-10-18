@@ -2125,6 +2125,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             hints.addView(hint(L.t("st = półton. Mniejsza zmiana tonu w sylabie nie daje strzałki; im większa zmiana, tym bardziej stroma strzałka.")));
         }
         if (fullV) hints.addView(toggleRow("🗣 " + L.t("Pomiar sylab i tempo (sylaby na minutę)"), LiveAudioData.showTempo, on -> { LiveAudioData.showTempo = on; saveDawSettings(); }));
+        if (fullV) addSpeechModelSettings(hints);
         hints.addView(toggleRow("📈 " + L.t("Licz pitch od razu przy otwieraniu nagrania"), prefs().getBoolean("auto_pitch", false), on -> prefs().edit().putBoolean("auto_pitch", on).apply()));
         if (logged) hints.addView(toggleRow("💡 " + L.t("Inspiracje na dziś (Statystyki)"), prefs().getBoolean("show_insp", true), on -> prefs().edit().putBoolean("show_insp", on).apply()));
         hints.addView(hint(L.t("Podpowiedzi pojawiają się na wykresie w czasie nagrywania i przy odsłuchu.")));
@@ -2957,6 +2958,39 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     public interface BoolConsumer { void accept(boolean b); }
 
+    // 🗣 Rozpoznawanie mowy w telefonie (model offline) — tempo całego nagrania po zakończeniu
+    private void addSpeechModelSettings(android.widget.LinearLayout box) {
+        android.widget.LinearLayout wrap = new android.widget.LinearLayout(this);
+        wrap.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.addView(wrap);
+        fillSpeechModelSettings(wrap);
+    }
+
+    private void fillSpeechModelSettings(android.widget.LinearLayout wrap) {
+        wrap.removeAllViews();
+        boolean ready = SpeechModel.ready(this);
+        wrap.addView(hint("🗣 " + L.t("Tempo całego nagrania liczone w telefonie: rozpoznawanie słów (bez internetu) porównane z dźwiękiem. Wynik przy nagraniu w Nagraniach.")
+                + "\n" + (ready ? "✅ " + L.t("Model rozpoznawania mowy jest pobrany.") : L.f("Model rozpoznawania mowy: nie pobrany (ok. {0} MB).", SpeechModel.SIZE_MB))));
+        if (!ready) {
+            Button dl = Ui.button(this, SpeechModel.busy() ? L.f("⏳ Pobieranie… {0}%", SpeechModel.pct()) : "⬇ " + L.t("Pobierz model rozpoznawania mowy"), R.color.pr_accent, true);
+            dl.setOnClickListener(v -> {
+                if (SpeechModel.busy()) return;
+                dl.setEnabled(false);
+                SpeechModel.download(this, (p, err, done) -> {
+                    if (!done) { dl.setText(L.f("⏳ Pobieranie… {0}%", p)); return; }
+                    if (err != null) Toast.makeText(this, L.t("Nie udało się pobrać modelu: ") + err, Toast.LENGTH_LONG).show();
+                    fillSpeechModelSettings(wrap);
+                });
+            });
+            wrap.addView(dl);
+        } else {
+            wrap.addView(toggleRow("⚡ " + L.t("Licz tempo od razu po nagraniu"), LocalTempo.autoOn(this), on -> LocalTempo.setAuto(this, on)));
+            Button del = Ui.button(this, "🗑 " + L.t("Usuń model (zwolni ok. 50 MB)"), R.color.pr_muted, false);
+            del.setOnClickListener(v -> { SpeechModel.delete(this); fillSpeechModelSettings(wrap); });
+            wrap.addView(del);
+        }
+    }
+
     private android.widget.LinearLayout toggleRow(String text, boolean initial, BoolConsumer onChange) {
         android.widget.LinearLayout r = Ui.row(this);
         r.setPadding(0, (int) Ui.dp(this, 6), 0, (int) Ui.dp(this, 6));
@@ -3321,6 +3355,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         {
             statusText.setText(L.t("Nagrano ") + (durationMs / 1000) + L.t("s — zapisano"));
             save.run();
+            if (lastSavedFilePath != null) LocalTempo.autoAfterRecording(this, new File(lastSavedFilePath)); // 🗣 tempo w tle
             loadedFilePath = null; // swiezo nagrany plik jest juz w LiveAudioData, nie trzeba wczytywac ponownie
             pendingSeekSample = 0L;
             lastRecordingTotalDurationMs = durationMs;
@@ -3942,6 +3977,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         metaRow.addView(note, new android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         metaRow.addView(Ui.text(this, fmt.format(new java.util.Date(file.lastModified())), 10f, R.color.pr_muted));
         card.addView(metaRow);
+        if (LocalTempo.allowed(this)) {
+            TextView tl = LocalTempo.cardLine(this, file); // 🗣 tempo mowy z telefonu
+            tl.setOnClickListener(v -> LocalTempo.showDialog(this, file, () -> { if ("recs".equals(currentPage)) renderRecsPage(); }));
+            card.addView(tl);
+        }
 
         android.widget.LinearLayout btns = Ui.row(this);
         btns.setPadding(0, (int) (10 * d), 0, 0);
@@ -3981,6 +4021,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 .setPositiveButton(getString(R.string.btn_delete), (d2, w2) -> {
                     file.delete();
                     RecMeta.delete(this, file.getName());
+                    LocalTempo.forget(this, file.getName());
                     Toast.makeText(this, getString(R.string.deleted_toast), Toast.LENGTH_SHORT).show();
                     renderRecsPage();
                 })
@@ -4067,7 +4108,16 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             String desc = rec.optString("description", "").trim();
             if (desc.isEmpty() || "null".equals(desc)) desc = meta.note;
             if (desc != null && !desc.isEmpty()) infoRow(box, L.t("Opis"), desc);
-            SpeechRate.recordInto(this, box, recordId); // 🗣 tempo tego nagrania (z tekstu AI)
+            // 🗣 tempo tego nagrania — liczone w telefonie (słowa + dźwięk); bez pliku w telefonie — z serwera
+            if (file != null && file.exists() && LocalTempo.allowed(this)) {
+                TextView lt = Ui.label(this, "🗣 " + L.t("TEMPO MOWY"));
+                lt.setPadding(0, (int) (14 * d), 0, (int) (2 * d));
+                box.addView(lt);
+                android.widget.LinearLayout tsec = new android.widget.LinearLayout(this);
+                tsec.setOrientation(android.widget.LinearLayout.VERTICAL);
+                box.addView(tsec);
+                LocalTempo.fillSection(this, tsec, file);
+            } else SpeechRate.recordInto(this, box, recordId);
 
             // ── OCENA TRENERA: wszystkie kryteria w kolejnosci trenera ──
             org.json.JSONArray rates = rec.optJSONArray("record_rates");

@@ -192,6 +192,9 @@ public class StatsPage {
         LinearLayout summary = Ui.card(a);
         root.addView(summary);
         fillSummary(summary, local, -1);
+        LinearLayout rate = Ui.card(a); // 🗣 tempo mowy w monologach — liczone w telefonie
+        root.addView(rate);
+        SpeechRate.fill(a, rate, host::isCurrent);
         LinearLayout stress = Ui.card(a);
         root.addView(stress);
         fillStress(stress, local);

@@ -12,6 +12,8 @@ android {
         // dzieki temu aplikacja wie, ze na serwerze jest nowsza wersja
         versionCode (project.hasProperty('buildNo') ? project.property('buildNo').toInteger() : 1)
         versionName (project.hasProperty('buildNo') ? "1." + project.property('buildNo') : "0.1-test")
+        // rozpoznawanie mowy offline (Vosk) ma biblioteki natywne — tylko telefony ARM (prawie wszystkie)
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
     }
 
     buildFeatures {
@@ -88,6 +90,9 @@ dependencies {
     studentsImplementation 'com.google.firebase:firebase-messaging:24.0.0'
     // Zakup "pełna wersja" — tylko wersja Google Play (kursanci maja wszystko bez zakupu)
     playImplementation 'com.android.billingclient:billing:8.0.0'
+    // 🗣 rozpoznawanie mowy w telefonie (offline, model polski pobierany w Ustawieniach) — tempo mowy
+    implementation 'com.alphacephei:vosk-android:0.3.47@aar'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 }
 
 // Nowsze biblioteki (Firebase) maja kotlin-stdlib w jednym pakiecie — stare czesci jdk7/jdk8

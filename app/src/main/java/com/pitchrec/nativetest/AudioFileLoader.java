@@ -219,6 +219,11 @@ public class AudioFileLoader {
         return out;
     }
 
+    // Probki mono 44,1 kHz z pliku WAV/MP3 (np. do liczenia tempa w telefonie)
+    public static short[] decode(File file) throws IOException {
+        return file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
+    }
+
     // Dekoduje WAV, wykrywajac liczbe kanalow z naglowka (offset 22-23) — importowane
     // pliki (nie nasze wlasne nagrania) sa czesto STEREO, a wczesniejsza wersja zawsze
     // zakladala mono, co przy stereo myliło kanaly L/R jako sekwencyjne probki mono,

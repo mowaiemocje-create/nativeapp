@@ -19,6 +19,11 @@ public final class SpeechRate {
     private SpeechRate() { }
 
     public static void fill(Activity a, LinearLayout card, java.util.function.BooleanSupplier isCurrent) {
+        // najpierw tempo policzone w telefonie (dokładniejsze, bez limitu serwera); gdy brak — z serwera
+        JSONObject loc = LocalTempo.allowed(a) ? LocalTempo.statsJson(a) : null;
+        if (loc != null && loc.optJSONArray("items") != null && loc.optJSONArray("items").length() > 0) {
+            try { render(a, card, loc); return; } catch (Exception e) { }
+        }
         SharedPreferences p = a.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE);
         String token = p.getString("ns_token", null), email = p.getString("ns_email", "");
         if (token == null) { card.setVisibility(View.GONE); return; }
@@ -121,7 +126,8 @@ public final class SpeechRate {
             }
             card.addView(chart);
         }
-        TextView note = Ui.text(a, L.t("Liczone z całego nagrania po przepisaniu tekstu (monologi od 1 minuty). Tempo mowy — bez pauz."), 10f, R.color.pr_muted);
+        TextView note = Ui.text(a, d.optBoolean("local", false) ? L.t("Liczone w telefonie z całego nagrania (słowa + dźwięk; monologi od 1 minuty). Tempo mowy — bez pauz.")
+                : L.t("Liczone z całego nagrania po przepisaniu tekstu (monologi od 1 minuty). Tempo mowy — bez pauz."), 10f, R.color.pr_muted);
         note.setPadding(0, (int) (8 * dp), 0, 0);
         card.addView(note);
         if (d.optInt("without_text", 0) > 0) {
