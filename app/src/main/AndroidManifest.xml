@@ -15,6 +15,13 @@
     <!-- Zgody i usluga nagrywania rozmow + samoaktualizacja: TYLKO wersja kursantow
          (app/src/students/AndroidManifest.xml). Wersja Google Play ich nie ma. -->
 
+    <!-- rozpoznawanie mowy Androida (tempo mowy w telefonie) — Android 11+ wymaga deklaracji -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:largeHeap="true"

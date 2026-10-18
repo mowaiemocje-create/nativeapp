@@ -25,12 +25,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 // 🗣 TEMPO MOWY LICZONE W TELEFONIE — po zakończeniu nagrania, z CAŁEGO nagrania, bez serwera i bez logowania.
-//  • SŁOWA: rozpoznawanie mowy offline (Vosk, model polski) — każde słowo z czasem początku i końca.
+//  • SŁOWA: rozpoznawanie mowy wbudowane w Androida (Google, Android 13+) — tekst całego nagrania.
 //  • DŹWIĘK (nasz model z wykresu): ten sam VAD co pauzy na wykresie (głos / cisza) i to samo liczenie
 //    sylab z głośności co tempo na żywo.
-//  • KONFRONTACJA: czas mówienia = głos z dźwięku LUB rozpoznane słowo (przeciągnięta sylaba, której
-//    rozpoznawanie nie złapało, nadal jest mową, nie pauzą). Sylaby = z tekstu (grupy samogłosek)
-//    + sylaby z dźwięku tam, gdzie nie rozpoznano żadnego słowa. Obie liczby sylab widać osobno.
+//  • Czas mówienia i pauzy — z dźwięku (nasz pomiar). Sylaby — z tekstu (grupy samogłosek); obok
+//    sylaby z dźwięku do porównania (gdy różnią się o > 20% — ostrzeżenie).
 // Wynik zapisany przy nagraniu (SharedPreferences "tempo_local", kluczem jest nazwa pliku).
 public final class LocalTempo {
 
@@ -76,7 +75,7 @@ public final class LocalTempo {
 
     // Po nagraniu: liczy w tle, jeśli model jest pobrany i włączone liczenie automatyczne
     public static void autoAfterRecording(Context c, File f) {
-        if (f == null || !allowed(c) || !autoOn(c) || !SpeechModel.ready(c)) return;
+        if (f == null || !allowed(c) || !autoOn(c)) return;
         analyzeAsync(c, f, null);
     }
 
@@ -144,60 +143,24 @@ public final class LocalTempo {
         // porcje mowy z dźwięku (krótkie przerwy < 0,15 s łączymy)
         List<double[]> runs = runsOf(speechG, 15);
 
-        // 2) SŁOWA: rozpoznawanie offline (16 kHz)
-        List<Object[]> words = new ArrayList<>(); // {słowo, start, koniec, pewność}
-        boolean asr = SpeechModel.ready(c);
-        if (asr) {
-            org.vosk.Model m = SpeechModel.model(c);
-            org.vosk.Recognizer rec = new org.vosk.Recognizer(m, 16000f);
-            try {
-                rec.setWords(true);
-                int n16 = (int) (s.length * 16000L / SR);
-                short[] buf = new short[4000];
-                int k = 0;
-                for (int i = 0; i < n16; i++) {
-                    double pos = i * (double) SR / 16000.0;
-                    int a = (int) pos;
-                    // prosty filtr: średnia z ok. 3 próbek (mniej szumu przy zmianie częstotliwości)
-                    int lo = Math.max(0, a - 1), hi = Math.min(s.length - 1, a + 1);
-                    int sum = 0;
-                    for (int j = lo; j <= hi; j++) sum += s[j];
-                    buf[k++] = (short) (sum / (hi - lo + 1));
-                    if (k == buf.length) { if (rec.acceptWaveForm(buf, k)) collect(rec.getResult(), words); k = 0; }
-                }
-                if (k > 0 && rec.acceptWaveForm(buf, k)) collect(rec.getResult(), words);
-                collect(rec.getFinalResult(), words);
-            } finally { try { rec.close(); } catch (Throwable t) { } }
-        }
-
-        // 3) KONFRONTACJA
-        boolean[] wordG = new boolean[G];
+        // 2) SŁOWA: rozpoznawanie mowy wbudowane w Androida (całe nagranie, tylko tekst — bez czasów słów)
+        String text = null, asrErr = null;
+        if (AndroidAsr.supported(c)) {
+            try { text = AndroidAsr.recognize(c, s, SR); } catch (Throwable t) { asrErr = t.getMessage() == null ? t.toString() : t.getMessage(); }
+        } else asrErr = L.t("Rozpoznawanie mowy z pliku wymaga Androida 13 lub nowszego.");
+        List<String> words = new ArrayList<>();
+        if (text != null) for (String w : text.split("\\s+")) if (w.replaceAll("[^\\p{L}\\p{N}]", "").length() > 0) words.add(w);
+        boolean asr = text != null && !words.isEmpty();
         int sylText = 0;
-        StringBuilder text = new StringBuilder();
-        for (Object[] w : words) {
-            int a = (int) ((Double) w[1] * 100), b = (int) Math.ceil((Double) w[2] * 100);
-            for (int g = Math.max(0, a); g < Math.min(G, b); g++) wordG[g] = true;
-            sylText += syl((String) w[0]);
-            if (text.length() > 0) text.append(' ');
-            text.append((String) w[0]);
-        }
-        boolean[] speech = new boolean[G];
-        int sp0 = 0, cover = 0;
-        for (int g = 0; g < G; g++) {
-            speech[g] = speechG[g] || wordG[g];
-            if (speechG[g]) { sp0++; if (wordG[g]) cover++; }
-        }
-        // sylaby z dźwięku (to samo liczenie co tempo na żywo), kawałkami po 10 s
+        for (String w : words) sylText += syl(w);
+
+        // 3) DŹWIĘK: czas mówienia i pauzy z naszego pomiaru (VAD jak pauzy na wykresie),
+        //    sylaby z dźwięku (to samo liczenie co tempo na żywo) — do porównania z tekstem
+        boolean[] speech = speechG;
         List<SyllableDetector.Syl> sylA = new ArrayList<>();
         for (double[] r : runs) sylA.addAll(sylIn(env, r[0], r[1], voiced));
-        int extra = 0;
-        for (SyllableDetector.Syl y : sylA) {
-            int g = (int) (y.nucleus * 100);
-            boolean inWord = false;
-            for (int d = -15; d <= 15 && !inWord; d++) if (g + d >= 0 && g + d < G && wordG[g + d]) inWord = true;
-            if (!inWord) extra++;
-        }
-        int sylFinal = asr && !words.isEmpty() ? sylText + extra : sylA.size();
+        int extra = 0, sp0 = 0, cover = 0;
+        int sylFinal = asr ? sylText : sylA.size();
 
         // czas mówienia, pauzy (wewnątrz nagrania — cisza przed pierwszym i po ostatnim słowie się nie liczy)
         int first = -1, last = -1, spk = 0;
@@ -226,13 +189,14 @@ public final class LocalTempo {
         o.put("syl_audio", sylA.size());
         o.put("syl_audio_extra", extra);
         o.put("words", asr ? words.size() : -1);
-        o.put("coverage", sp0 > 0 && asr ? Math.round(cover * 100.0 / sp0) : -1);
+        o.put("coverage", -1);
+        if (asrErr != null) o.put("asr_err", asrErr);
         o.put("syl_min_speech", Math.round(sylFinal / speechSec * 60));
         o.put("syl_min", Math.round(sylFinal / spanSec * 60));
         if (asr) {
             o.put("wpm_speech", Math.round(words.size() / speechSec * 60));
             o.put("wpm", Math.round(words.size() / spanSec * 60));
-            String tx = text.toString();
+            String tx = text;
             o.put("text", tx.length() > 4000 ? tx.substring(0, 4000) + "…" : tx);
         }
         return o;
@@ -331,26 +295,8 @@ public final class LocalTempo {
     public static void fillSection(Activity a, LinearLayout box, File f) {
         box.removeAllViews();
         float d = a.getResources().getDisplayMetrics().density;
-        if (!SpeechModel.ready(a)) {
-            box.addView(Ui.text(a, L.f("Do dokładnego liczenia słów potrzebny jest model rozpoznawania mowy (ok. {0} MB, pobierany raz, działa bez internetu).", SpeechModel.SIZE_MB), 12f, R.color.pr_text));
-            Button dl = Ui.button(a, SpeechModel.busy() ? L.f("⏳ Pobieranie… {0}%", SpeechModel.pct()) : "⬇ " + L.t("Pobierz model"), R.color.pr_accent, true);
-            dl.setOnClickListener(v -> {
-                if (SpeechModel.busy()) return;
-                dl.setEnabled(false);
-                SpeechModel.download(a, (p, err, done) -> {
-                    if (!done) { dl.setText(L.f("⏳ Pobieranie… {0}%", p)); return; }
-                    if (err != null) { dl.setEnabled(true); dl.setText("⬇ " + L.t("Pobierz model")); android.widget.Toast.makeText(a, L.t("Nie udało się pobrać modelu: ") + err, android.widget.Toast.LENGTH_LONG).show(); return; }
-                    fillSection(a, box, f);
-                });
-            });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = (int) (8 * d);
-            box.addView(dl, lp);
-            Button rough = Ui.button(a, L.t("Policz bez modelu (tylko z dźwięku)"), R.color.pr_muted, false);
-            rough.setOnClickListener(v -> compute(a, box, f));
-            box.addView(rough, lp);
-            return;
-        }
+        if (!AndroidAsr.supported(a))
+            box.addView(Ui.text(a, "ℹ️ " + L.t("Słowa liczy rozpoznawanie mowy Androida 13+. Na tym telefonie tempo liczone tylko z dźwięku (przybliżone)."), 11f, R.color.pr_pause));
         JSONObject r = get(a, f.getName());
         if (r == null) { compute(a, box, f); return; }
         render(a, box, r);
@@ -398,7 +344,7 @@ public final class LocalTempo {
         if (asr) {
             box.addView(Ui.text(a, L.f("Słów: {0} · sylab z tekstu: {1} · sylab z dźwięku: {2}", r.optInt("words", 0), r.optInt("syl_text", 0), r.optInt("syl_audio", 0)), 11f, R.color.pr_text));
             int cov = r.optInt("coverage", -1);
-            if (cov >= 0) box.addView(Ui.text(a, L.f("Rozpoznane słowa obejmują {0}% mowy z dźwięku", cov) + (r.optInt("syl_audio_extra", 0) > 0 ? " · " + L.f("dodano {0} sylab z dźwięku tam, gdzie nie rozpoznano słów", r.optInt("syl_audio_extra", 0)) : ""), 11f, cov < 70 ? R.color.pr_warn : R.color.pr_muted));
+            if (cov >= 0 && false) box.addView(Ui.text(a, L.f("Rozpoznane słowa obejmują {0}% mowy z dźwięku", cov) + (r.optInt("syl_audio_extra", 0) > 0 ? " · " + L.f("dodano {0} sylab z dźwięku tam, gdzie nie rozpoznano słów", r.optInt("syl_audio_extra", 0)) : ""), 11f, cov < 70 ? R.color.pr_warn : R.color.pr_muted));
             int st = r.optInt("syl_text", 0), sa = r.optInt("syl_audio", 0);
             if (st > 0 && sa > 0 && Math.abs(st - sa) > Math.max(st, sa) * 0.2)
                 box.addView(Ui.text(a, "⚠️ " + L.t("Tekst i dźwięk różnią się o ponad 20% — posłuchaj nagrania i sprawdź tekst poniżej."), 11f, R.color.pr_warn));
@@ -412,8 +358,10 @@ public final class LocalTempo {
                 box.addView(tt);
             }
         } else {
-            box.addView(Ui.text(a, L.f("Sylaby tylko z dźwięku: {0} (bez modelu słów — wynik przybliżony)", r.optInt("syl_audio", 0)), 11f, R.color.pr_muted));
+            box.addView(Ui.text(a, L.f("Sylaby tylko z dźwięku: {0} (bez rozpoznanych słów — wynik przybliżony)", r.optInt("syl_audio", 0)), 11f, R.color.pr_muted));
         }
+        String ae = r.optString("asr_err", "");
+        if (!ae.isEmpty()) box.addView(Ui.text(a, "⚠️ " + ae, 11f, R.color.pr_warn));
     }
 
     private static View tile(Activity a, String label, String big, String small) {

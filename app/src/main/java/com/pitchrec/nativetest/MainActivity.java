@@ -2968,27 +2968,25 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void fillSpeechModelSettings(android.widget.LinearLayout wrap) {
         wrap.removeAllViews();
-        boolean ready = SpeechModel.ready(this);
-        wrap.addView(hint("🗣 " + L.t("Tempo całego nagrania liczone w telefonie: rozpoznawanie słów (bez internetu) porównane z dźwiękiem. Wynik przy nagraniu w Nagraniach.")
-                + "\n" + (ready ? "✅ " + L.t("Model rozpoznawania mowy jest pobrany.") : L.f("Model rozpoznawania mowy: nie pobrany (ok. {0} MB).", SpeechModel.SIZE_MB))));
-        if (!ready) {
-            Button dl = Ui.button(this, SpeechModel.busy() ? L.f("⏳ Pobieranie… {0}%", SpeechModel.pct()) : "⬇ " + L.t("Pobierz model rozpoznawania mowy"), R.color.pr_accent, true);
-            dl.setOnClickListener(v -> {
-                if (SpeechModel.busy()) return;
-                dl.setEnabled(false);
-                SpeechModel.download(this, (p, err, done) -> {
-                    if (!done) { dl.setText(L.f("⏳ Pobieranie… {0}%", p)); return; }
-                    if (err != null) Toast.makeText(this, L.t("Nie udało się pobrać modelu: ") + err, Toast.LENGTH_LONG).show();
-                    fillSpeechModelSettings(wrap);
-                });
-            });
-            wrap.addView(dl);
-        } else {
-            wrap.addView(toggleRow("⚡ " + L.t("Licz tempo od razu po nagraniu"), LocalTempo.autoOn(this), on -> LocalTempo.setAuto(this, on)));
-            Button del = Ui.button(this, "🗑 " + L.t("Usuń model (zwolni ok. 50 MB)"), R.color.pr_muted, false);
-            del.setOnClickListener(v -> { SpeechModel.delete(this); fillSpeechModelSettings(wrap); });
-            wrap.addView(del);
+        wrap.addView(hint("🗣 " + L.t("Tempo całego nagrania liczone w telefonie: słowa z rozpoznawania mowy Androida, czas mówienia i pauzy z dźwięku. Wynik przy nagraniu w Nagraniach.")));
+        wrap.addView(toggleRow("⚡ " + L.t("Licz tempo od razu po nagraniu"), LocalTempo.autoOn(this), on -> LocalTempo.setAuto(this, on)));
+        if (!AndroidAsr.supported(this)) {
+            wrap.addView(hint("ℹ️ " + L.t("Słowa liczy rozpoznawanie mowy Androida 13+. Na tym telefonie tempo liczone tylko z dźwięku (przybliżone).")));
+            return;
         }
+        TextView st = Ui.text(this, "⏳ " + L.t("Sprawdzam rozpoznawanie mowy…"), 12f, R.color.pr_muted);
+        wrap.addView(st);
+        AndroidAsr.checkLanguage(this, state -> {
+            if ("installed".equals(state)) st.setText("✅ " + L.t("Język pobrany — rozpoznawanie działa w telefonie, bez internetu."));
+            else if ("pending".equals(state)) st.setText("⏳ " + L.t("Język do rozpoznawania mowy jest właśnie pobierany."));
+            else if ("downloadable".equals(state)) {
+                st.setText(L.t("Pobierz język, żeby rozpoznawanie działało w telefonie, bez internetu (bez niego potrzebny jest internet)."));
+                Button dl = Ui.button(this, "⬇ " + L.t("Pobierz język do rozpoznawania mowy"), R.color.pr_accent, true);
+                dl.setOnClickListener(v -> { AndroidAsr.downloadLanguage(this); dl.setEnabled(false); dl.setText("⏳ " + L.t("Pobieranie…")); });
+                wrap.addView(dl);
+            } else if ("online".equals(state)) st.setText("🌐 " + L.t("Rozpoznawanie mowy działa przez internet (Google)."));
+            else st.setText("⚠️ " + L.t("Rozpoznawanie mowy w tym języku jest niedostępne — tempo liczone tylko z dźwięku."));
+        });
     }
 
     private android.widget.LinearLayout toggleRow(String text, boolean initial, BoolConsumer onChange) {
