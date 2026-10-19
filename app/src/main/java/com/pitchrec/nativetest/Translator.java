@@ -39,6 +39,8 @@ public final class Translator {
     public static boolean on(Context c) { return !BuildConfig.PLAY && p(c).getBoolean("translator_on", false); }
     public static boolean onlyCharging(Context c) { return p(c).getBoolean("tr_charging", true); }
     public static boolean onlyWifi(Context c) { return p(c).getBoolean("tr_wifi", true); }
+    public static boolean all(Context c) { return p(c).getBoolean("tr_all", false); }
+    public static void setAll(Context c, boolean v) { p(c).edit().putBoolean("tr_all", v).apply(); }
     public static int done(Context c) { return p(c).getInt("tr_done", 0); }
     public static int doneToday(Context c) {
         String d = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date());
@@ -88,10 +90,10 @@ public final class Translator {
         String token = p(c).getString("ns_token", null), email = p(c).getString("ns_email", "");
         if (token == null) { setStatus(L.t("Zaloguj się kontem trenera.")); return 300000; }
         setStatus("⏳ " + L.t("Sprawdzam nagrania bez tekstu…"));
-        String q = "/transcripts/phone-queue?limit=2&ns_token=" + NsClient.enc(token) + "&ns_email=" + NsClient.enc(email) + "&ns_server=new";
+        String q = "/transcripts/phone-queue?limit=2" + (all(c) ? "&scope=all" : "") + "&ns_token=" + NsClient.enc(token) + "&ns_email=" + NsClient.enc(email) + "&ns_server=new";
         JSONObject d = http("GET", q, null);
         if (d.has("error")) {
-            if (String.valueOf(d.optString("error", "")).contains("trener")) { p(c).edit().putBoolean("translator_on", false).apply(); setStatus("⛔ " + L.t("Tryb tłumacza działa tylko na koncie trenera/admina.")); return 600000; }
+            if (String.valueOf(d.optString("error", "")).contains("trener")) { p(c).edit().putBoolean("translator_on", false).apply(); setStatus("⛔ " + L.t("Tryb tłumacza działa tylko na koncie trenera (np. „Trener Dawid”) albo trenera/admina NS.")); return 600000; }
             throw new Exception(d.optString("error", ""));
         }
         waiting = d.optInt("waiting", 0);

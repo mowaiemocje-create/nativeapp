@@ -2970,11 +2970,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void fillTranslatorSettings(android.widget.LinearLayout box) {
         box.removeAllViews();
-        box.addView(hint(L.t("Konto trenera/admina: ten telefon bierze z serwera nagrania kursantów bez tekstu i przepisuje je rozpoznawaniem mowy Androida (bez limitu serwera). Działa, gdy aplikacja jest uruchomiona — najlepiej zostaw telefon na ładowarce.")));
+        box.addView(hint(L.t("Dla konta trenera (np. „Trener Dawid”, oznaczonego w panelu jako 🎓 konto trenera): ten telefon bierze z serwera nagrania kursantów bez tekstu i przepisuje je rozpoznawaniem mowy Androida (bez limitu serwera). Działa, gdy aplikacja jest uruchomiona — najlepiej zostaw telefon na ładowarce.")));
         if (!AndroidAsr.supported(this)) { box.addView(hint("ℹ️ " + L.t("Rozpoznawanie mowy z pliku wymaga Androida 13 lub nowszego."))); return; }
         box.addView(toggleRow("📥 " + L.t("Przepisuj nagrania kursantów na tym telefonie"), Translator.on(this), on -> { Translator.setOn(this, on); fillTranslatorSettings(box); }));
         box.addView(toggleRow("🔌 " + L.t("Tylko na ładowarce"), Translator.onlyCharging(this), on -> Translator.setOnlyCharging(this, on)));
         box.addView(toggleRow("📶 " + L.t("Tylko na Wi-Fi"), Translator.onlyWifi(this), on -> Translator.setOnlyWifi(this, on)));
+        box.addView(toggleRow("🗂 " + L.t("Także starsze zaległe nagrania (nie tylko z 90 dni)"), Translator.all(this), on -> Translator.setAll(this, on)));
         TextView st = Ui.text(this, "", 12f, R.color.pr_text);
         Runnable upd = () -> st.setText((Translator.status.isEmpty() ? (Translator.on(this) ? "⏳ " + L.t("Uruchamianie…") : L.t("Wyłączony")) : Translator.status)
                 + "\n" + L.f("Przepisane na tym telefonie: dziś {0}, razem {1}", Translator.doneToday(this), Translator.done(this))
