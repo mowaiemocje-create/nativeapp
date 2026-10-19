@@ -91,7 +91,7 @@ public final class LocalTempo {
                 File real = new File(f.getParentFile(), finalName(name));
                 r = analyze(ac, real.exists() ? real : f);
                 if (r == null) err = L.t("Nagranie za krótkie albo bez mowy.");
-                else sp(ac).edit().putString(finalName(name), r.toString()).apply();
+                else { sp(ac).edit().putString(finalName(name), r.toString()).apply(); sync(ac, finalName(name)); }
             } catch (Throwable t) {
                 err = t.getMessage() == null ? t.toString() : t.getMessage();
             } finally {
@@ -177,6 +177,10 @@ public final class LocalTempo {
         double speechSec = spk / 100.0, spanSec = span / 100.0;
         JSONObject o = new JSONObject();
         o.put("v", 1);
+        // porcje mowy z dźwięku [start, koniec] — do przybliżonych czasów słów w bazie tekstów
+        JSONArray ra = new JSONArray();
+        for (int i = 0; i < Math.min(1500, runs.size()); i++) ra.put(new JSONArray().put(r2(runs.get(i)[0])).put(r2(runs.get(i)[1])));
+        o.put("runs", ra);
         o.put("at", System.currentTimeMillis());
         o.put("dur", r1(dur));
         o.put("span_sec", r1(spanSec));
@@ -261,6 +265,81 @@ public final class LocalTempo {
     }
 
     private static double r1(double v) { return Math.round(v * 10) / 10.0; }
+    private static double r2(double v) { return Math.round(v * 100) / 100.0; }
+
+    // ── 📱 TEKST Z TELEFONU → BAZA TEKSTÓW (worker /transcripts/phone) ──
+    // Gdy nagranie jest już w NewSpeech (ma ID) i tekst z telefonu jest gotowy — wysyłamy raz.
+    // Czasy słów: słowa rozłożone w porcjach mowy z dźwięku wg liczby sylab (pauzy są prawdziwe).
+    public static void sync(Context c, String fileName) {
+        try {
+            JSONObject r = get(c, fileName);
+            if (r == null || r.optBoolean("srv", false)) return;
+            String text = r.optString("text", "").trim();
+            if (text.isEmpty()) return;
+            RecMeta m = RecMeta.load(c, fileName);
+            String rid = !m.fixRecordId.isEmpty() ? m.fixRecordId : m.nsRecordId;
+            if (rid.isEmpty() || !"sent".equals(m.ns)) return;
+            SharedPreferences p = app(c);
+            String token = p.getString("ns_token", null), email = p.getString("ns_email", "");
+            if (token == null) return;
+            JSONObject b = new JSONObject();
+            b.put("ns_token", token);
+            b.put("ns_email", email);
+            b.put("ns_server", "new");
+            b.put("record_id", rid);
+            b.put("text", text);
+            b.put("dur", r.optDouble("dur", 0));
+            b.put("lang", AndroidAsr.langTag().substring(0, 2));
+            b.put("words", wordTimes(text, r.optJSONArray("runs")));
+            final Context ac = c.getApplicationContext();
+            NsClient.backend("POST", "/transcripts/phone", b.toString(), res -> {
+                if (!res.ok || res.body == null) return;
+                try {
+                    JSONObject d = new JSONObject(res.body);
+                    if (!d.optBoolean("ok", false)) return;
+                    JSONObject cur = get(ac, fileName);
+                    if (cur != null) { cur.put("srv", true); sp(ac).edit().putString(fileName, cur.toString()).apply(); }
+                } catch (Exception e) { }
+            });
+        } catch (Exception e) { }
+    }
+
+    static JSONArray wordTimes(String text, JSONArray runs) throws Exception {
+        List<String> words = new ArrayList<>();
+        for (String w : text.split("\\s+")) if (!w.isEmpty()) words.add(w);
+        JSONArray out = new JSONArray();
+        if (words.isEmpty()) return out;
+        List<double[]> R = new ArrayList<>();
+        double total = 0;
+        for (int i = 0; runs != null && i < runs.length(); i++) {
+            JSONArray x = runs.optJSONArray(i);
+            if (x == null) continue;
+            double a = x.optDouble(0, 0), e = x.optDouble(1, 0);
+            if (e > a) { R.add(new double[]{a, e}); total += e - a; }
+        }
+        if (R.isEmpty() || total <= 0) return out;
+        int W = 0;
+        int[] wt = new int[words.size()];
+        for (int i = 0; i < wt.length; i++) { wt[i] = Math.max(1, syl(words.get(i))); W += wt[i]; }
+        // czas mowy (bez pauz) → czas w nagraniu
+        double acc = 0;
+        for (int i = 0; i < words.size(); i++) {
+            double s0 = acc / W * total, s1 = (acc + wt[i]) / W * total;
+            acc += wt[i];
+            out.put(new JSONArray().put(words.get(i)).put(r2(mapT(R, s0, false))).put(r2(mapT(R, s1, true))));
+        }
+        return out;
+    }
+
+    private static double mapT(List<double[]> R, double t, boolean end) {
+        double acc = 0;
+        for (double[] r : R) {
+            double len = r[1] - r[0];
+            if (t < acc + len || (end && t <= acc + len)) return r[0] + (t - acc);
+            acc += len;
+        }
+        return R.get(R.size() - 1)[1];
+    }
 
     // ── WIDOK ──
     // Krótka linia na karcie nagrania („🗣 152 syl/min · pauzy 31%  ›” albo „🗣 Policz tempo ›”)
