@@ -1324,6 +1324,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok) {
                 markNs(file, "sent");
                 if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); }
+                LocalTempo.announce(this, file.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, file.getName()); // 📱 tekst z telefonu → baza tekstów
                 setStatus(isFix ? L.t("☁✓ Poprawka wysłana! Czeka na ocenę trenera.") : L.t("☁✓ NS: wysłano (") + L.cat(meta.cat) + ")");
                 Toast.makeText(this, isFix ? L.t("☁✓ Poprawka wysłana") : L.t("☁✓ Wysłano do NS"), Toast.LENGTH_SHORT).show();
@@ -1434,6 +1435,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok) {
                 markNs(f, "sent");
                 rememberNsId(f, r.body);
+                LocalTempo.announce(this, f.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, f.getName()); // 📱 tekst z telefonu → baza tekstów
                 sendNext(todo, idx + 1, okCount + 1);
             } else if (r.mute) {

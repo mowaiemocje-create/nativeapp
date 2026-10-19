@@ -293,14 +293,40 @@ public final class LocalTempo {
             b.put("words", wordTimes(text, r.optJSONArray("runs")));
             final Context ac = c.getApplicationContext();
             NsClient.backend("POST", "/transcripts/phone", b.toString(), res -> {
-                if (!res.ok || res.body == null) return;
                 try {
-                    JSONObject d = new JSONObject(res.body);
-                    if (!d.optBoolean("ok", false)) return;
                     JSONObject cur = get(ac, fileName);
-                    if (cur != null) { cur.put("srv", true); sp(ac).edit().putString(fileName, cur.toString()).apply(); }
+                    if (cur == null) return;
+                    JSONObject d = null;
+                    try { if (res.body != null) d = new JSONObject(res.body); } catch (Exception e) { }
+                    if (res.ok && d != null && d.optBoolean("ok", false)) {
+                        cur.put("srv", true);
+                        cur.put("srv_note", d.has("skipped") ? "whisper" : "saved");
+                        cur.remove("srv_err");
+                    } else cur.put("srv_err", d != null && !d.optString("error", "").isEmpty() ? d.optString("error", "") : (res.err == null ? "HTTP" : res.err));
+                    sp(ac).edit().putString(fileName, cur.toString()).apply();
                 } catch (Exception e) { }
             });
+        } catch (Exception e) { }
+    }
+
+    // Zaraz po wysłaniu nagrania: „tekst policzę w telefonie” — serwer nie przepisuje go sam przez 30 min
+    public static void announce(Context c, String fileName) {
+        try {
+            if (!allowed(c) || !AndroidAsr.supported(c)) return;
+            JSONObject r = get(c, fileName);
+            if (r != null && (r.optBoolean("srv", false) || r.optString("text", "").trim().isEmpty())) return;
+            if (r == null && !autoOn(c) && RUNNING.isEmpty()) return;
+            RecMeta m = RecMeta.load(c, fileName);
+            String rid = !m.fixRecordId.isEmpty() ? m.fixRecordId : m.nsRecordId;
+            SharedPreferences p = app(c);
+            String token = p.getString("ns_token", null);
+            if (rid.isEmpty() || token == null) return;
+            JSONObject b = new JSONObject();
+            b.put("ns_token", token);
+            b.put("ns_email", p.getString("ns_email", ""));
+            b.put("ns_server", "new");
+            b.put("record_id", rid);
+            NsClient.backend("POST", "/transcripts/phone-pending", b.toString(), res -> { });
         } catch (Exception e) { }
     }
 
@@ -373,6 +399,7 @@ public final class LocalTempo {
     // Sekcja tempa (okno tempa i szczegóły nagrania)
     public static void fillSection(Activity a, LinearLayout box, File f) {
         box.removeAllViews();
+        sync(a, f.getName()); // tekst jeszcze nie w bazie (np. wcześniej bez internetu) — ponów
         float d = a.getResources().getDisplayMetrics().density;
         if (!AndroidAsr.supported(a))
             box.addView(Ui.text(a, "ℹ️ " + L.t("Słowa liczy rozpoznawanie mowy Androida 13+. Na tym telefonie tempo liczone tylko z dźwięku (przybliżone)."), 11f, R.color.pr_pause));
@@ -441,6 +468,17 @@ public final class LocalTempo {
         }
         String ae = r.optString("asr_err", "");
         if (!ae.isEmpty()) box.addView(Ui.text(a, "⚠️ " + ae, 11f, R.color.pr_warn));
+        // 📱 czy tekst z telefonu jest w bazie tekstów (panel trenera)
+        if (!r.optString("text", "").trim().isEmpty()) {
+            String sn = r.optString("srv_note", ""), se = r.optString("srv_err", "");
+            String st = "saved".equals(sn) ? "✅ " + L.t("Tekst z telefonu zapisany w bazie tekstów.")
+                    : "whisper".equals(sn) ? "↷ " + L.t("Serwer przepisał to nagranie wcześniej — w bazie jest jego tekst.")
+                    : !se.isEmpty() ? "⚠️ " + L.t("Nie udało się zapisać tekstu w bazie:") + " " + se
+                    : "⏳ " + L.t("Tekst trafi do bazy tekstów po wysłaniu nagrania do NewSpeech.");
+            TextView sv = Ui.text(a, "📱 " + st, 11f, "saved".equals(sn) ? R.color.pr_accent : !se.isEmpty() ? R.color.pr_warn : R.color.pr_muted);
+            sv.setPadding(0, (int) (6 * d), 0, 0);
+            box.addView(sv);
+        }
     }
 
     private static View tile(Activity a, String label, String big, String small) {
