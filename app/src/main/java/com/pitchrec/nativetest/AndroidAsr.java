@@ -31,8 +31,9 @@ public final class AndroidAsr {
         return Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isRecognitionAvailable(c);
     }
 
-    public static String langTag() {
-        String l = L.lang();
+    public static String langTag() { return tagFor(L.lang()); }
+
+    public static String tagFor(String l) {
         switch (l == null ? "pl" : l) {
             case "en": return "en-US";
             case "cs": return "cs-CZ";
@@ -105,7 +106,9 @@ public final class AndroidAsr {
 
     // ── Rozpoznanie całego nagrania (wołać z wątku w tle; czeka na wynik) ──
     // pcm: próbki mono w częstotliwości sr. Zwraca rozpoznany tekst (może być pusty) albo rzuca wyjątek.
-    public static String recognize(Context c, short[] pcm, int sr) throws Exception {
+    public static String recognize(Context c, short[] pcm, int sr) throws Exception { return recognize(c, pcm, sr, langTag()); }
+
+    public static String recognize(Context c, short[] pcm, int sr, String tag) throws Exception {
         if (!supported(c)) throw new Exception(L.t("Rozpoznawanie mowy z pliku wymaga Androida 13 lub nowszego."));
         final byte[] bytes = toPcm16k(pcm, sr);
         final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
@@ -147,6 +150,7 @@ public final class AndroidAsr {
                     }
                 });
                 Intent i = baseIntent();
+                if (tag != null) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag);
                 i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0]);
                 i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1);
                 i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT);

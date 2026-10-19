@@ -224,6 +224,37 @@ public class AudioFileLoader {
         return file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".mp3") ? decodeMp3(file) : decodeWav(file);
     }
 
+    // Dowolny plik (WAV / MP3 / M4A / WEBM / OGG…) → mono 44,1 kHz (pliki z serwera bywają w innej częstotliwości)
+    public static short[] decode44k(File file) throws IOException {
+        int sr;
+        short[] s;
+        if (file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".wav")) {
+            try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+                byte[] h = new byte[28];
+                raf.readFully(h);
+                sr = (h[24] & 0xff) | ((h[25] & 0xff) << 8) | ((h[26] & 0xff) << 16) | ((h[27] & 0xff) << 24);
+            }
+            s = decodeWav(file);
+        } else {
+            s = decodeMp3(file);
+            sr = LAST_SR.get() == null ? LiveAudioData.SAMPLE_RATE : LAST_SR.get();
+        }
+        if (sr <= 0 || sr == LiveAudioData.SAMPLE_RATE || s.length == 0) return s;
+        int n = (int) ((long) s.length * LiveAudioData.SAMPLE_RATE / sr);
+        short[] o = new short[n];
+        double k = sr / (double) LiveAudioData.SAMPLE_RATE;
+        for (int i = 0; i < n; i++) {
+            double p = i * k;
+            int a = (int) p;
+            int b = Math.min(s.length - 1, a + 1);
+            double f = p - a;
+            o[i] = (short) (s[Math.min(a, s.length - 1)] * (1 - f) + s[b] * f);
+        }
+        return o;
+    }
+
+    private static final ThreadLocal<Integer> LAST_SR = new ThreadLocal<>();
+
     // Dekoduje WAV, wykrywajac liczbe kanalow z naglowka (offset 22-23) — importowane
     // pliki (nie nasze wlasne nagrania) sa czesto STEREO, a wczesniejsza wersja zawsze
     // zakladala mono, co przy stereo myliło kanaly L/R jako sekwencyjne probki mono,
@@ -297,6 +328,7 @@ public class AudioFileLoader {
         int channels = Math.max(1, format.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT) ? format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT) : 1);
         long durUs = format.containsKey(android.media.MediaFormat.KEY_DURATION) ? format.getLong(android.media.MediaFormat.KEY_DURATION) : 0L;
         int sr = format.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE) ? format.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE) : LiveAudioData.SAMPLE_RATE;
+        LAST_SR.set(sr);
         int cap = (int) Math.min(Integer.MAX_VALUE - 16, Math.max(1 << 16, durUs > 0 ? durUs * sr / 1_000_000L + sr : 60L * sr));
         short[] out = new short[cap];
         int outN = 0;
@@ -326,6 +358,7 @@ public class AudioFileLoader {
             while (outIdx >= 0 || outIdx == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 if (outIdx == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     try { channels = Math.max(1, codec.getOutputFormat().getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)); } catch (Exception e) { }
+                    try { LAST_SR.set(codec.getOutputFormat().getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)); } catch (Exception e) { }
                     outIdx = codec.dequeueOutputBuffer(info, 0);
                     continue;
                 }

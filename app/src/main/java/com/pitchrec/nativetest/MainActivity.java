@@ -2211,6 +2211,12 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void renderLangAndAbout(android.widget.LinearLayout c, float d) {
+        // 📥 Tryb tłumacza (konto trenera/admina): ten telefon przepisuje nagrania kursantów z serwera
+        if (!BuildConfig.PLAY && isLoggedIn()) {
+            android.widget.LinearLayout tr = section(c, "translator", "📥  " + L.t("TRYB TŁUMACZA") + "  ·  " + (Translator.on(this) ? L.t("WŁ") : L.t("WYŁ")));
+            fillTranslatorSettings(tr);
+        }
+
         android.widget.LinearLayout lang = section(c, "lang", "🌐  " + L.t("JĘZYK") + "  ·  " + currentLangName());
         String cur = getSavedLanguage(this);
         String[][] langs = {{"pl", "🇵🇱 Polski"}, {"en", "🇬🇧 English"}, {"cs", "🇨🇿 Čeština"}, {"sk", "🇸🇰 Slovenčina"}, {"de", "🇩🇪 Deutsch"}, {"es", "🇪🇸 Español"}, {"hu", "🇭🇺 Magyar"}};
@@ -2961,6 +2967,23 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     public interface BoolConsumer { void accept(boolean b); }
+
+    private void fillTranslatorSettings(android.widget.LinearLayout box) {
+        box.removeAllViews();
+        box.addView(hint(L.t("Konto trenera/admina: ten telefon bierze z serwera nagrania kursantów bez tekstu i przepisuje je rozpoznawaniem mowy Androida (bez limitu serwera). Działa, gdy aplikacja jest uruchomiona — najlepiej zostaw telefon na ładowarce.")));
+        if (!AndroidAsr.supported(this)) { box.addView(hint("ℹ️ " + L.t("Rozpoznawanie mowy z pliku wymaga Androida 13 lub nowszego."))); return; }
+        box.addView(toggleRow("📥 " + L.t("Przepisuj nagrania kursantów na tym telefonie"), Translator.on(this), on -> { Translator.setOn(this, on); fillTranslatorSettings(box); }));
+        box.addView(toggleRow("🔌 " + L.t("Tylko na ładowarce"), Translator.onlyCharging(this), on -> Translator.setOnlyCharging(this, on)));
+        box.addView(toggleRow("📶 " + L.t("Tylko na Wi-Fi"), Translator.onlyWifi(this), on -> Translator.setOnlyWifi(this, on)));
+        TextView st = Ui.text(this, "", 12f, R.color.pr_text);
+        Runnable upd = () -> st.setText((Translator.status.isEmpty() ? (Translator.on(this) ? "⏳ " + L.t("Uruchamianie…") : L.t("Wyłączony")) : Translator.status)
+                + "\n" + L.f("Przepisane na tym telefonie: dziś {0}, razem {1}", Translator.doneToday(this), Translator.done(this))
+                + (Translator.waiting >= 0 ? "\n" + L.f("Nagrań bez tekstu (ostatnie 90 dni, z 600 najnowszych): {0}", Translator.waiting) : ""));
+        upd.run();
+        Translator.listener = () -> { if (st.isAttachedToWindow()) upd.run(); };
+        st.setPadding(0, (int) (6 * getResources().getDisplayMetrics().density), 0, 0);
+        box.addView(st);
+    }
 
     // 🗣 Rozpoznawanie mowy w telefonie (model offline) — tempo całego nagrania po zakończeniu
     private void addSpeechModelSettings(android.widget.LinearLayout box) {
@@ -3887,6 +3910,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (coachRoot != null) { coachRoot.removeCallbacks(coachPoll); coachRoot.post(coachPoll); }
         LiveAudioData.loggedIn = isLoggedIn();
         LiveAudioData.full = Access.full(this);
+        Translator.ensureRunning(this); // 📥 tryb tłumacza (konto trenera)
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);

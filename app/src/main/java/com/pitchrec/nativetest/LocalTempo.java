@@ -104,8 +104,11 @@ public final class LocalTempo {
     }
 
     // ── ANALIZA ──
-    static JSONObject analyze(Context c, File f) throws Exception {
-        short[] s = AudioFileLoader.decode(f);
+    static JSONObject analyze(Context c, File f) throws Exception { return analyze(c, f, null); }
+
+    // lang: język nagrania („pl”, „cs”…) — dla trybu tłumacza (nagrania innych kursantów); null = język aplikacji
+    static JSONObject analyze(Context c, File f, String lang) throws Exception {
+        short[] s = AudioFileLoader.decode44k(f);
         if (s == null || s.length < SR * 5) return null;
         double dur = s.length / (double) SR;
         int G = (int) Math.ceil(dur * 100); // siatka 10 ms
@@ -146,7 +149,7 @@ public final class LocalTempo {
         // 2) SŁOWA: rozpoznawanie mowy wbudowane w Androida (całe nagranie, tylko tekst — bez czasów słów)
         String text = null, asrErr = null;
         if (AndroidAsr.supported(c)) {
-            try { text = AndroidAsr.recognize(c, s, SR); } catch (Throwable t) { asrErr = t.getMessage() == null ? t.toString() : t.getMessage(); }
+            try { text = AndroidAsr.recognize(c, s, SR, lang == null ? AndroidAsr.langTag() : AndroidAsr.tagFor(lang)); } catch (Throwable t) { asrErr = t.getMessage() == null ? t.toString() : t.getMessage(); }
         } else asrErr = L.t("Rozpoznawanie mowy z pliku wymaga Androida 13 lub nowszego.");
         List<String> words = new ArrayList<>();
         if (text != null) for (String w : text.split("\\s+")) if (w.replaceAll("[^\\p{L}\\p{N}]", "").length() > 0) words.add(w);
