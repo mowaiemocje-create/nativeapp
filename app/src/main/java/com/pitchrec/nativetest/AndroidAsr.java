@@ -108,6 +108,59 @@ public final class AndroidAsr {
     // pcm: próbki mono w częstotliwości sr. Zwraca rozpoznany tekst (może być pusty) albo rzuca wyjątek.
     public static String recognize(Context c, short[] pcm, int sr) throws Exception { return recognize(c, pcm, sr, langTag()); }
 
+    // CAŁE NAGRANIE PO KAWAŁKACH: rozpoznawanie Androida często kończy po pierwszej dłuższej ciszy albo po ok. minucie
+    // i reszta nagrania przepadała. Tniemy w pauzach (porcje mowy z naszego pomiaru dźwięku): kawałki do ~20 s,
+    // bez długich cisz w środku, z małym zapasem na brzegach — każdy rozpoznawany osobno, tekst sklejany.
+    public static String recognizeRuns(Context c, short[] pcm, int sr, String tag, java.util.List<double[]> runs) throws Exception {
+        if (runs == null || runs.isEmpty()) return recognize(c, pcm, sr, tag);
+        // kawałki pokrywają CAŁE nagranie (nic nie wycinamy — także cichszy rozmówca); granice w połowie pauz.
+        // Porcje mowy łączymy, gdy przerwa między nimi < 1 s i kawałek nie przekroczy 20 s.
+        double total = pcm.length / (double) sr;
+        java.util.List<double[]> groups = new ArrayList<>();
+        for (double[] r : runs) {
+            double[] last = groups.isEmpty() ? null : groups.get(groups.size() - 1);
+            if (last != null && r[0] - last[1] < 1.0 && r[1] - last[0] <= 20) last[1] = r[1];
+            else groups.add(new double[]{r[0], r[1]});
+        }
+        java.util.List<double[]> pieces = new ArrayList<>();
+        for (int i = 0; i < groups.size(); i++) {
+            double a0 = i == 0 ? 0 : (groups.get(i - 1)[1] + groups.get(i)[0]) / 2;
+            double b0 = i == groups.size() - 1 ? total : (groups.get(i)[1] + groups.get(i + 1)[0]) / 2;
+            // długa cisza przy brzegu — zostawiamy najwyżej 1,5 s (reszta i tak trafi do sąsiedniego kawałka)
+            a0 = Math.max(a0, groups.get(i)[0] - 1.5);
+            b0 = Math.min(b0, groups.get(i)[1] + 1.5);
+            if (i > 0 && pieces.size() > 0) a0 = Math.min(a0, pieces.get(pieces.size() - 1)[1]); // bez dziur między kawałkami
+            pieces.add(new double[]{a0, b0});
+        }
+        if (!pieces.isEmpty()) pieces.get(pieces.size() - 1)[1] = Math.max(pieces.get(pieces.size() - 1)[1], Math.min(total, pieces.get(pieces.size() - 1)[1]));
+        StringBuilder all = new StringBuilder();
+        String lastErr = null;
+        int okN = 0;
+        for (double[] p : pieces) {
+            // bardzo długa porcja bez pauzy (> 25 s) — tniemy co 20 s
+            for (double a = p[0]; a < p[1]; a += 20) {
+                double b = Math.min(p[1], a + 20);
+                if (p[1] - b < 3) b = p[1]; // nie zostawiaj krótkiej końcówki
+                int i0 = (int) Math.max(0, a * sr), i1 = (int) Math.min(pcm.length, b * sr);
+                if (i1 - i0 < sr / 4) { if (b >= p[1]) break; else continue; }
+                short[] part = java.util.Arrays.copyOfRange(pcm, i0, i1);
+                try {
+                    String t = recognize(c, part, sr, tag);
+                    okN++;
+                    if (!t.isEmpty()) { if (all.length() > 0) all.append(' '); all.append(t); }
+                } catch (Exception e) {
+                    lastErr = e.getMessage();
+                    // brak słów w kawałku to nie błąd całego nagrania; inne błędy (np. brak języka) — przerywamy
+                    if (lastErr != null && lastErr.equals(L.t("Nie rozpoznano żadnych słów."))) { okN++; }
+                    else if (okN == 0) throw e;
+                }
+                if (b >= p[1]) break;
+            }
+        }
+        if (all.length() == 0 && lastErr != null && okN == 0) throw new Exception(lastErr);
+        return all.toString().trim();
+    }
+
     public static String recognize(Context c, short[] pcm, int sr, String tag) throws Exception {
         if (!supported(c)) throw new Exception(L.t("Rozpoznawanie mowy z pliku wymaga Androida 13 lub nowszego."));
         final byte[] bytes = toPcm16k(pcm, sr);
@@ -144,7 +197,8 @@ public final class AndroidAsr {
                     @Override public void onError(int e) {
                         lastEvent[0] = System.currentTimeMillis();
                         // „nic nie rozpoznano” w jednym fragmencie (np. dłuższa cisza) — sesja trwa dalej
-                        if (e == SpeechRecognizer.ERROR_NO_MATCH) return;
+                        if (e == SpeechRecognizer.ERROR_NO_MATCH && !written[0]) return;
+                        if (e == SpeechRecognizer.ERROR_NO_MATCH) { done.countDown(); return; }
                         err[0] = errName(e);
                         done.countDown();
                     }
@@ -164,12 +218,12 @@ public final class AndroidAsr {
                 done.countDown();
             }
         });
-        long durMs = pcm.length * 1000L / sr, start = System.currentTimeMillis();
+        long durMs = Math.max(3000, pcm.length * 1000L / sr), start = System.currentTimeMillis();
         boolean ok = false, quiet = false;
         // koniec: sesja się zakończyła, albo cały dźwięk przekazany i od 15 s nic nie przychodzi
         while (!ok && System.currentTimeMillis() - start < durMs * 2 + 60000) {
             ok = done.await(1000, TimeUnit.MILLISECONDS);
-            if (!ok && written[0] && System.currentTimeMillis() - lastEvent[0] > 15000) { quiet = true; break; }
+            if (!ok && written[0] && System.currentTimeMillis() - lastEvent[0] > 8000) { quiet = true; break; }
         }
         if (quiet) ok = true;
         MAIN.post(() -> { try { if (holder[0] != null) holder[0].destroy(); } catch (Throwable t) { } });
