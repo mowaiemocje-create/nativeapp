@@ -326,7 +326,7 @@ public class DescribeSheet {
         body.addView(gpsBox);
         final Location[] gps = {null};
         if (m.hasGps()) {
-            Location l = new Location("saved");
+            Location l = new Location(m.gpsApprox ? "ip" : "saved");
             l.setLatitude(m.lat);
             l.setLongitude(m.lon);
             gps[0] = l;
@@ -426,7 +426,7 @@ public class DescribeSheet {
             if (st != null && !m.note.contains(st.shortName())) m.note = "🎬 " + st.shortName() + (m.note.isEmpty() ? "" : " — " + m.note);
             if (ContactList.CATEGORY.equals(selCat[0]) && !selContact[0].isEmpty() && !m.note.contains(selContact[0]))
                 m.note = "📞 " + selContact[0] + (m.note.isEmpty() ? "" : " — " + m.note);
-            if (gps[0] != null && !local) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); }
+            if (gps[0] != null && !local) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); if (!"saved".equals(gps[0].getProvider())) m.gpsApprox = GpsHelper.isApprox(gps[0]); }
             prefs.edit().putString("student_name", name).putString("last_sys", selSys[0]).apply();
             dismiss.run();
             if (onSave != null) onSave.onSave(m);
@@ -512,6 +512,7 @@ public class DescribeSheet {
     private static void showGps(Context c, TextView box, Location loc, String msg) {
         boolean ok = msg == null && loc != null;
         if (msg != null) box.setText(msg);
+        else if (loc != null && GpsHelper.isApprox(loc)) box.setText(String.format(Locale.US, "📍 %.3f, %.3f  ", loc.getLatitude(), loc.getLongitude()) + L.t("≈ przybliżona (z internetu — urządzenie bez GPS)"));
         else if (loc != null) box.setText(String.format(Locale.US, L.t("📍 %.5f, %.5f (±%dm)"), loc.getLatitude(), loc.getLongitude(), Math.round(loc.getAccuracy())));
         else box.setText(L.t("❌ Brak GPS z czasu nagrywania — kliknij, aby pobrać"));
         box.setTextColor(Ui.col(c, ok ? R.color.pr_text : (msg != null && msg.startsWith("⏳") ? R.color.pr_muted : R.color.pr_warn)));

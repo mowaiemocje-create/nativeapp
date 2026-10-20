@@ -1472,7 +1472,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         GpsHelper.recordingFix = null;
         if (rf != null) {
             RecMeta pg = RecMeta.load(this, file.getName());
-            if (!pg.hasGps()) { pg.lat = rf.getLatitude(); pg.lon = rf.getLongitude(); pg.save(this, file.getName()); }
+            if (!pg.hasGps()) { pg.lat = rf.getLatitude(); pg.lon = rf.getLongitude(); pg.gpsApprox = GpsHelper.isApprox(rf); pg.save(this, file.getName()); }
             GpsTag.write(file, rf.getLatitude(), rf.getLongitude()); // pozycja w metadanych pliku MP3
         }
         if (!Access.full(this)) {

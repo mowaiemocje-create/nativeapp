@@ -25,6 +25,7 @@ public class RecMeta {
     public String fixRecordId = ""; // nagranie jest POPRAWKA rekordu NS o tym ID (PUT bez limitu)
     public String fixSys = "";      // poprawka MUSI byc w tym samym systemie mowy co oryginal
     public String special = "";     // zadanie specjalne (kategoria Special) — pelna nazwa z SpecialTasks
+    public boolean gpsApprox = false; // pozycja przybliżona (z adresu internetowego — tablet bez GPS)
 
     public static final String[] EMOTION_LABELS = {"", "luz", "komfortowo", "neutralnie", "niekomfortowo", "stres"};
     public static final String[] SYS_LEVELS = {"Basic", "U1", "U1K", "FIX", "K1", "K2", "Full"};
@@ -53,6 +54,7 @@ public class RecMeta {
                 m.fixRecordId = o.optString("fixId", "");
                 m.fixSys = o.optString("fixSys", "");
                 m.special = o.optString("special", "");
+                m.gpsApprox = o.optBoolean("gpsA", false);
             } catch (Exception e) { /* uszkodzony wpis — traktujemy jak brak opisu */ }
         }
         // Zgodnosc: nagrania wyslane przed wprowadzeniem opisow (lista "ns_sent_files")
@@ -78,6 +80,7 @@ public class RecMeta {
             o.put("fixId", fixRecordId);
             o.put("fixSys", fixSys);
             o.put("special", special);
+            if (gpsApprox) o.put("gpsA", true);
             sp(c).edit().putString(fileName, o.toString()).apply();
         } catch (Exception e) { /* ignorowane */ }
     }
@@ -119,7 +122,8 @@ public class RecMeta {
         if (m.hasGps()) {
             GpsTag.write(f, m.lat, m.lon);
             int d = HomeGps.distance(c, m.lat, m.lon);
-            m.placeWord = d < 0 ? "" : d < HomeGps.RADIUS_M ? "_dom" : String.format(Locale.US, "_teren-%.1fkm", d / 1000.0);
+            // przybliżona pozycja (z adresu internetowego) — nie wiemy, czy dom czy teren
+            m.placeWord = m.gpsApprox ? "_okolica" : d < 0 ? "" : d < HomeGps.RADIUS_M ? "_dom" : String.format(Locale.US, "_teren-%.1fkm", d / 1000.0);
         } else m.placeWord = "_bezGPS";
         String base = m.buildFileName(f.lastModified(), "");
         File dest = new File(f.getParentFile(), base + ext);
