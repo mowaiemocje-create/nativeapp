@@ -5935,6 +5935,12 @@ var worker_default = {
         if (!me.id) return json({ ok: true, categories: [], totals: {}, weeks: [] });
         return json(await txTalkStats(env, me.id));
       }
+      if (url.pathname === "/geo" && request.method === "GET") {
+        const cf = request.cf || {};
+        const lat = Number(cf.latitude), lon = Number(cf.longitude);
+        if (!isFinite(lat) || !isFinite(lon)) return json({ ok: false, error: "Brak lokalizacji" });
+        return json({ ok: true, lat, lon, city: cf.city || null, country: cf.country || null, source: "ip" });
+      }
       if (url.pathname === "/speech-rate" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
