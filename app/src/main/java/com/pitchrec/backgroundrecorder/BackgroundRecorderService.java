@@ -196,7 +196,10 @@ public class BackgroundRecorderService extends Service {
                 @Override
                 public void run() {
                     try { Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO); } catch (Exception e) { }
-                    short[] buffer = new short[finalBufferSize / 2];
+                    // Czytamy MAŁYMI porcjami (1024 próbki ≈ 23 ms), niezależnie od bufora mikrofonu w systemie.
+                    // Na części telefonów (np. Samsung) minimalny bufor to nawet 0,5 s — read() czekał, aż się
+                    // zapełni, i wykres DAW przesuwał się skokami co pół sekundy.
+                    short[] buffer = new short[Math.max(256, Math.min(finalBufferSize / 2, 1024))];
                     float currentAppliedGain = LiveAudioData.gainMultiplier; // do plynnego rampowania gain
                     com.pitchrec.nativetest.NoiseGate gate = new com.pitchrec.nativetest.NoiseGate(LiveAudioData.SAMPLE_RATE);
 
