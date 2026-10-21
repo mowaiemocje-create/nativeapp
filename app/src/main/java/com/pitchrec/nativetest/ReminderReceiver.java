@@ -67,13 +67,6 @@ public class ReminderReceiver extends BroadcastReceiver {
     public void onReceive(Context c, Intent intent) {
         L.init(c);
         String act = intent != null ? intent.getAction() : null;
-        if (Intent.ACTION_BOOT_COMPLETED.equals(act) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(act)) {
-            schedule(c);
-            TrainerWatch.schedule(c);
-            AvailWatch.schedule(c);
-            CallRecUi.watch(c);
-            return;
-        }
         if (AvailWatch.ACTION.equals(act)) {
             CallRecUi.watch(c); // usluga nagrywania rozmow wylaczona przez telefon?
             AvailWatch.schedule(c); // nastepne sprawdzenie (budzik jednorazowy, dziala tez w uspieniu)

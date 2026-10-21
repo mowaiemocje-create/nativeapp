@@ -66,9 +66,15 @@
             android:foregroundServiceType="microphone|mediaPlayback"
             android:exported="false" />
 
-        <!-- Przypomnienie o 20:00 (nagranie i dziennik) + ponowne ustawienie po restarcie telefonu -->
+        <!-- Przypomnienie o 20:00 (nagranie i dziennik) i sprawdzanie w tle (budziki) -->
         <receiver
             android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Po restarcie telefonu / aktualizacji: TYLKO ponowne ustawienie budzików (Android 15: odbiornik
+             BOOT_COMPLETED nie może uruchamiać usług na pierwszym planie — ten niczego nie uruchamia) -->
+        <receiver
+            android:name=".BootReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
