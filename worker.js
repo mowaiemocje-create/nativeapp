@@ -5921,6 +5921,29 @@ var worker_default = {
         await env.DB.prepare("INSERT INTO student_report_job (ns_student_id, days, status, error, requested_by, created_at, started_at, finished_at, tries, extra) VALUES (?, ?, 'queued', NULL, ?, ?, NULL, NULL, 0, ?) ON CONFLICT(ns_student_id) DO UPDATE SET days = excluded.days, status = 'queued', error = NULL, requested_by = excluded.requested_by, created_at = excluded.created_at, started_at = NULL, finished_at = NULL, tries = 0, extra = excluded.extra").bind(sid, days, String(who.email || ""), now, extra).run();
         return json({ ok: true, queued: true, job: { status: "queued", days, created_at: now } });
       }
+      if (url.pathname.startsWith("/research/notes")) {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : { ns_token: url.searchParams.get("ns_token"), ns_email: url.searchParams.get("ns_email"), ns_server: url.searchParams.get("ns_server") };
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/research/notes" && request.method === "GET") return json(await rsNotesList(env));
+        if (url.pathname === "/research/notes/save" && request.method === "POST") {
+          const r = await rsNotesSave(env, who, body);
+          return json(r, r.ok ? 200 : 400);
+        }
+        if (url.pathname === "/research/notes/delete" && request.method === "POST") {
+          await rsNotesTable(env);
+          await env.DB.prepare("UPDATE research_notes SET deleted = 1, updated_by = ?, updated_at = ? WHERE slug = ?").bind(String(who.email || ""), Math.floor(Date.now() / 1e3), String(body.slug || "")).run();
+          return json({ ok: true });
+        }
+      }
       if ((url.pathname === "/research/inventory" || url.pathname === "/research/export") && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -9723,6 +9746,103 @@ async function rsExport(env, url) {
 }
 __name(rsExport, "rsExport");
 __name2(rsExport, "rsExport");
+var RS_DOC_URL = "https://claude.ai/artifact/2jHj5o4mXQRFPzQrqUZo2J";
+var RS_NOTES_SEED = [
+  { slug: "dokument", sort: 10, title: "\u{1F4C4} Dokument dla Politechniki \u015Al\u0105skiej", body: `Pe\u0142ny opis danych, propozycji bada\u0144, sprawdzania automatyki, ogranicze\u0144 i etyki: [Nowa Mowa \u2014 dane do bada\u0144 z Politechnik\u0105 \u015Al\u0105sk\u0105](${RS_DOC_URL})
+
+- Dokument jest prywatny. Przed wys\u0142aniem: otw\xF3rz go \u2192 **Share** \u2192 dodaj osob\u0119 z Politechniki (ogl\u0105danie, komentowanie albo edycja).
+- Gdy w Share nie da si\u0119 doda\u0107 osoby z zewn\u0105trz: kliknij nazw\u0119 dokumentu \u2192 **Export** \u2192 PDF albo Word i wy\u015Blij plik.
+- Plik\xF3w CSV z danymi nie wysy\u0142amy przed podpisaniem umowy i zebraniem zg\xF3d kursant\xF3w.` },
+  { slug: "dane", sort: 20, title: "\u{1F5C2} Jakie dane mamy", body: `Liczby (nagrania, kursanci, godziny, lata, kraje, sytuacje): przycisk **\u{1F4CA} Poka\u017C, ile danych mamy** powy\u017Cej.
+
+| \u0179r\xF3d\u0142o | Co zawiera |
+| --- | --- |
+| Nagrania (PitchRec) | d\u017Awi\u0119k, data i godzina, sytuacja, system mowy, samoocena po nagraniu (1 luz \u2013 5 stres), odleg\u0142o\u015B\u0107 od domu |
+| Oceny trenera | poprawne / do poprawy, kryteria z procentem, komentarz, nagrania niewliczone, system poprawiony przez trenera |
+| Teksty nagra\u0144 | tekst z czasem ka\u017Cdego s\u0142owa (Whisper albo telefon), podzia\u0142 rozmowy na osoby |
+| Miary mowy | tempo w sylabach na minut\u0119, udzia\u0142 ciszy, pauzy \u2265 1 s, s\u0142owa kursanta, zmiany osoby m\xF3wi\u0105cej |
+| Dzienniki | ocena dnia, medytacje, u\u017Cycie \u201Estarej mowy\u201D, samopoczucie w rozmowach |
+| Harmonogramy | okresy kursu, wymagane i wykonane nagrania, system mowy w okresie |
+| Kontakty | telefony mi\u0119dzy kursantami i do trenera, dni telefonu do trenera |
+
+Najwi\u0119ksza warto\u015B\u0107: sytuacja z \u017Cycia + samoocena stresu tu\u017C po rozmowie + nagranie d\u017Awi\u0119ku, powtarzane u tej samej osoby przez miesi\u0105ce.` },
+  { slug: "badania", sort: 30, title: "\u{1F9EA} Proponowane badania", body: `| Nr | Temat | Pytanie | Dane |
+| --- | --- | --- | --- |
+| 1 | Oswajanie l\u0119ku w terenie | Czy samoocena stresu spada z kolejnymi powt\xF3rzeniami tej samej sytuacji i jak szybko? | samoocena, numer nagrania w sytuacji, sytuacja (CSV) |
+| 2 | Tempo mowy na kolejnych systemach | Jak zmienia si\u0119 tempo i pauzy od Basic do Full i czy ocena trenera si\u0119 utrzymuje? | tempo, pauzy, system, ocena (CSV) |
+| 3 | Wyj\u015Bcie poza stref\u0119 komfortu | Czy kursanci nagrywaj\u0105 coraz dalej od domu i w trudniejszych sytuacjach? | odleg\u0142o\u015B\u0107, sytuacja, godzina, samoocena (CSV) |
+| 4 | Cechy g\u0142osu a samoocena stresu | Czy wysoko\u015B\u0107 i zmienno\u015B\u0107 g\u0142osu, g\u0142o\u015Bno\u015B\u0107, pauzy przewiduj\u0105 stres i ocen\u0119 trenera? | pliki audio + CSV |
+| 5 | Wykrywanie niep\u0142ynno\u015Bci w nagraniach z \u017Cycia | Czy automat wykryje przed\u0142u\u017Cenia, blokady i powt\xF3rzenia w ha\u0142asie i przez telefon? | pliki audio + r\u0119cznie oznaczona pr\xF3bka |
+| 6 | Rozpoznawanie mowy u os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105 | Jak bardzo Whisper i telefon wyg\u0142adzaj\u0105 niep\u0142ynno\u015Bci? Jak dok\u0142adny jest podzia\u0142 na osoby? | teksty + r\u0119czny zapis pr\xF3bki |
+| 7 | Ile \u0107wicze\u0144 daje efekt | Czy minuty, regularno\u015B\u0107 i harmonogram wi\u0105\u017C\u0105 si\u0119 z popraw\u0105 oceny i samopoczucia? | wszystkie CSV |
+
+Od razu z CSV: tematy 1, 2, 3, 6 i 7. Tematy 4 i 5 (najbli\u017Csze in\u017Cynierii biomedycznej) wymagaj\u0105 przekazania plik\xF3w d\u017Awi\u0119kowych.` },
+  { slug: "automatyka", sort: 40, title: "\u2705 Jak sprawdzamy automatyk\u0119", body: `Nie ods\u0142uchujemy wszystkich nagra\u0144. Automat sprawdzamy na losowej pr\xF3bce oznaczonej przez ludzi, potem stosujemy go do ca\u0142ego zbioru.
+
+| Co robi automat | Wzorzec | Pr\xF3bka | Miara |
+| --- | --- | --- | --- |
+| Tekst nagrania (Whisper, telefon) | zapis dos\u0142owny z niep\u0142ynno\u015Bciami, r\u0119czny | ok. 100 nagra\u0144 | WER, ile niep\u0142ynno\u015Bci zgin\u0119\u0142o |
+| Podzia\u0142 rozmowy na osoby | r\u0119czne zaznaczenie, kto m\xF3wi | ok. 50 rozm\xF3w | odsetek s\u0142\xF3w przypisanych w\u0142a\u015Bciwej osobie |
+| Tempo i pauzy | pomiar w Praacie | ok. 50 monolog\xF3w | korelacja, \u015Bredni b\u0142\u0105d |
+| Cechy g\u0142osu (openSMILE / Praat) | uznane narz\u0119dzia | wszystkie | odrzucenie nagra\u0144 z przesterem, szumem, za cichych |
+| Wykrywanie niep\u0142ynno\u015Bci (do zbudowania) | dwie osoby niezale\u017Cnie oznaczaj\u0105 | 300\u2013500 fragment\xF3w po kilka sekund | kappa, czu\u0142o\u015B\u0107, precyzja |
+| Ocena trenera | dw\xF3ch trener\xF3w ocenia te same nagrania | ok. 5% nagra\u0144, losowo | kappa Cohena |
+
+Pr\xF3bk\u0119 losujemy z r\xF3\u017Cnych sytuacji, kursant\xF3w, telefon\xF3w i miesi\u0119cy. Oznaczaj\u0105cy nie widz\u0105 wyniku automatu. Trenerzy ods\u0142uchali ju\u017C dziesi\u0105tki tysi\u0119cy nagra\u0144 \u2014 to du\u017Cy zbi\xF3r ocen od ludzi.` },
+  { slug: "ograniczenia", sort: 50, title: "\u26A0\uFE0F Ograniczenia", body: `- Tekst z AI wyg\u0142adza j\u0105kanie: z tekst\xF3w nie policzymy odsetka zaj\u0105kni\u0119\u0107 (%SS).
+- Ocena trenera nie jest zwalidowan\u0105 skal\u0105 \u2014 brakuje pomiaru zgodno\u015Bci oceniaj\u0105cych.
+- Brak grupy kontrolnej \u2014 mo\u017Cna por\xF3wnywa\u0107 kursant\xF3w zaczynaj\u0105cych w r\xF3\u017Cnych miesi\u0105cach.
+- Samoselekcja: najbardziej zmotywowani nagrywaj\u0105 najwi\u0119cej.
+- Niepe\u0142ne dane: nie ka\u017Cde nagranie ma samoocen\u0119, odleg\u0142o\u015B\u0107 od domu albo tekst.
+- Teksty z telefonu maj\u0105 przybli\u017Cone czasy s\u0142\xF3w (pauzy s\u0105 z pomiaru d\u017Awi\u0119ku).` },
+  { slug: "etyka", sort: 60, title: "\u2696\uFE0F Etyka i RODO", body: `- **Zgoda na badania** od ka\u017Cdego kursanta (nieletni \u2014 rodzic), z prawem wycofania; najpro\u015Bciej w PitchRec i w umowie kursu.
+- **Umowa o wsp\xF3\u0142pracy i powierzeniu danych** z Politechnik\u0105: cel, zakres, czas przechowywania, dost\u0119p.
+- **Opinia komisji bioetycznej** \u2014 zwykle po stronie uczelni.
+- **Pseudonimy** s\u0105 ju\u017C w eksporcie; klucz zostaje u nas, wi\u0119c tylko my usuwamy dane osoby, kt\xF3ra wycofa zgod\u0119.
+- **Pliki d\u017Awi\u0119kowe** rozpoznaj\u0105 osob\u0119 \u2014 tylko dla os\xF3b z umowy, bez publikowania.
+- **Osoby trzecie** (sprzedawcy, przechodnie) te\u017C s\u0105 w nagraniach \u2014 do akustyki lepiej monologi albo wypowiedzi kursanta.` },
+  { slug: "kroki", sort: 70, title: "\u{1F4CB} Co zbiera\u0107 teraz i nast\u0119pne kroki", body: `**Do aplikacji (za rok mocne dane):**
+- kwestionariusze OASES, S-24, UTBAS-6 \u2014 start, po 3, 6 i 12 miesi\u0105cach (sprawdzi\u0107 polskie wersje i licencje);
+- sta\u0142e nagranie pomiarowe: ten sam tekst + 2 minuty monologu, w tych samych terminach;
+- podw\xF3jna ocena ok. 5% nagra\u0144 przez dw\xF3ch trener\xF3w;
+- zgoda na badania przy rejestracji.
+
+**Nast\u0119pne kroki:**
+- [ ] Pobra\u0107 zestawienie danych i dopisa\u0107 liczby do dokumentu
+- [ ] Wybra\u0107 z Politechnik\u0105 1\u20132 tematy na start (np. 1 i 6)
+- [ ] Umowa o wsp\xF3\u0142pracy i powierzeniu danych
+- [ ] Zgoda na badania w PitchRec i w umowie kursu
+- [ ] Pr\xF3bny eksport CSV (np. 3 miesi\u0105ce) do oceny przez uczelni\u0119
+- [ ] Ustali\u0107 kwestionariusze i nagranie pomiarowe` }
+];
+async function rsNotesTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS research_notes (slug TEXT PRIMARY KEY, title TEXT, body TEXT, sort INTEGER, updated_by TEXT, updated_at INTEGER, deleted INTEGER DEFAULT 0)").run();
+  const now = Math.floor(Date.now() / 1e3);
+  await env.DB.batch(RS_NOTES_SEED.map((n) => env.DB.prepare("INSERT OR IGNORE INTO research_notes (slug, title, body, sort, updated_by, updated_at, deleted) VALUES (?, ?, ?, ?, 'claude', ?, 0)").bind(n.slug, n.title, n.body, n.sort, now)));
+}
+__name(rsNotesTable, "rsNotesTable");
+__name2(rsNotesTable, "rsNotesTable");
+async function rsNotesList(env) {
+  await rsNotesTable(env);
+  const rs = await env.DB.prepare("SELECT slug, title, body, sort, updated_by, updated_at FROM research_notes WHERE COALESCE(deleted, 0) = 0 ORDER BY sort, updated_at").all();
+  return { ok: true, notes: rs.results || [], doc_url: RS_DOC_URL };
+}
+__name(rsNotesList, "rsNotesList");
+__name2(rsNotesList, "rsNotesList");
+async function rsNotesSave(env, who, b) {
+  await rsNotesTable(env);
+  const title = String(b.title || "").trim().slice(0, 200), body = String(b.body || "").slice(0, 1e5);
+  if (!title) return { ok: false, error: "Brak tytu\u0142u" };
+  let slug = String(b.slug || "").trim();
+  if (!slug) {
+    slug = "n-" + Date.now().toString(36);
+  }
+  const sort = Number.isFinite(Number(b.sort)) ? Number(b.sort) : 1e3;
+  await env.DB.prepare("INSERT INTO research_notes (slug, title, body, sort, updated_by, updated_at, deleted) VALUES (?, ?, ?, ?, ?, ?, 0) ON CONFLICT(slug) DO UPDATE SET title = excluded.title, body = excluded.body, sort = excluded.sort, updated_by = excluded.updated_by, updated_at = excluded.updated_at, deleted = 0").bind(slug, title, body, sort, String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+  return { ok: true, slug };
+}
+__name(rsNotesSave, "rsNotesSave");
+__name2(rsNotesSave, "rsNotesSave");
 async function txRecordInfo(env, rid) {
   if (!rid || !env.HYPERDRIVE) return {};
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
