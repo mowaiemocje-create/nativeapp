@@ -5921,6 +5921,14 @@ var worker_default = {
         await env.DB.prepare("INSERT INTO student_report_job (ns_student_id, days, status, error, requested_by, created_at, started_at, finished_at, tries, extra) VALUES (?, ?, 'queued', NULL, ?, ?, NULL, NULL, 0, ?) ON CONFLICT(ns_student_id) DO UPDATE SET days = excluded.days, status = 'queued', error = NULL, requested_by = excluded.requested_by, created_at = excluded.created_at, started_at = NULL, finished_at = NULL, tries = 0, extra = excluded.extra").bind(sid, days, String(who.email || ""), now, extra).run();
         return json({ ok: true, queued: true, job: { status: "queued", days, created_at: now } });
       }
+      if ((url.pathname === "/research/inventory" || url.pathname === "/research/export") && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/research/inventory") return json(await rsInventory(env));
+        const ex = await rsExport(env, url);
+        return new Response(ex.csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "X-Rows": String(ex.n), "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Rows" } });
+      }
       if (url.pathname === "/talk-stats" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -7648,35 +7656,71 @@ async function handleTrainerVisitDates(request, env, url) {
       } catch (e) {
       }
       let from = stu && stu.created_at ? warsawDay(stu.created_at) : "1970-01-01";
-      stats = v.rows.map((row) => {
-        const visitDay = warsawDay(row.date);
-        const to = prevDay(visitDay);
-        const per = {};
+      const addDays = /* @__PURE__ */ __name((ymd, n) => {
+        const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+        d.setUTCDate(d.getUTCDate() + n);
+        return d.toISOString().slice(0, 10);
+      }, "addDays");
+      const periods = v.rows.map((row) => {
+        const visitDay = warsawDay(row.date), to = prevDay(visitDay);
+        const gm = String(row.additional_requirements || "").match(/⏰\s*Dogrywka:\s*(\d+)/);
+        const p = { row, from, to, grace: gm ? Math.min(20, Number(gm[1])) : 3, per: {} };
         reqs.filter((r) => r.visit_date_id === row.id).forEach((r) => {
-          per[r.record_category_id] = { category_id: r.record_category_id, category_name: r.name_pl || catNames[r.record_category_id] || "", required_records: Number(r.records_count) || 0, all_records: 0, correct_records: 0 };
+          p.per[r.record_category_id] = { category_id: r.record_category_id, category_name: r.name_pl || catNames[r.record_category_id] || "", required_records: Number(r.records_count) || 0, all_records: 0, correct_records: 0, late_records: 0 };
         });
-        recDays.forEach((r) => {
-          if (!r.day || r.day < from || r.day > to) return;
-          const c = per[r.cat] || (per[r.cat] = { category_id: r.cat, category_name: catNames[r.cat] || "", required_records: 0, all_records: 0, correct_records: 0 });
+        from = visitDay;
+        return p;
+      });
+      const pOf = /* @__PURE__ */ __name((day) => periods.findIndex((p) => day >= p.from && day <= p.to), "pOf");
+      const cell = /* @__PURE__ */ __name((p, cat) => p.per[cat] || (p.per[cat] = { category_id: cat, category_name: catNames[cat] || "", required_records: 0, all_records: 0, correct_records: 0, late_records: 0 }), "cell");
+      const owner = recDays.map((r) => r.day ? pOf(r.day) : -1);
+      recDays.forEach((r, i) => {
+        if (owner[i] < 0) return;
+        const c = cell(periods[owner[i]], r.cat);
+        c.all_records++;
+        if (r.ok) c.correct_records++;
+      });
+      const order = recDays.map((r, i) => i).filter((i) => recDays[i].day && recDays[i].ok).sort((a, b) => recDays[a].day.localeCompare(recDays[b].day));
+      periods.forEach((p, pi) => {
+        if (!p.grace) return;
+        const end = periods[pi + 1] ? periods[pi + 1].to : "9999-12-31";
+        let taken = 0;
+        for (const i of order) {
+          if (taken >= p.grace) break;
+          const r = recDays[i];
+          if (r.day <= p.to || r.day > end) continue;
+          if (owner[i] !== -1 && owner[i] <= pi) continue;
+          const c = p.per[r.cat];
+          if (!c || !(c.required_records > 0) || c.correct_records >= c.required_records) continue;
+          if (owner[i] >= 0) {
+            const q = cell(periods[owner[i]], r.cat);
+            q.all_records--;
+            q.correct_records--;
+          }
           c.all_records++;
-          if (r.ok) c.correct_records++;
-        });
-        const cats = Object.values(per);
-        const dia = diaryDays.filter((d) => d.day && d.day >= from && d.day <= to);
-        const out = {
-          visit_id: row.id,
-          start_range: from,
-          end_range: to,
+          c.correct_records++;
+          c.late_records++;
+          owner[i] = pi;
+          taken++;
+        }
+      });
+      stats = periods.map((p) => {
+        const cats = Object.values(p.per).filter((c) => c.required_records > 0 || c.all_records > 0);
+        const dia = diaryDays.filter((d) => d.day && d.day >= p.from && d.day <= p.to);
+        return {
+          visit_id: p.row.id,
+          start_range: p.from,
+          end_range: p.to,
           recorded_records_categories: cats,
+          grace_days: p.grace,
+          late_records: cats.reduce((a, c) => a + (c.late_records || 0), 0),
           all_records: cats.reduce((a, c) => a + c.all_records, 0),
           correct_records: cats.reduce((a, c) => a + c.correct_records, 0),
           required_records: cats.reduce((a, c) => a + c.required_records, 0),
           all_diaries: dia.length,
           correct_diaries: dia.filter((d) => d.ok).length,
-          required_diaries: Number(row.required_diaries_count) || 0
+          required_diaries: Number(p.row.required_diaries_count) || 0
         };
-        from = visitDay;
-        return out;
       });
     }
     return json({ ok: true, collection: visits, stats });
@@ -9350,6 +9394,335 @@ async function srJobTick(env) {
 }
 __name(srJobTick, "srJobTick");
 __name2(srJobTick, "srJobTick");
+var RS_MOOD = { luz: 1, komfortowo: 2, neutralnie: 3, niekomfortowo: 4, stres: 5 };
+async function rsSalt(env) {
+  if (env.RESEARCH_SALT) return String(env.RESEARCH_SALT);
+  await ensureTranscriptTables(env);
+  const r = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'research_salt'").first();
+  if (r && r.v) return r.v;
+  const b = new Uint8Array(24);
+  crypto.getRandomValues(b);
+  const v = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('research_salt', ?) ON CONFLICT(k) DO NOTHING").bind(v).run();
+  const again = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'research_salt'").first();
+  return again && again.v || v;
+}
+__name(rsSalt, "rsSalt");
+__name2(rsSalt, "rsSalt");
+async function rsPseudo(salt) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(salt), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const cache = {};
+  return async (prefix, id) => {
+    const k = prefix + ":" + id;
+    if (cache[k]) return cache[k];
+    const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(k)));
+    return cache[k] = prefix + "-" + [...sig.slice(0, 5)].map((x) => x.toString(16).padStart(2, "0")).join("");
+  };
+}
+__name(rsPseudo, "rsPseudo");
+__name2(rsPseudo, "rsPseudo");
+function rsCsv(rows, cols) {
+  const esc = /* @__PURE__ */ __name((v) => {
+    if (v === null || v === void 0) return "";
+    const s = String(v);
+    return /[",;\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }, "esc");
+  return "\uFEFF" + cols.join(",") + "\n" + rows.map((r) => cols.map((c) => esc(r[c])).join(",")).join("\n") + "\n";
+}
+__name(rsCsv, "rsCsv");
+__name2(rsCsv, "rsCsv");
+function rsFile(file) {
+  const f = String(file || "").split("/").pop();
+  const core = f.replace(/\.(mp3|m4a|wav|ogg|webm|aac)$/i, "").replace(/_(GPS|teren|dom)[\s\S]*$/i, "");
+  const m = core.match(/_-([A-Za-z][A-Za-z0-9]*)-([a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+)$/);
+  const tm = f.match(/_(\d{1,2})h-(\d{1,2})m-(\d{1,2})s_/), ter = f.match(/teren-(\d+(?:\.\d+)?)km/i);
+  return {
+    system: m ? m[1] : null,
+    mood: m ? m[2].toLowerCase() : null,
+    hour: tm ? Number(tm[1]) : null,
+    teren_km: ter ? Number(ter[1]) : null,
+    has_gps: /_GPS-?\d/.test(f),
+    dom: /_dom(\.|_|$)/i.test(f)
+  };
+}
+__name(rsFile, "rsFile");
+__name2(rsFile, "rsFile");
+var RS_WD = ["nd", "pn", "wt", "sr", "cz", "pt", "so"];
+function rsWarsaw(d) {
+  if (!d) return { day: null, hour: null };
+  const p = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(d instanceof Date ? d : new Date(d));
+  const g = /* @__PURE__ */ __name((t) => (p.find((x) => x.type === t) || {}).value, "g");
+  return { day: g("year") + "-" + g("month") + "-" + g("day"), hour: Number(g("hour")) };
+}
+__name(rsWarsaw, "rsWarsaw");
+__name2(rsWarsaw, "rsWarsaw");
+async function rsInventory(env) {
+  await ensureTranscriptTables(env);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  const out = {};
+  try {
+    const q = /* @__PURE__ */ __name(async (sql, p) => (await pg.query(sql, p || [])).rows, "q");
+    out.records = (await q(`SELECT COUNT(*)::int AS n, COUNT(DISTINCT user_id)::int AS students, MIN(COALESCE(date, created_at::date))::text AS first, MAX(COALESCE(date, created_at::date))::text AS last,
+        COUNT(*) FILTER (WHERE reviewed_at IS NOT NULL)::int AS reviewed, COUNT(*) FILTER (WHERE is_correct = true)::int AS correct,
+        COUNT(*) FILTER (WHERE review_details LIKE '\u{1F6AB}%')::int AS not_counted,
+        COUNT(*) FILTER (WHERE record_file ~ '_-[A-Za-z][A-Za-z0-9]*-(luz|komfortowo|neutralnie|niekomfortowo|stres)')::int AS with_mood,
+        COUNT(*) FILTER (WHERE record_file LIKE '%\\_GPS%')::int AS with_gps, COUNT(*) FILTER (WHERE record_file LIKE '%teren-%')::int AS with_teren
+      FROM records WHERE deleted_at IS NULL AND record_file IS NOT NULL`))[0];
+    out.by_year = await q(`SELECT EXTRACT(YEAR FROM COALESCE(date, created_at::date))::int AS year, COUNT(*)::int AS n, COUNT(DISTINCT user_id)::int AS students
+      FROM records WHERE deleted_at IS NULL AND record_file IS NOT NULL GROUP BY 1 ORDER BY 1`);
+    out.by_country = await q(`SELECT COALESCE(u.country, '?') AS country, COUNT(DISTINCT r.user_id)::int AS students, COUNT(*)::int AS n
+      FROM records r JOIN users u ON u.id = r.user_id WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL GROUP BY 1 ORDER BY 3 DESC`);
+    out.by_category = await q(`SELECT COALESCE(rct.name, rc.name) AS category, COUNT(*)::int AS n, COUNT(DISTINCT r.user_id)::int AS students
+      FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+      WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 40`);
+    out.per_student = (await q(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY n)::int AS median, MAX(n)::int AS max,
+        COUNT(*) FILTER (WHERE n >= 50)::int AS ge50, COUNT(*) FILTER (WHERE n >= 200)::int AS ge200, COUNT(*) FILTER (WHERE months >= 3)::int AS months3plus
+      FROM (SELECT user_id, COUNT(*) AS n, (MAX(COALESCE(date, created_at::date)) - MIN(COALESCE(date, created_at::date))) / 30 AS months FROM records
+            WHERE deleted_at IS NULL AND record_file IS NOT NULL GROUP BY user_id) x`))[0];
+    try {
+      out.rates = (await q(`SELECT COUNT(*)::int AS n, COUNT(DISTINCT record_id)::int AS records FROM record_rates`))[0];
+    } catch (e) {
+      out.rates = null;
+    }
+    try {
+      out.diaries = (await q(`SELECT COUNT(*)::int AS n, COUNT(DISTINCT user_id)::int AS students FROM diaries WHERE deleted_at IS NULL`))[0];
+    } catch (e) {
+      out.diaries = null;
+    }
+    try {
+      out.visits = (await q(`SELECT COUNT(*)::int AS n, COUNT(DISTINCT student_id)::int AS students FROM visit_dates`))[0];
+    } catch (e) {
+      out.visits = null;
+    }
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const d1 = /* @__PURE__ */ __name(async (sql) => {
+    try {
+      return await env.DB.prepare(sql).first();
+    } catch (e) {
+      return null;
+    }
+  }, "d1");
+  out.transcripts = await d1(`SELECT COUNT(*) AS n, ROUND(SUM(dur) / 3600.0, 1) AS hours, SUM(CASE WHEN model LIKE 'android-asr%' THEN 1 ELSE 0 END) AS phone,
+      SUM(CASE WHEN speakers IS NOT NULL THEN 1 ELSE 0 END) AS split, SUM(CASE WHEN fixed IS NOT NULL THEN 1 ELSE 0 END) AS fixed,
+      SUM(CASE WHEN spk_people IS NOT NULL THEN 1 ELSE 0 END) AS people, SUM(CASE WHEN edited_by IS NOT NULL THEN 1 ELSE 0 END) AS edited
+    FROM record_transcript WHERE status = 'ok'`);
+  out.special_tasks = await d1(`SELECT COUNT(*) AS n, COUNT(DISTINCT ns_student_id) AS students FROM special_task_done`);
+  out.disc = await d1(`SELECT COUNT(*) AS n, COUNT(DISTINCT ns_user_id) AS students FROM disc_results`);
+  out.call_days = await d1(`SELECT COUNT(*) AS n, COUNT(DISTINCT ns_student_id) AS students FROM call_days`);
+  out.review_log = await d1(`SELECT COUNT(*) AS n, COUNT(DISTINCT trainer_email) AS trainers FROM review_log`);
+  out.system_override = await d1(`SELECT COUNT(*) AS n FROM record_system_override`);
+  return { ok: true, inventory: out, generated_at: (/* @__PURE__ */ new Date()).toISOString() };
+}
+__name(rsInventory, "rsInventory");
+__name2(rsInventory, "rsInventory");
+async function rsExport(env, url) {
+  const kind = url.searchParams.get("kind") || "recordings";
+  const P = await rsPseudo(await rsSalt(env));
+  await ensureTranscriptTables(env);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  try {
+    if (kind === "students") {
+      const rows2 = (await pg.query(`SELECT u.id::text AS id, u.country, u.created_at, to_jsonb(u) ->> 'gender' AS gender, to_jsonb(u) ->> 'birth_date' AS birth_date,
+          COUNT(r.id)::int AS n, MIN(COALESCE(r.date, r.created_at::date))::text AS first, MAX(COALESCE(r.date, r.created_at::date))::text AS last,
+          COUNT(r.id) FILTER (WHERE r.is_correct = true)::int AS correct, COUNT(r.id) FILTER (WHERE r.reviewed_at IS NOT NULL)::int AS reviewed
+        FROM users u JOIN records r ON r.user_id = u.id AND r.deleted_at IS NULL AND r.record_file IS NOT NULL
+        GROUP BY u.id ORDER BY MIN(r.created_at)`)).rows;
+      let disc = {};
+      try {
+        for (const x of (await env.DB.prepare("SELECT ns_user_id, profile_code FROM disc_results ORDER BY created_at").all()).results || []) disc[x.ns_user_id] = x.profile_code;
+      } catch (e) {
+      }
+      let tasks = {};
+      try {
+        for (const x of (await env.DB.prepare("SELECT ns_student_id, COUNT(*) AS n FROM special_task_done GROUP BY ns_student_id").all()).results || []) tasks[x.ns_student_id] = x.n;
+      } catch (e) {
+      }
+      const yr = /* @__PURE__ */ __name((d) => {
+        const y = d ? Number(String(d).slice(0, 4)) : null;
+        if (!y) return null;
+        const a = (/* @__PURE__ */ new Date()).getUTCFullYear() - y;
+        return a < 18 ? "<18" : a < 30 ? "18-29" : a < 45 ? "30-44" : a < 60 ? "45-59" : "60+";
+      }, "yr");
+      const out2 = [];
+      for (const r of rows2) out2.push({
+        pid: await P("K", r.id),
+        country: r.country || "",
+        start_month: r.created_at ? new Date(r.created_at).toISOString().slice(0, 7) : "",
+        gender: r.gender || "",
+        age_band: yr(r.birth_date) || "",
+        recordings: r.n,
+        reviewed: r.reviewed,
+        correct: r.correct,
+        first_record: r.first,
+        last_record: r.last,
+        disc_profile: disc[r.id] || "",
+        special_tasks_done: tasks[r.id] || 0
+      });
+      return { csv: rsCsv(out2, ["pid", "country", "start_month", "gender", "age_band", "recordings", "reviewed", "correct", "first_record", "last_record", "disc_profile", "special_tasks_done"]), n: out2.length };
+    }
+    if (kind === "diaries") {
+      const rows2 = (await pg.query(`SELECT d.user_id::text AS uid, d.date, d.is_correct, to_jsonb(d) AS j FROM diaries d WHERE d.deleted_at IS NULL ORDER BY d.date`)).rows;
+      const out2 = [];
+      for (const r of rows2) {
+        const j = r.j || {};
+        out2.push({
+          pid: await P("K", r.uid),
+          date: r.date ? rsWarsaw(r.date).day : "",
+          is_correct: r.is_correct === true ? 1 : r.is_correct === false ? 0 : "",
+          meditation_count: j.meditation_count != null ? j.meditation_count : "",
+          old_speech_usage: j.old_speech_usage === true ? 1 : j.old_speech_usage === false ? 0 : "",
+          talk_feeling_id: j.talk_feeling_id || ""
+        });
+      }
+      return { csv: rsCsv(out2, ["pid", "date", "is_correct", "meditation_count", "old_speech_usage", "talk_feeling_id"]), n: out2.length };
+    }
+    const month = /^\d{4}-\d{2}$/.test(url.searchParams.get("month") || "") ? url.searchParams.get("month") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
+    const from = month + "-01", toD = /* @__PURE__ */ new Date(from + "T12:00:00Z");
+    toD.setUTCMonth(toD.getUTCMonth() + 1);
+    const to = toD.toISOString().slice(0, 10);
+    const rows = (await pg.query(`SELECT r.id::text AS id, r.user_id::text AS uid, COALESCE(r.date, r.created_at::date)::text AS d, r.created_at, r.record_file, r.is_correct, r.reviewed_at,
+        r.review_details LIKE '\u{1F6AB}%' AS not_counted, COALESCE(rct.name, rc.name) AS category, u.country, u.created_at AS u_created,
+        (SELECT string_agg(COALESCE(rrt.name, '?') || ':' || COALESCE(ru.percent_mark::text, ''), ';') FROM record_rates rr
+           LEFT JOIN record_rate_category_translations rrt ON rrt.record_rate_category_id = rr.record_rate_category_id AND rrt.locale = 'pl'
+           LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id WHERE rr.record_id = r.id) AS rates,
+        (SELECT COUNT(*) FROM records p WHERE p.user_id = r.user_id AND p.deleted_at IS NULL AND p.record_file IS NOT NULL AND p.created_at < r.created_at)::int AS idx_all,
+        (SELECT COUNT(*) FROM records p WHERE p.user_id = r.user_id AND p.record_category_id = r.record_category_id AND p.deleted_at IS NULL AND p.record_file IS NOT NULL AND p.created_at < r.created_at)::int AS idx_cat
+      FROM records r JOIN users u ON u.id = r.user_id
+      LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+      WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL AND COALESCE(r.date, r.created_at::date) >= $1::date AND COALESCE(r.date, r.created_at::date) < $2::date
+      ORDER BY r.created_at`, [from, to])).rows;
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+    const tx = {}, ov = {};
+    for (let i = 0; i < rows.length; i += 90) {
+      const ch = rows.slice(i, i + 90).map((r) => r.id);
+      const rs = await env.DB.prepare(`SELECT ns_record_id, dur, words, speakers, spk_names, spk_src, model FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${ch.map(() => "?").join(",")})`).bind(...ch).all();
+      for (const x of rs.results || []) tx[x.ns_record_id] = x;
+      try {
+        const o = await env.DB.prepare(`SELECT ns_record_id, system FROM record_system_override WHERE ns_record_id IN (${ch.map(() => "?").join(",")})`).bind(...ch).all();
+        for (const x of o.results || []) ov[x.ns_record_id] = x.system;
+      } catch (e) {
+      }
+    }
+    const out = [];
+    for (const r of rows) {
+      const f = rsFile(r.record_file), w = rsWarsaw(r.created_at), t = tx[r.id];
+      const o = {
+        pid: await P("K", r.uid),
+        rid: await P("R", r.id),
+        date: r.d,
+        weekday: RS_WD[(/* @__PURE__ */ new Date(r.d + "T12:00:00Z")).getUTCDay()],
+        hour: f.hour !== null ? f.hour : w.hour,
+        days_since_start: r.u_created ? Math.floor((Date.parse(r.d + "T12:00:00Z") - new Date(r.u_created).getTime()) / 864e5) : "",
+        record_no: r.idx_all + 1,
+        record_no_in_category: r.idx_cat + 1,
+        country: r.country || "",
+        category: r.category || "",
+        system: ov[r.id] || f.system || "",
+        system_by_trainer: ov[r.id] ? 1 : 0,
+        mood: f.mood || "",
+        mood_level: f.mood ? RS_MOOD[f.mood] || "" : "",
+        teren_km: f.teren_km !== null ? f.teren_km : "",
+        has_gps: f.has_gps ? 1 : 0,
+        at_home: f.dom ? 1 : 0,
+        reviewed: r.reviewed_at ? 1 : 0,
+        is_correct: r.is_correct === true ? 1 : r.is_correct === false ? 0 : "",
+        not_counted: r.not_counted ? 1 : 0,
+        rates: r.rates || ""
+      };
+      if (t) {
+        let words = [], sp = null, names = {};
+        try {
+          words = JSON.parse(t.words || "[]");
+        } catch (e) {
+        }
+        try {
+          sp = t.speakers ? JSON.parse(t.speakers) : null;
+        } catch (e) {
+        }
+        try {
+          names = t.spk_names ? JSON.parse(t.spk_names) || {} : {};
+        } catch (e) {
+        }
+        const spOk = sp && sp.length === words.length, persons = spOk ? new Set(sp).size : 1;
+        let kIdx = null;
+        if (spOk && persons > 1) {
+          for (const k of Object.keys(names)) if (/kursant/i.test(String(names[k]))) {
+            kIdx = Number(k);
+            break;
+          }
+          if (kIdx === null && t.spk_src === "ai-text") kIdx = 0;
+        }
+        const m = persons < 2 ? srMeasure(words, t.dur, 20) : null;
+        Object.assign(o, {
+          dur_s: Math.round((Number(t.dur) || 0) * 10) / 10,
+          text_source: /^android-asr/.test(String(t.model || "")) ? "phone" : "whisper",
+          words: words.length,
+          speakers: persons,
+          student_words: persons < 2 ? words.length : kIdx !== null ? sp.filter((x) => x === kIdx).length : "",
+          turns: spOk ? sp.reduce((a, x, i) => a + (i && x !== sp[i - 1] ? 1 : 0), 0) : 0,
+          syl_min: m ? m.syl_min : "",
+          syl_min_speech: m ? m.syl_min_speech : "",
+          pause_pct: m ? m.pause_pct : "",
+          pauses_1s: m ? m.pauses_1s : ""
+        });
+      }
+      out.push(o);
+    }
+    const cols = [
+      "pid",
+      "rid",
+      "date",
+      "weekday",
+      "hour",
+      "days_since_start",
+      "record_no",
+      "record_no_in_category",
+      "country",
+      "category",
+      "system",
+      "system_by_trainer",
+      "mood",
+      "mood_level",
+      "teren_km",
+      "has_gps",
+      "at_home",
+      "reviewed",
+      "is_correct",
+      "not_counted",
+      "rates",
+      "dur_s",
+      "text_source",
+      "words",
+      "speakers",
+      "student_words",
+      "turns",
+      "syl_min",
+      "syl_min_speech",
+      "pause_pct",
+      "pauses_1s"
+    ];
+    return { csv: rsCsv(out, cols), n: out.length, month };
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+}
+__name(rsExport, "rsExport");
+__name2(rsExport, "rsExport");
 async function txRecordInfo(env, rid) {
   if (!rid || !env.HYPERDRIVE) return {};
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
