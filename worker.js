@@ -5921,6 +5921,42 @@ var worker_default = {
         await env.DB.prepare("INSERT INTO student_report_job (ns_student_id, days, status, error, requested_by, created_at, started_at, finished_at, tries, extra) VALUES (?, ?, 'queued', NULL, ?, ?, NULL, NULL, 0, ?) ON CONFLICT(ns_student_id) DO UPDATE SET days = excluded.days, status = 'queued', error = NULL, requested_by = excluded.requested_by, created_at = excluded.created_at, started_at = NULL, finished_at = NULL, tries = 0, extra = excluded.extra").bind(sid, days, String(who.email || ""), now, extra).run();
         return json({ ok: true, queued: true, job: { status: "queued", days, created_at: now } });
       }
+      if (url.pathname === "/offers/send" && request.method === "POST") return await handleOfferSend(request, env);
+      if (url.pathname.startsWith("/offers/reminders")) {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : { ns_token: url.searchParams.get("ns_token"), ns_email: url.searchParams.get("ns_email"), ns_server: url.searchParams.get("ns_server") };
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        await ofTables(env);
+        if (url.pathname === "/offers/reminders/deposit" && request.method === "POST") {
+          const on = body.on !== false;
+          await env.DB.prepare("UPDATE course_reminders SET deposit_at = ?, deposit_by = ? WHERE id = ?").bind(on ? Math.floor(Date.now() / 1e3) : null, on ? String(who.email || "") : null, Number(body.id) || 0).run();
+          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(Number(body.id) || 0).first();
+          return json({ ok: true, send_on: r ? ofAddDays(r.start_date, -7) : null });
+        }
+        if (url.pathname === "/offers/reminders/send-now" && request.method === "POST") {
+          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(Number(body.id) || 0).first();
+          if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
+          const res = await ofSendCourseInfo(env, r);
+          return json(res.ok ? { ok: true } : { error: res.error }, res.ok ? 200 : 502);
+        }
+        if (url.pathname === "/offers/reminders/preview" && request.method === "GET") {
+          return json({ ok: true, html: ofCourseInfoHtml(String(url.searchParams.get("start") || "2026-01-01")) });
+        }
+        if (url.pathname === "/offers/reminders/cancel" && request.method === "POST") {
+          await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
+          return json({ ok: true });
+        }
+        const rs = await env.DB.prepare("SELECT id, to_email, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 100").all();
+        return json({ ok: true, reminders: rs.results || [], to: ofReminderTo(env) });
+      }
       if (url.pathname.startsWith("/research/notes")) {
         let body = {};
         if (request.method === "POST") {
@@ -6563,6 +6599,8 @@ var worker_default = {
     ctx.waitUntil(transcribeTick(env).catch(() => {
     }));
     ctx.waitUntil(srJobTick(env).catch(() => {
+    }));
+    ctx.waitUntil(ofReminderTick(env).catch(() => {
     }));
   }
 };
@@ -9843,6 +9881,167 @@ async function rsNotesSave(env, who, b) {
 }
 __name(rsNotesSave, "rsNotesSave");
 __name2(rsNotesSave, "rsNotesSave");
+function ofReminderTo(env) {
+  return String(env.COURSE_REMINDER_TO || "nowamowa@gmail.com").trim();
+}
+__name(ofReminderTo, "ofReminderTo");
+async function ofTables(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS course_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, student_name TEXT, start_date TEXT NOT NULL, child INTEGER, created_by TEXT, created_at INTEGER, sent_at INTEGER, cancelled INTEGER DEFAULT 0, error TEXT, deposit_at INTEGER, deposit_by TEXT)").run();
+  for (const c of ["deposit_at INTEGER", "deposit_by TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
+    } catch (e) {
+    }
+  }
+}
+__name(ofTables, "ofTables");
+__name2(ofTables, "ofTables");
+function ofMime(o) {
+  const imgs = [];
+  const html = String(o.html || "").replace(/src=(["'])data:(image\/[a-z+.-]+);base64,([A-Za-z0-9+/=\s]+)\1/gi, (m2, q, type, data) => {
+    const cid = "img" + imgs.length + "_" + crypto.randomUUID().slice(0, 8) + "@nowamowa";
+    imgs.push({ cid, type, data: data.replace(/\s+/g, "") });
+    return "src=" + q + "cid:" + cid + q;
+  });
+  const bMix = "nsmix_" + crypto.randomUUID().replace(/-/g, ""), bRel = "nsrel_" + crypto.randomUUID().replace(/-/g, "");
+  const headers = [
+    "From: " + mimeWord(o.fromName || "Nowa Mowa") + (o.from ? " <" + o.from + ">" : ""),
+    "To: " + o.to,
+    o.cc ? "Cc: " + o.cc : null,
+    o.replyTo ? "Reply-To: " + o.replyTo : null,
+    "Subject: " + mimeWord(o.subject || ""),
+    "MIME-Version: 1.0",
+    'Content-Type: multipart/mixed; boundary="' + bMix + '"'
+  ].filter(Boolean);
+  let m = headers.join("\r\n") + "\r\n\r\n--" + bMix + '\r\nContent-Type: multipart/related; boundary="' + bRel + '"\r\n\r\n--' + bRel + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" + wrap76(b64Utf8(html)) + "\r\n";
+  imgs.forEach((im, i) => {
+    const ext = (im.type.split("/")[1] || "png").replace("jpeg", "jpg").replace(/\+.*/, "");
+    m += "--" + bRel + "\r\nContent-Type: " + im.type + '; name="obraz' + i + "." + ext + '"\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <' + im.cid + '>\r\nContent-Disposition: inline; filename="obraz' + i + "." + ext + '"\r\n\r\n' + wrap76(im.data) + "\r\n";
+  });
+  m += "--" + bRel + "--\r\n";
+  if (o.pdf) m += "--" + bMix + '\r\nContent-Type: application/pdf; name="' + mimeWord(o.filename || "umowa.pdf") + '"\r\nContent-Disposition: attachment; filename="' + mimeWord(o.filename || "umowa.pdf") + '"\r\nContent-Transfer-Encoding: base64\r\n\r\n' + wrap76(o.pdf) + "\r\n";
+  return m + "--" + bMix + "--";
+}
+__name(ofMime, "ofMime");
+__name2(ofMime, "ofMime");
+async function ofGmailSend(env, mime) {
+  const token = await googleOAuthAccessToken(env);
+  if (!token) return { ok: false, error: "Konto Google nie jest po\u0142\u0105czone \u2014 admin: \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz" };
+  const r = await fetch("https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + token, "Content-Type": "message/rfc822" },
+    body: mime
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = d && d.error && d.error.message || "status " + r.status;
+    if (r.status === 403 || /insufficient|scope/i.test(msg)) return { ok: false, error: "Po\u0142\u0105czone konto Google nie ma zgody na wysy\u0142anie maili \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Roz\u0142\u0105cz i po\u0142\u0105cz ponownie. (" + msg + ")" };
+    return { ok: false, error: "Gmail: " + msg };
+  }
+  return { ok: true, id: d.id || null };
+}
+__name(ofGmailSend, "ofGmailSend");
+__name2(ofGmailSend, "ofGmailSend");
+async function handleOfferSend(request, env) {
+  let b = {};
+  try {
+    b = await request.json();
+  } catch (e) {
+  }
+  const who = await contactAuth(env, b.ns_token, b.ns_email, b.ns_server);
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+  const to = String(b.to || "").trim();
+  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i.test(to)) return json({ error: "Nieprawid\u0142owy adres e-mail kursanta" }, 400);
+  const pdf = String(b.pdf_base64 || "").replace(/\s+/g, "");
+  if (pdf.length > 14e6 || String(b.html || "").length > 8e6) return json({ error: "Wiadomo\u015B\u0107 jest za du\u017Ca" }, 400);
+  await ensureGoogleTables(env);
+  const account = await appSettingGet(env, "google_account") || "";
+  const subject = String(b.subject || "Nowa Mowa").slice(0, 200);
+  const mime = ofMime({
+    from: account,
+    fromName: "Nowa Mowa",
+    to,
+    cc: b.cc_me ? who.email : null,
+    replyTo: who.email,
+    subject,
+    html: b.html,
+    pdf: pdf || null,
+    filename: String(b.filename || "umowa.pdf").replace(/[^\w.\-ąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g, "_").slice(0, 120)
+  });
+  const s = await ofGmailSend(env, mime);
+  if (!s.ok) return json({ error: s.error }, 502);
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+    await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", to, subject, who.email, s.id, Math.floor(Date.now() / 1e3)).run();
+  } catch (e) {
+  }
+  let reminder = null;
+  const rm = b.reminder;
+  if (rm && /^\d{4}-\d{2}-\d{2}$/.test(String(rm.start || ""))) {
+    await ofTables(env);
+    await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE LOWER(to_email) = LOWER(?) AND start_date = ? AND sent_at IS NULL AND deposit_at IS NULL AND COALESCE(cancelled, 0) = 0").bind(to, rm.start).run();
+    const r = await env.DB.prepare("INSERT INTO course_reminders (to_email, student_name, start_date, child, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(to, String(rm.name || "").slice(0, 120), rm.start, rm.child ? 1 : 0, who.email, Math.floor(Date.now() / 1e3)).run();
+    reminder = { id: r.meta && r.meta.last_row_id, start: rm.start, on: ofAddDays(rm.start, -7), to: ofReminderTo(env) };
+  }
+  return json({ ok: true, to, id: s.id, from: account, reminder });
+}
+__name(handleOfferSend, "handleOfferSend");
+__name2(handleOfferSend, "handleOfferSend");
+function ofAddDays(ymd, n) {
+  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+__name(ofAddDays, "ofAddDays");
+var OF_MONTHS = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "wrze\u015Bnia", "pa\u017Adziernika", "listopada", "grudnia"];
+function ofLong(ymd) {
+  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+  return d.getUTCDate() + " " + OF_MONTHS[d.getUTCMonth()];
+}
+__name(ofLong, "ofLong");
+function ofCourseInfoText(start) {
+  return "Witaj!\n\nJu\u017C " + ofLong(start) + " rozpoczynamy Kurs Nowej Mowy. Poni\u017Cej przesy\u0142amy najwa\u017Cniejsze informacje organizacyjne dotycz\u0105ce dop\u0142aty do kursu oraz przygotowania do zaj\u0119\u0107.\n\nP\u0142atno\u015Bci\n\n* Przelew: je\u015Bli planujesz op\u0142aci\u0107 kurs przelewem, prosimy o uregulowanie wp\u0142aty najp\xF3\u017Aniej do " + ofLong(ofAddDays(start, -3)) + " na ten sam numer konta, na kt\xF3ry wp\u0142acany by\u0142 zadatek.\n* Got\xF3wka: w przypadku p\u0142atno\u015Bci got\xF3wk\u0105 na miejscu, prosimy o przybycie do Szko\u0142y Nowa Mowa o godzinie 8:50.\n\nCo nale\u017Cy ze sob\u0105 zabra\u0107\n\n* Notes: b\u0119dzie potrzebny do komunikacji z trenerem w trakcie tzw. dni \u201Ekartkowych\u201D.\n* Wygodne obuwie i ciep\u0142e ubranie: planujemy treningi w przestrzeni miejskiej, dlatego przydadz\u0105 si\u0119 wygodne buty oraz co\u015B cieplejszego do ubrania na wypadek ch\u0142odniejszej pogody.\n\nDo zobaczenia na zaj\u0119ciach! W razie jakichkolwiek pyta\u0144 zapraszamy do kontaktu.\n\nPARKINGI\nhttps://www.google.com/maps/d/u/0/edit?mid=1H5gc1803KRf8s34QoN37T_PXqxMkoWA&usp=sharing";
+}
+__name(ofCourseInfoText, "ofCourseInfoText");
+__name2(ofCourseInfoText, "ofCourseInfoText");
+function ofCourseInfoHtml(start) {
+  const L = "color:#1a4fd6;";
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222"><p>Witaj!</p><p>Ju\u017C <b>' + ofLong(start) + '</b> rozpoczynamy Kurs Nowej Mowy. Poni\u017Cej przesy\u0142amy najwa\u017Cniejsze informacje organizacyjne dotycz\u0105ce dop\u0142aty do kursu oraz przygotowania do zaj\u0119\u0107.</p><p style="margin-top:16px"><b>P\u0142atno\u015Bci</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li><b>Przelew:</b> je\u015Bli planujesz op\u0142aci\u0107 kurs przelewem, prosimy o uregulowanie wp\u0142aty najp\xF3\u017Aniej do <b>' + ofLong(ofAddDays(start, -3)) + '</b> na ten sam numer konta, na kt\xF3ry wp\u0142acany by\u0142 zadatek.</li><li><b>Got\xF3wka:</b> w przypadku p\u0142atno\u015Bci got\xF3wk\u0105 na miejscu, prosimy o przybycie do Szko\u0142y Nowa Mowa o godzinie <b>8:50</b>.</li></ul><p><b>Co nale\u017Cy ze sob\u0105 zabra\u0107</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li><b>Notes:</b> b\u0119dzie potrzebny do komunikacji z trenerem w trakcie tzw. dni \u201Ekartkowych\u201D.</li><li><b>Wygodne obuwie i ciep\u0142e ubranie:</b> planujemy treningi w przestrzeni miejskiej, dlatego przydadz\u0105 si\u0119 wygodne buty oraz co\u015B cieplejszego do ubrania na wypadek ch\u0142odniejszej pogody.</li></ul><p>Do zobaczenia na zaj\u0119ciach! W razie jakichkolwiek pyta\u0144 zapraszamy do kontaktu.</p><p><b>PARKINGI</b><br><a href="https://www.google.com/maps/d/u/0/edit?mid=1H5gc1803KRf8s34QoN37T_PXqxMkoWA&usp=sharing" style="' + L + '">Mapa parking\xF3w w pobli\u017Cu Szko\u0142y Nowej Mowy</a></p><p>Szko\u0142a Nowej Mowy<br>Rynek 3/1A, Miko\u0142\xF3w</p></div>';
+}
+__name(ofCourseInfoHtml, "ofCourseInfoHtml");
+__name2(ofCourseInfoHtml, "ofCourseInfoHtml");
+async function ofSendCourseInfo(env, r) {
+  const account = await appSettingGet(env, "google_account") || "";
+  const subj = "Kurs Nowej Mowy od " + ofLong(r.start_date) + " \u2014 dop\u0142ata i przygotowanie";
+  const mime = ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: subj, html: ofCourseInfoHtml(r.start_date) });
+  const s = await ofGmailSend(env, mime);
+  if (s.ok) await env.DB.prepare("UPDATE course_reminders SET sent_at = ?, error = NULL WHERE id = ?").bind(Math.floor(Date.now() / 1e3), r.id).run();
+  else await env.DB.prepare("UPDATE course_reminders SET error = ? WHERE id = ?").bind(String(s.error).slice(0, 300), r.id).run();
+  return s;
+}
+__name(ofSendCourseInfo, "ofSendCourseInfo");
+__name2(ofSendCourseInfo, "ofSendCourseInfo");
+async function ofReminderTick(env) {
+  const now = /* @__PURE__ */ new Date();
+  const p = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const gp = /* @__PURE__ */ __name((t) => (p.find((x) => x.type === t) || {}).value, "gp");
+  const today = gp("year") + "-" + gp("month") + "-" + gp("day");
+  if (Number(gp("hour")) < 7) return;
+  try {
+    await ofTables(env);
+    const rows = (await env.DB.prepare("SELECT * FROM course_reminders WHERE sent_at IS NULL AND COALESCE(cancelled, 0) = 0 AND start_date >= ? ORDER BY start_date LIMIT 20").bind(today).all()).results || [];
+    for (const r of rows) {
+      if (!r.deposit_at) continue;
+      if (ofAddDays(r.start_date, -7) > today) continue;
+      const res = await ofSendCourseInfo(env, r);
+      if (!res.ok) break;
+    }
+  } catch (e) {
+  }
+}
+__name(ofReminderTick, "ofReminderTick");
+__name2(ofReminderTick, "ofReminderTick");
 async function txRecordInfo(env, rid) {
   if (!rid || !env.HYPERDRIVE) return {};
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
