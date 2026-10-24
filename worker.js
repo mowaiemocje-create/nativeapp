@@ -5944,6 +5944,53 @@ var worker_default = {
         const r = await svList(env);
         return json(r, r.ok ? 200 : 400);
       }
+      if (url.pathname === "/surveys/status" || url.pathname === "/surveys/bulk-mail" || url.pathname === "/surveys/export-sheet" || url.pathname === "/surveys/hide" || url.pathname === "/surveys/merge") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (e) {
+        }
+        if (request.method !== "POST") return json({ error: "POST" }, 405);
+        const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/surveys/status") return json(await svSetStatus(env, who, body));
+        if (url.pathname === "/surveys/merge") {
+          await sstTable(env);
+          await svLinksTable(env);
+          const keys = (Array.isArray(body.row_keys) ? body.row_keys : [body.row_key]).map((k) => String(k || "").slice(0, 300)).filter(Boolean).slice(0, 20);
+          const into = String(body.into_key || "").slice(0, 300);
+          if (!keys.length) return json({ error: "Brak ankiety" }, 400);
+          if (body.undo) {
+            for (const k of keys) await env.DB.prepare("DELETE FROM survey_merge WHERE row_key = ?").bind(k).run();
+            return json({ ok: true });
+          }
+          if (!into || keys.includes(into)) return json({ error: "Wybierz ankiet\u0119 g\u0142\xF3wn\u0105" }, 400);
+          const main = await env.DB.prepare("SELECT ns_student_id FROM survey_links WHERE row_key = ?").bind(into).first();
+          const now = Math.floor(Date.now() / 1e3);
+          for (const k of keys) {
+            await env.DB.prepare("INSERT OR REPLACE INTO survey_merge (row_key, into_key, merged_by, merged_at) VALUES (?, ?, ?, ?)").bind(k, into, String(who.email || ""), now).run();
+            if (main && main.ns_student_id) await env.DB.prepare("INSERT INTO survey_links (row_key, ns_student_id, linked_by, linked_at) VALUES (?, ?, ?, ?) ON CONFLICT(row_key) DO UPDATE SET ns_student_id = excluded.ns_student_id, linked_by = excluded.linked_by, linked_at = excluded.linked_at").bind(k, main.ns_student_id, String(who.email || ""), now).run();
+          }
+          return json({ ok: true, count: keys.length });
+        }
+        if (url.pathname === "/surveys/hide") {
+          await sstTable(env);
+          const keys = (Array.isArray(body.row_keys) ? body.row_keys : [body.row_key]).map((k) => String(k || "").slice(0, 300)).filter(Boolean).slice(0, 200);
+          if (!keys.length) return json({ error: "Brak ankiety" }, 400);
+          for (const k of keys) {
+            if (body.hidden === false) await env.DB.prepare("DELETE FROM survey_hidden WHERE row_key = ?").bind(k).run();
+            else await env.DB.prepare("INSERT OR REPLACE INTO survey_hidden (row_key, hidden_by, hidden_at) VALUES (?, ?, ?)").bind(k, String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+          }
+          return json({ ok: true, count: keys.length });
+        }
+        if (url.pathname === "/surveys/bulk-mail") {
+          const r2 = await svBulkMail(env, who, body);
+          return json(r2, r2.ok ? 200 : 400);
+        }
+        const r = await svExportSheet(env);
+        return json(r, r.ok ? 200 : 400);
+      }
       if (url.pathname === "/student-symptoms" || url.pathname === "/student-symptoms/save") {
         let body = {};
         if (request.method === "POST") {
@@ -5988,12 +6035,18 @@ var worker_default = {
         if (!sid) return json({ error: "Brak student_id" }, 400);
         const r = await svForStudent(env, sid);
         try {
-          r.edits = await seGet(env, sid);
+          r.edits = await seMerged(env, sid, r.row_key);
         } catch (e) {
           r.edits = null;
         }
         if (!r.ok) return json({ ok: true, row: null, header: [], edits: r.edits, sheet_error: r.error || null });
         return json(r);
+      }
+      if (url.pathname === "/admin/trainer-activity" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko admin" }, 403);
+        return json(await trainerActivity(env));
       }
       if (url.pathname === "/surveys/edit" && request.method === "POST") {
         let body = {};
@@ -6004,14 +6057,24 @@ var worker_default = {
         const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
         if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
-        const sid = String(body.student_id || "");
-        if (!sid) return json({ error: "Brak student_id" }, 400);
+        const rowKey = String(body.row_key || "").slice(0, 300);
+        const sid = body.student_id ? String(body.student_id) : rowKey ? "row:" + rowKey : "";
+        if (!sid) return json({ error: "Brak student_id albo row_key" }, 400);
         await seTable(env);
         const answers = {};
         for (const [k, v] of Object.entries(body.answers || {})) if (/^\d{1,3}$/.test(k)) answers[k] = String(v == null ? "" : v).slice(0, 4e3);
         const added = (Array.isArray(body.added) ? body.added : []).slice(0, 100).map((x) => ({ group: String(x && x.group || "").slice(0, 60), q: String(x && x.q || "").slice(0, 300), a: String(x && x.a || "").slice(0, 4e3) })).filter((x) => x.q || x.a);
         await env.DB.prepare("INSERT INTO survey_edits (ns_student_id, answers, added, updated_by, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(ns_student_id) DO UPDATE SET answers = excluded.answers, added = excluded.added, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(sid, JSON.stringify(answers), JSON.stringify(added), String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+        if (body.student_id && rowKey) await env.DB.prepare("DELETE FROM survey_edits WHERE ns_student_id = ?").bind("row:" + rowKey).run();
         return json({ ok: true, edits: await seGet(env, sid) });
+      }
+      if (url.pathname === "/surveys/edits" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sidQ = url.searchParams.get("student_id"), rk = url.searchParams.get("row_key");
+        if (!sidQ && !rk) return json({ error: "Brak student_id albo row_key" }, 400);
+        return json({ ok: true, edits: await seMerged(env, sidQ, rk) });
       }
       if (url.pathname === "/surveys/check" || url.pathname === "/surveys/sheet") {
         let body = {};
@@ -6025,6 +6088,42 @@ var worker_default = {
         const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
         if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/surveys/sheet" && request.method === "POST" && body.colmap_id) {
+          await ensureGoogleTables(env);
+          const x = (await svExtraSheets(env)).find((e) => e.id === String(body.colmap_id));
+          if (!x) return json({ error: "Nie ma takiego arkusza" }, 404);
+          const main = await svRowsOne(env, await svSheetId(env)), R = await svRowsOne(env, x.id);
+          if (!main.ok) return json(main, 400);
+          if (!R.ok) return json(R, 400);
+          if (body.recompute) await appSettingSet(env, "svmap_" + x.id, "null");
+          if (body.map && typeof body.map === "object") {
+            const map = {}, used = /* @__PURE__ */ new Set();
+            for (const [k, v] of Object.entries(body.map)) {
+              const j = +k, p = v === "" || v == null ? null : +v;
+              if (j >= 0 && j < R.header.length && p != null && p >= 0 && p < main.header.length && !used.has(p)) {
+                map[j] = p;
+                used.add(p);
+              }
+            }
+            await appSettingSet(env, "svmap_" + x.id, JSON.stringify({ hash: await svHeaderHash(R.header), map, manual: true, at: Math.floor(Date.now() / 1e3), by: who.email }));
+          }
+          const M = await svColMap(env, x, R.header, main.header);
+          const sample = R.rows.slice(-1)[0] || [];
+          return json({ ok: true, label: x.label, lang: x.lang, sk_header: R.header, pl_header: main.header, map: M.map, manual: !!M.manual, sample });
+        }
+        if (url.pathname === "/surveys/sheet" && request.method === "POST" && (body.extra || body.remove_extra)) {
+          await ensureGoogleTables(env);
+          let list = await svExtraSheets(env);
+          if (body.remove_extra) list = list.filter((x) => x.id !== String(body.remove_extra));
+          else {
+            const m = String(body.sheet || "").match(/[-\w]{30,}/);
+            if (!m) return json({ error: "Wklej link do arkusza Google" }, 400);
+            if (m[0] === await svSheetId(env)) return json({ error: "To jest ju\u017C arkusz g\u0142\xF3wny" }, 400);
+            list = list.filter((x) => x.id !== m[0]).concat([{ id: m[0], label: String(body.label || "SK").slice(0, 20), lang: /^(sk|cs|pl|en)$/.test(String(body.lang || "")) ? body.lang : "sk" }]);
+          }
+          await appSettingSet(env, "survey_sheets_extra", JSON.stringify(list));
+          return json(await svCheck(env));
+        }
         if (url.pathname === "/surveys/sheet" && request.method === "POST") {
           const m = String(body.sheet || "").match(/[-\w]{30,}/);
           if (!m) return json({ error: "Wklej link do arkusza Google" }, 400);
@@ -6034,6 +6133,20 @@ var worker_default = {
         return json(await svCheck(env));
       }
       if (url.pathname === "/offers/send" && request.method === "POST") return await handleOfferSend(request, env);
+      if (url.pathname === "/offers/translate" && request.method === "POST") return await handleOfferTranslate(request, env);
+      if (url.pathname === "/raty" && request.method === "GET") return ofRatyPage(url);
+      if (url.pathname === "/offers/sent-file" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        await sstTable(env);
+        const r = await env.DB.prepare("SELECT html_key, pdf_key, pdf_name FROM offer_meta WHERE id = ?").bind(Number(url.searchParams.get("id")) || 0).first();
+        const k = r && (url.searchParams.get("part") === "pdf" ? r.pdf_key : r.html_key);
+        if (!k) return json({ error: "Brak kopii tej wiadomo\u015Bci" }, 404);
+        const o = await env.RECORDINGS.get(k);
+        if (!o) return json({ error: "Plik nie istnieje" }, 404);
+        return new Response(o.body, { headers: { "Content-Type": o.httpMetadata && o.httpMetadata.contentType || "application/octet-stream", "Access-Control-Allow-Origin": "*", "Cache-Control": "private, max-age=300" } });
+      }
       if (url.pathname.startsWith("/offers/reminders")) {
         let body = {};
         if (request.method === "POST") {
@@ -6049,9 +6162,29 @@ var worker_default = {
         await ofTables(env);
         if (url.pathname === "/offers/reminders/deposit" && request.method === "POST") {
           const on = body.on !== false;
-          await env.DB.prepare("UPDATE course_reminders SET deposit_at = ?, deposit_by = ? WHERE id = ?").bind(on ? Math.floor(Date.now() / 1e3) : null, on ? String(who.email || "") : null, Number(body.id) || 0).run();
-          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(Number(body.id) || 0).first();
-          return json({ ok: true, send_on: r ? ofAddDays(r.start_date, -7) : null });
+          let id = Number(body.id) || 0;
+          if (!id && on) {
+            const to = String(body.to_email || "").trim(), start = String(body.start || "");
+            if (!/@/.test(to) || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return json({ error: "Podaj e-mail i dat\u0119 startu kursu" }, 400);
+            const r0 = await env.DB.prepare("INSERT INTO course_reminders (to_email, student_name, start_date, child, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(to, String(body.name || "").slice(0, 120), start, body.child ? 1 : 0, who.email, Math.floor(Date.now() / 1e3)).run();
+            id = r0.meta && r0.meta.last_row_id;
+          }
+          await env.DB.prepare("UPDATE course_reminders SET deposit_at = ?, deposit_by = ? WHERE id = ?").bind(on ? Math.floor(Date.now() / 1e3) : null, on ? String(who.email || "") : null, id).run();
+          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(id).first();
+          return json({ ok: true, id, send_on: r ? ofAddDays(r.start_date, -7) : null });
+        }
+        if (url.pathname === "/offers/reminders/remind" && request.method === "POST") {
+          const on = body.on !== false, now = Math.floor(Date.now() / 1e3);
+          let id = Number(body.id) || 0;
+          if (!id && on) {
+            const to = String(body.to_email || "").trim(), start = String(body.start || "");
+            if (!/@/.test(to) || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return json({ error: "Podaj e-mail i dat\u0119 startu kursu" }, 400);
+            const r2 = await env.DB.prepare("INSERT INTO course_reminders (to_email, student_name, start_date, child, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(to, String(body.name || "").slice(0, 120), start, body.child ? 1 : 0, who.email, now).run();
+            id = r2.meta && r2.meta.last_row_id;
+          }
+          await env.DB.prepare("UPDATE course_reminders SET remind_at = ?, remind_by = ? WHERE id = ?").bind(on ? now : null, on ? String(who.email || "") : null, id).run();
+          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(id).first();
+          return json({ ok: true, id, send_on: r ? ofAddDays(r.start_date, -7) : null, sent_at: r && r.sent_at });
         }
         if (url.pathname === "/offers/reminders/send-now" && request.method === "POST") {
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(Number(body.id) || 0).first();
@@ -6067,6 +6200,34 @@ var worker_default = {
           return json({ ok: true });
         }
         const rs = await env.DB.prepare("SELECT id, to_email, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 100").all();
+        try {
+          const ra = (await env.DB.prepare("SELECT id, remind_at FROM course_reminders WHERE remind_at IS NOT NULL").all()).results || [];
+          const m = {};
+          ra.forEach((x) => m[x.id] = x.remind_at);
+          (rs.results || []).forEach((x) => {
+            x.remind_at = m[x.id] || null;
+          });
+        } catch (e) {
+        }
+        try {
+          const ems = [...new Set((rs.results || []).map((x) => String(x.to_email || "").toLowerCase()).filter(Boolean))];
+          if (ems.length) {
+            const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+            try {
+              await pg.connect();
+              const has = new Set((await pg.query("SELECT LOWER(email) AS e FROM users WHERE LOWER(email) = ANY($1) AND deleted_at IS NULL", [ems])).rows.map((r) => r.e));
+              (rs.results || []).forEach((x) => {
+                x.has_account = has.has(String(x.to_email || "").toLowerCase());
+              });
+            } finally {
+              try {
+                await pg.end();
+              } catch (e) {
+              }
+            }
+          }
+        } catch (e) {
+        }
         return json({ ok: true, reminders: rs.results || [], to: ofReminderTo(env) });
       }
       if (url.pathname.startsWith("/research/notes")) {
@@ -8031,7 +8192,7 @@ async function handleDocumentsAction(request, env, action) {
 }
 __name(handleDocumentsAction, "handleDocumentsAction");
 __name2(handleDocumentsAction, "handleDocumentsAction");
-var GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/spreadsheets.readonly";
+var GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/spreadsheets";
 function googleOAuthRedirectUri(url) {
   return url.origin + "/google/oauth/callback";
 }
@@ -10000,7 +10161,7 @@ function ofReminderTo(env) {
 __name(ofReminderTo, "ofReminderTo");
 async function ofTables(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS course_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, student_name TEXT, start_date TEXT NOT NULL, child INTEGER, created_by TEXT, created_at INTEGER, sent_at INTEGER, cancelled INTEGER DEFAULT 0, error TEXT, deposit_at INTEGER, deposit_by TEXT)").run();
-  for (const c of ["deposit_at INTEGER", "deposit_by TEXT"]) {
+  for (const c of ["deposit_at INTEGER", "deposit_by TEXT", "remind_at INTEGER", "remind_by TEXT"]) {
     try {
       await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
     } catch (e) {
@@ -10055,6 +10216,135 @@ async function ofGmailSend(env, mime) {
 }
 __name(ofGmailSend, "ofGmailSend");
 __name2(ofGmailSend, "ofGmailSend");
+var OF_TR_LANG = { sk: "s\u0142owacki", cs: "czeski" };
+async function ofTrKey(lang, t) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(lang + "" + t));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+__name(ofTrKey, "ofTrKey");
+function ofTagSig(t) {
+  return (String(t).match(/<\/?[a-z][a-z0-9]*/gi) || []).map((x) => x.toLowerCase()).join(",");
+}
+__name(ofTagSig, "ofTagSig");
+async function handleOfferTranslate(request, env) {
+  let b = {};
+  try {
+    b = await request.json();
+  } catch (e) {
+  }
+  const who = await contactAuth(env, b.ns_token, b.ns_email, b.ns_server);
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+  const lang = String(b.lang || "");
+  if (!OF_TR_LANG[lang]) return json({ error: "J\u0119zyk: sk albo cs" }, 400);
+  const texts = (Array.isArray(b.texts) ? b.texts : []).slice(0, 40).map((x) => String(x == null ? "" : x).slice(0, 8e3));
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS offer_tr (h TEXT PRIMARY KEY, lang TEXT, src TEXT, out TEXT, at INTEGER)").run();
+  const keys = await Promise.all(texts.map((t) => ofTrKey(lang, t)));
+  const out = new Array(texts.length).fill(null), todo = [];
+  for (let i = 0; i < texts.length; i++) {
+    if (!/\p{L}{2}/u.test(texts[i].replace(/<[^>]*>/g, ""))) {
+      out[i] = texts[i];
+      continue;
+    }
+    const r = await env.DB.prepare("SELECT out FROM offer_tr WHERE h = ?").bind(keys[i]).first();
+    if (r && r.out != null) out[i] = r.out;
+    else todo.push(i);
+  }
+  if (todo.length) {
+    const L = OF_TR_LANG[lang];
+    const sys = `Jeste\u015B zawodowym t\u0142umaczem z j\u0119zyka polskiego na ${L}. T\u0142umaczysz ofert\u0119 kursu, umow\u0119 rezerwacji terminu i maile szko\u0142y \u201ESzko\u0142a Nowej Mowy\u201D (metoda Nowa Mowa\xAE) dla klienta ze ${lang === "sk" ? "S\u0142owacji" : "Czech"}.
+Zasady:
+- Dostajesz tablic\u0119 JSON z fragmentami HTML. Zwr\xF3\u0107 WY\u0141\u0104CZNIE tablic\u0119 JSON z t\u0142umaczeniami: tyle samo element\xF3w, ta sama kolejno\u015B\u0107.
+- Zachowaj dok\u0142adnie wszystkie znaczniki HTML, atrybuty, style i adresy URL; t\u0142umacz tylko tekst widoczny dla czytelnika.
+- Nie zmieniaj kwot, walut (z\u0142), dat liczbowych, numer\xF3w kont, telefon\xF3w, e-maili, adres\xF3w, nazw firm (NEW SPEECH\xAE Sp. z o.o., Szko\u0142a Nowej Mowy) ani znaku \xAE. \u201ENowa Mowa\u201D jako nazwa metody zostaje bez t\u0142umaczenia.
+- Nazwy miesi\u0119cy i dni tygodnia przet\u0142umacz. Imiona i nazwiska zostaw, zwrot grzeczno\u015Bciowy dopasuj do j\u0119zyka (forma \u201EVy\u201D, np. ${lang === "sk" ? "\u201EV\xE1\u017Een\xE1 pani \u2026\u201D, \u201EV\xE1\u017Een\xFD p\xE1n \u2026\u201D" : "\u201EV\xE1\u017Een\xE1 pan\xED \u2026\u201D, \u201EV\xE1\u017Een\xFD pane \u2026\u201D"}).
+- Styl: naturalny, uprzejmy, poprawny ${L}. W umowie i regulaminie precyzyjny j\u0119zyk prawniczy.
+- Nigdy nie u\u017Cywaj s\u0142\xF3w ${lang === "sk" ? "\u201Eterapia\u201D, \u201Eterapeutick\xFD\u201D, \u201Eterapeut\u201D" : "\u201Eterapie\u201D, \u201Eterapeutick\xFD\u201D, \u201Eterapeut\u201D"} \u2014 zamiast nich \u201Etr\xE9ning\u201D, \u201Ekurz\u201D, \u201E\u0161pecialista\u201D/\u201Especialista\u201D.`;
+    const parts = [];
+    let cur = [], len = 0;
+    for (const i of todo) {
+      if (cur.length && (cur.length >= 14 || len + texts[i].length > 5e3)) {
+        parts.push(cur);
+        cur = [];
+        len = 0;
+      }
+      cur.push(i);
+      len += texts[i].length;
+    }
+    if (cur.length) parts.push(cur);
+    for (const part of parts) {
+      const src = part.map((i) => texts[i]);
+      let arr = null;
+      for (let attempt = 0; attempt < 2 && !arr; attempt++) {
+        try {
+          const txt = await txLlm(env, sys, JSON.stringify(src), Math.min(8e3, 400 + src.join("").length * 2));
+          const a = txt.indexOf("["), z = txt.lastIndexOf("]");
+          const p = a >= 0 && z > a ? JSON.parse(txt.slice(a, z + 1)) : null;
+          if (Array.isArray(p) && p.length === src.length) arr = p.map((x) => String(x == null ? "" : x));
+        } catch (e) {
+        }
+      }
+      if (!arr) continue;
+      const now = Math.floor(Date.now() / 1e3);
+      for (let k = 0; k < part.length; k++) {
+        const i = part[k], t = arr[k];
+        if (!t || ofTagSig(t) !== ofTagSig(texts[i])) continue;
+        out[i] = t;
+        try {
+          await env.DB.prepare("INSERT OR REPLACE INTO offer_tr (h, lang, src, out, at) VALUES (?, ?, ?, ?, ?)").bind(keys[i], lang, texts[i].slice(0, 2e3), t, now).run();
+        } catch (e) {
+        }
+      }
+    }
+  }
+  return json({ ok: true, texts: out, missing: out.filter((x) => x == null).length });
+}
+__name(handleOfferTranslate, "handleOfferTranslate");
+__name2(handleOfferTranslate, "handleOfferTranslate");
+function ofRatyPage(url) {
+  let d = {};
+  try {
+    const b = String(url.searchParams.get("d") || "").replace(/-/g, "+").replace(/_/g, "/");
+    d = JSON.parse(decodeURIComponent(escape(atob(b))));
+  } catch (e) {
+  }
+  const V = (Array.isArray(d.v) ? d.v : []).slice(0, 8).map((x) => [Math.max(0, Math.min(99, Number(x && x[0]) || 0)), String(x && x[1] || "").slice(0, 60), Math.max(0, Math.min(1e6, Number(x && x[2]) || 0))]).filter((x) => x[2] > 0);
+  const r = Math.max(0, Math.min(60, Number(d.r) || 21.97)), sel = Math.max(0, Number(d.s) || 0);
+  const link = /^https:\/\/[^\s"'<>]+$/.test(String(d.l || "")) ? String(d.l) : "";
+  const data = JSON.stringify({ v: V, r, s: sel, l: link }).replace(/</g, "\\u003c");
+  const html = `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kalkulator rat \u2014 Nowa Mowa</title>
+<style>body{margin:0;background:#f4f1ed;font-family:Arial,Helvetica,sans-serif;color:#222}.w{max-width:620px;margin:0 auto;padding:16px}.h{background:#1E1E1E;color:#fff;padding:18px 20px;border-top:6px solid #F5A623}.h b{color:#F5A623;font-size:12px;letter-spacing:1px;text-transform:uppercase}.h div{font-size:22px;font-weight:bold;margin-top:4px}
+.c{background:#fff;padding:16px 20px;margin-top:12px;border:1px solid #ead8c4}.vs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 14px}.vs button{border:1px solid #ead8c4;background:#fbf8f5;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;text-align:left}.vs button.on{border:2px solid #E8A317;background:#FFF6E0;font-weight:bold}
+input[type=range]{width:100%;accent-color:#D9822B;height:28px}.big{font-size:34px;font-weight:bold;color:#D9822B}.row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}.sub{color:#6b6259;font-size:13px}.btn{display:inline-block;background:#D9822B;color:#fff;padding:12px 18px;border-radius:6px;text-decoration:none;font-weight:bold;margin-top:12px}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}td{padding:6px 8px;border-bottom:1px solid #efe4d8}</style></head><body><div class="w">
+<div class="h"><b>Szko\u0142a Nowej Mowy</b><div>\u{1F9EE} Kalkulator rat</div></div>
+<div class="c"><div class="sub">Wybierz wariant kursu:</div><div class="vs" id="vs"></div>
+<div class="row"><span>Liczba rat: <b id="nv"></b></span><span class="sub">od 3 do 60</span></div>
+<input type="range" id="n" min="3" max="60" value="12">
+<div class="row" style="margin-top:8px"><span class="big" id="rata"></span><span class="sub" id="tot"></span></div>
+<table id="tb"></table>
+<div id="lk"></div>
+<p class="sub" style="font-size:12px;margin-top:14px">Wyliczenia s\u0105 orientacyjne (RRSO ok. <span id="rr"></span>%), jak w kalkulatorze imoje. Ostateczne warunki i decyzj\u0119 kredytow\u0105 przedstawia operator p\u0142atno\u015Bci przed akceptacj\u0105 umowy.</p></div>
+<p class="sub" style="text-align:center;font-size:12px">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w \xB7 <a href="https://www.nowamowa.com" style="color:#D9822B">nowamowa.com</a></p></div>
+<script>var D=${data};var cur=0;
+function rata(P,n){var rr=D.r/100;if(!(rr>0))return P/n;var q=Math.pow(1+rr,1/12)-1;return P*q/(1-Math.pow(1+q,-n));}
+function zl(x){return (Math.round(x*100)/100).toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})+'\xA0z\u0142';}
+function zl0(x){return String(Math.round(x)).replace(/\\B(?=(\\d{3})+(?!\\d))/g,'\xA0')+'\xA0z\u0142';}
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function draw(){var v=D.v[cur];if(!v){document.getElementById('rata').textContent='\u2014';return;}var n=+document.getElementById('n').value,a=rata(v[2],n);
+document.getElementById('nv').textContent=n;document.getElementById('rata').textContent=zl(a)+' / mies.';document.getElementById('tot').textContent='razem '+zl(a*n)+' \xB7 cena kursu '+zl0(v[2]);
+document.getElementById('tb').innerHTML='<tr class="sub"><td>Liczba rat</td><td>Rata</td><td>Razem</td></tr>'+[6,12,24,36,48,60].map(function(k){var b=rata(v[2],k);return '<tr'+(k===n?' style="background:#FFF6E0;font-weight:bold"':'')+'><td>'+k+'</td><td>'+zl(b)+'</td><td>'+zl(b*k)+'</td></tr>';}).join('');
+document.querySelectorAll('#vs button').forEach(function(b,i){b.className=i===cur?'on':'';});}
+document.getElementById('vs').innerHTML=D.v.map(function(v,i){return '<button type="button" data-i="'+i+'">'+(v[0]?'Wariant '+v[0]+'<br>':'')+esc(v[1])+'<br><span class="sub">'+zl0(v[2])+'</span></button>';}).join('');
+document.querySelectorAll('#vs button').forEach(function(b){b.onclick=function(){cur=+b.getAttribute('data-i');draw();};});
+D.v.forEach(function(v,i){if(v[0]===D.s)cur=i;});
+document.getElementById('rr').textContent=String(D.r).replace('.',',');
+document.getElementById('lk').innerHTML=D.l?'<a class="btn" href="'+esc(D.l)+'">\u{1F4B3} Przejd\u017A do p\u0142atno\u015Bci ratalnej imoje</a>':'<p class="sub" style="margin-top:12px">Zainteresowana/y ratami? Odpisz na maila z ofert\u0105 \u2014 prze\u015Blemy link do p\u0142atno\u015Bci.</p>';
+document.getElementById('n').oninput=draw;draw();<\/script></body></html>`;
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+}
+__name(ofRatyPage, "ofRatyPage");
+__name2(ofRatyPage, "ofRatyPage");
 async function handleOfferSend(request, env) {
   let b = {};
   try {
@@ -10087,6 +10377,26 @@ async function handleOfferSend(request, env) {
   try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
     await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", to, subject, who.email, s.id, Math.floor(Date.now() / 1e3)).run();
+  } catch (e) {
+  }
+  try {
+    const m = b.meta || {};
+    if (m.kind === "offer" || m.kind === "contract") {
+      await sstTable(env);
+      const r0 = await env.DB.prepare("INSERT INTO offer_meta (to_email, kind, variant, variant_name, price, sent_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(to.toLowerCase(), m.kind, Number(m.variant) || null, String(m.variant_name || "").slice(0, 120), Number(m.price) || null, who.email, Math.floor(Date.now() / 1e3)).run();
+      const id = r0.meta && r0.meta.last_row_id;
+      if (id && env.RECORDINGS) {
+        const base = "offers/" + id + "-" + crypto.randomUUID().slice(0, 8);
+        await env.RECORDINGS.put(base + ".html", '<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>' + ofEsc(subject) + '</title></head><body style="margin:0;padding:16px;background:#f4f1ed">' + String(b.html || "") + "</body></html>", { httpMetadata: { contentType: "text/html; charset=utf-8" } });
+        let pk = null;
+        if (pdf) {
+          const bin = Uint8Array.from(atob(pdf), (c) => c.charCodeAt(0));
+          pk = base + ".pdf";
+          await env.RECORDINGS.put(pk, bin, { httpMetadata: { contentType: "application/pdf" } });
+        }
+        await env.DB.prepare("UPDATE offer_meta SET html_key = ?, pdf_key = ?, subject = ?, pdf_name = ? WHERE id = ?").bind(base + ".html", pk, subject, pk ? String(b.filename || "umowa.pdf").slice(0, 120) : null, id).run();
+      }
+    }
   } catch (e) {
   }
   let reminder = null;
@@ -10135,6 +10445,10 @@ async function ofSendCourseInfo(env, r) {
 }
 __name(ofSendCourseInfo, "ofSendCourseInfo");
 __name2(ofSendCourseInfo, "ofSendCourseInfo");
+function ofEsc(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+__name(ofEsc, "ofEsc");
 async function ofReminderTick(env) {
   const now = /* @__PURE__ */ new Date();
   const p = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(now);
@@ -10145,10 +10459,17 @@ async function ofReminderTick(env) {
     await ofTables(env);
     const rows = (await env.DB.prepare("SELECT * FROM course_reminders WHERE sent_at IS NULL AND COALESCE(cancelled, 0) = 0 AND start_date >= ? ORDER BY start_date LIMIT 20").bind(today).all()).results || [];
     for (const r of rows) {
-      if (!r.deposit_at) continue;
+      if (!r.deposit_at && !r.remind_at) continue;
       if (ofAddDays(r.start_date, -7) > today) continue;
       const res = await ofSendCourseInfo(env, r);
       if (!res.ok) break;
+    }
+  } catch (e) {
+  }
+  try {
+    if (/spreadsheets(\s|$)/.test(await appSettingGet(env, "google_scopes") || "") && await appSettingGet(env, "survey_export_day") !== today) {
+      await appSettingSet(env, "survey_export_day", today);
+      await svExportSheet(env);
     }
   } catch (e) {
   }
@@ -10161,10 +10482,10 @@ async function svSheetId(env) {
 }
 __name(svSheetId, "svSheetId");
 __name2(svSheetId, "svSheetId");
-async function svGoogle(env, path) {
+async function svGoogle(env, path, opt) {
   const token = await googleOAuthAccessToken(env);
   if (!token) return { ok: false, code: "no_google", error: "Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz." };
-  const r = await fetch("https://sheets.googleapis.com/v4/spreadsheets/" + path, { headers: { Authorization: "Bearer " + token } });
+  const r = await fetch("https://sheets.googleapis.com/v4/spreadsheets/" + path, opt && opt.method ? { method: opt.method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(opt.body || {}) } : { headers: { Authorization: "Bearer " + token } });
   const d = await r.json().catch(() => ({}));
   if (r.ok) return { ok: true, data: d };
   const msg = d && d.error && d.error.message || "status " + r.status;
@@ -10172,7 +10493,7 @@ async function svGoogle(env, path) {
     const m = msg.match(/https:\/\/console\.developers\.google\.com\/\S+?(?=\s|$)/);
     return { ok: false, code: "api_disabled", error: "W Google Cloud nie jest w\u0142\u0105czone Google Sheets API.", link: m ? m[0] : "https://console.cloud.google.com/apis/library/sheets.googleapis.com" };
   }
-  if (r.status === 403 && /insufficient|scope/i.test(msg)) return { ok: false, code: "scope", error: "Po\u0142\u0105czone konto Google nie ma zgody na odczyt arkuszy \u2014 po\u0142\u0105cz je ponownie (\u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Roz\u0142\u0105cz \u2192 Po\u0142\u0105cz) i zaznacz dost\u0119p do arkuszy." };
+  if (r.status === 403 && /insufficient|scope/i.test(msg)) return { ok: false, code: "scope", error: "Po\u0142\u0105czone konto Google nie ma zgody na arkusze (odczyt i zapis) \u2014 po\u0142\u0105cz je ponownie (\u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Roz\u0142\u0105cz \u2192 Po\u0142\u0105cz) i zaznacz dost\u0119p do arkuszy." };
   if (r.status === 403) return { ok: false, code: "no_access", error: "Po\u0142\u0105czone konto Google nie ma dost\u0119pu do tego arkusza \u2014 udost\u0119pnij arkusz temu kontu (Udost\u0119pnij \u2192 dodaj adres \u2192 Przegl\u0105daj\u0105cy)." };
   if (r.status === 404) return { ok: false, code: "not_found", error: "Nie znaleziono arkusza \u2014 sprawd\u017A link." };
   return { ok: false, code: "other", error: "Google Sheets: " + msg };
@@ -10193,21 +10514,98 @@ async function svCheck(env) {
     const h = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + sheets[0].title.replace(/'/g, "''") + "'!1:1"));
     if (h.ok) headers = ((h.data.values || [])[0] || []).length;
   }
-  return { ok: true, account, sheet_id: id, title: meta.data.properties && meta.data.properties.title, sheets, responses: filled, columns: headers };
+  return {
+    ok: true,
+    account,
+    sheet_id: id,
+    title: meta.data.properties && meta.data.properties.title,
+    sheets,
+    responses: filled,
+    columns: headers,
+    write_ok: /spreadsheets(\s|$)/.test(scopes),
+    export_at: Number(await appSettingGet(env, "survey_export_at")) || null,
+    extras: await svCheckExtras(env, headers)
+  };
 }
 __name(svCheck, "svCheck");
 __name2(svCheck, "svCheck");
+async function svCheckExtras(env, mainCols) {
+  const out = [];
+  for (const x of await svExtraSheets(env)) {
+    const R = await svRowsOne(env, x.id);
+    if (!R.ok) {
+      out.push(Object.assign({}, x, { ok: false, error: R.error }));
+      continue;
+    }
+    const H = R.header || [];
+    let mp = null;
+    try {
+      mp = JSON.parse(await appSettingGet(env, "svmap_" + x.id) || "null");
+    } catch (e) {
+    }
+    out.push(Object.assign({}, x, { ok: true, responses: R.rows.length, columns: H.length, same_layout: true, mapped: mp && mp.map ? Object.keys(mp.map).length : null, manual: !!(mp && mp.manual) }));
+  }
+  return out;
+}
+__name(svCheckExtras, "svCheckExtras");
+__name2(svCheckExtras, "svCheckExtras");
 function svKey(row) {
   return String(row[0] || "").trim() + "|" + String(row[1] || "").trim().toLowerCase();
 }
 __name(svKey, "svKey");
 __name2(svKey, "svKey");
+var SV_FIRST = new Set("adam adrian agata agnieszka aleksander aleksandra alicja amelia aneta angelika anita anna antoni antonina arkadiusz artur barbara bartek bart\u0142omiej bartosz beata bogdan bogus\u0142aw bo\u017Cena cezary czes\u0142aw damian daniel daria dariusz dawid dominik dominika dorota edyta el\u017Cbieta emil emilia ewa ewelina filip franciszek gabriel gabriela gra\u017Cyna grzegorz halina hanna helena henryk hubert igor ilona irena iwona izabela jacek jadwiga jakub jan janina janusz jaros\u0142aw jerzy joanna jolanta j\xF3zef julia julian justyna kacper kamil kamila karina karol karolina katarzyna kazimierz kinga klaudia konrad krystian krystyna krzysztof lena leon leszek liliana lucyna \u0142ucja \u0142ukasz maciej magdalena maja malwina ma\u0142gorzata marcel marcin marek maria marian mariusz marlena marta martyna mateusz micha\u0142 michalina miko\u0142aj milena mi\u0142osz miros\u0142aw monika natalia natan nikola nikodem norbert ola oliwia oliwier oskar patrycja patryk paula paulina pawe\u0142 piotr przemys\u0142aw rados\u0142aw rafa\u0142 renata robert roksana roman ryszard sabina sandra sebastian stanis\u0142aw stefan sylwia szymon tadeusz teresa tomasz urszula wanda weronika wies\u0142aw wiktor wiktoria witold w\u0142adys\u0142aw wojciech zbigniew zdzis\u0142aw zenon zofia zuzanna".split(" "));
+var SV_FEM_A_EXC = /* @__PURE__ */ new Set(["kuba", "barnaba", "bonawentura", "kosma", "jarema", "dyzma"]);
+function svIsFirst(w) {
+  return SV_FIRST.has(String(w || "").toLowerCase());
+}
+__name(svIsFirst, "svIsFirst");
+function svCap(w) {
+  w = String(w || "");
+  return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w;
+}
+__name(svCap, "svCap");
+function svFemName(first) {
+  const l = String(first || "").toLowerCase();
+  return /a$/.test(l) && !SV_FEM_A_EXC.has(l);
+}
+__name(svFemName, "svFemName");
+function svSurnameFor(sur, fem) {
+  return String(sur || "").split("-").map((p) => {
+    const l = p.toLowerCase();
+    if (fem) {
+      if (/(sk|ck|dzk)i$/.test(l)) return p.slice(0, -1) + "a";
+      return p;
+    }
+    if (/(sk|ck|dzk)a$/.test(l)) return p.slice(0, -1) + "i";
+    return p;
+  }).join("-");
+}
+__name(svSurnameFor, "svSurnameFor");
+function svParentSurname(parent, email) {
+  const w = String(parent || "").replace(/[^\p{L}\s-]/gu, " ").split(/\s+/).filter(Boolean);
+  if (w.length >= 2) {
+    if (svIsFirst(w[0])) return w.slice(1).join(" ");
+    if (svIsFirst(w[w.length - 1])) return w.slice(0, -1).join(" ");
+    return w.slice(1).join(" ");
+  }
+  if (w.length === 1 && !svIsFirst(w[0])) return w[0];
+  const tok = String(email || "").split("@")[0].split(/[._\-\d]+/).filter((x) => x.length >= 3 && /^\p{L}+$/u.test(x));
+  if (tok.length >= 2) {
+    const s = tok.find((x) => !svIsFirst(x));
+    if (s && tok.some((x) => svIsFirst(x))) return svCap(s);
+  }
+  return "";
+}
+__name(svParentSurname, "svParentSurname");
 function svNameOf(row) {
   const t = /* @__PURE__ */ __name((i) => String(row[i] || "").replace(/\s+/g, " ").trim(), "t");
-  const child = /rodzic/i.test(t(2)) || !!t(21);
+  const child = /rodzic|rodič/i.test(t(2)) || !!t(21);
   if (child) {
-    const ln = t(20).split(" ").slice(1).join(" ");
-    return { child: true, name: (t(21) + (ln ? " " + ln : "")).trim(), parent: t(20) };
+    const kid = t(21), parent = t(20);
+    if (kid.split(" ").length >= 2 || !kid) return { child: true, name: kid, parent };
+    const sur = svParentSurname(parent, t(1));
+    return { child: true, name: (kid + (sur ? " " + svSurnameFor(sur, svFemName(kid)) : "")).trim(), parent, surname_added: !!sur };
   }
   return { child: false, name: t(3), parent: "" };
 }
@@ -10218,18 +10616,364 @@ async function svLinksTable(env) {
 }
 __name(svLinksTable, "svLinksTable");
 __name2(svLinksTable, "svLinksTable");
+var SV_PANEL_TAB = "Panel trenera";
+async function svExtraSheets(env) {
+  try {
+    const a = JSON.parse(await appSettingGet(env, "survey_sheets_extra") || "[]");
+    return Array.isArray(a) ? a.filter((x) => x && x.id) : [];
+  } catch (e) {
+    return [];
+  }
+}
+__name(svExtraSheets, "svExtraSheets");
+__name2(svExtraSheets, "svExtraSheets");
 async function svRows(env) {
-  const id = await svSheetId(env);
-  const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=sheets.properties(title)");
-  if (!meta.ok) return meta;
-  const title = (((meta.data.sheets || [])[0] || {}).properties || {}).title || "Arkusz1";
-  const v = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + title.replace(/'/g, "''") + "'!A1:ZZ5000"));
-  if (!v.ok) return v;
-  const vals = v.data.values || [];
-  return { ok: true, header: vals[0] || [], rows: vals.slice(1).filter((r) => r && r.length > 2 && String(r[1] || r[0] || "").trim()) };
+  const main = await svRowsOne(env, await svSheetId(env));
+  if (!main.ok) return main;
+  const extras = await svExtraSheets(env), seen = new Set(main.rows.map(svKey)), errors = [];
+  for (const x of extras) {
+    const R = await svRowsOne(env, x.id);
+    if (!R.ok) {
+      errors.push({ id: x.id, label: x.label, error: R.error });
+      continue;
+    }
+    const M = await svColMap(env, x, R.header, main.header);
+    const extraIdx = {};
+    (R.header || []).forEach((h, j) => {
+      if (M.map[j] == null && String(h || "").trim()) {
+        extraIdx[j] = main.header.length;
+        main.header.push((x.lang === "cs" ? "\u{1F1E8}\u{1F1FF} " : "\u{1F1F8}\u{1F1F0} ") + String(h).replace(/\s+/g, " ").trim());
+      }
+    });
+    let n = 0;
+    for (const raw of R.rows) {
+      const r = new Array(main.header.length).fill("");
+      raw.forEach((v, j) => {
+        const t = M.map[j] != null ? M.map[j] : extraIdx[j];
+        if (t != null && (r[t] === "" || r[t] == null)) r[t] = v;
+      });
+      const k = svKey(r);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      r._src = x.label || "SK";
+      r._lang = x.lang || "";
+      main.rows.push(r);
+      n++;
+    }
+    main.tabs.push({ title: (x.label || "arkusz") + ": " + R.tabs.map((t) => t.title).join(", "), rows: n, extra: true });
+  }
+  main.extra_errors = errors;
+  return main;
 }
 __name(svRows, "svRows");
 __name2(svRows, "svRows");
+async function svHeaderHash(h) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode((h || []).join("")));
+  return [...new Uint8Array(d)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+__name(svHeaderHash, "svHeaderHash");
+async function svColMap(env, x, skH, plH) {
+  skH = skH || [];
+  plH = plH || [];
+  const key = "svmap_" + x.id, hash = await svHeaderHash(skH);
+  let saved = null;
+  try {
+    saved = JSON.parse(await appSettingGet(env, key) || "null");
+  } catch (e) {
+  }
+  if (saved && saved.map && (saved.hash === hash || saved.manual)) return saved;
+  const map = {};
+  if (Math.abs(skH.length - plH.length) <= 1 && skH.every((h, j) => j < 2 || String(h || "").trim().toLowerCase() === String(plH[j] || "").trim().toLowerCase())) {
+    skH.forEach((h, j) => {
+      map[j] = j;
+    });
+  } else {
+    map[0] = 0;
+    const em = skH.findIndex((h) => /mail/i.test(String(h || "")));
+    if (em >= 0) map[em] = 1;
+    const L = /* @__PURE__ */ __name((a) => a.map((h, j) => j + ": " + String(h || "").replace(/\s+/g, " ").trim().slice(0, 160)).join("\n"), "L");
+    const sys = "Dopasowujesz kolumny dw\xF3ch formularzy ankiety szko\u0142y Nowa Mowa (j\u0105kanie, bloki mowy): polskiego (wzorzec) i jego wersji " + (x.lang === "cs" ? "czeskiej" : "s\u0142owackiej") + ". Dla ka\u017Cdej kolumny formularza " + (x.lang === "cs" ? "czeskiego" : "s\u0142owackiego") + ' podaj numer kolumny polskiej, kt\xF3ra pyta o TO SAMO (np. ten sam objaw w nawiasie kwadratowym, ta sama osoba, ta sama informacja). Je\u015Bli nie ma odpowiednika \u2014 null. Jedna kolumna polska mo\u017Ce by\u0107 u\u017Cyta tylko raz. Uwa\u017Caj na pytania o dziecko i o rodzica, o wiek i dat\u0119 urodzenia, o kraj i miejscowo\u015B\u0107. Odpowiedz WY\u0141\u0104CZNIE obiektem JSON {"numer_kolumny_' + (x.lang === "cs" ? "cz" : "sk") + '": numer_kolumny_pl_lub_null, ...} dla wszystkich kolumn.';
+    const user = "POLSKI (wzorzec):\n" + L(plH) + "\n\n" + (x.lang === "cs" ? "CZESKI" : "S\u0141OWACKI") + ":\n" + L(skH);
+    try {
+      const txt = await txLlm(env, sys, user, 4e3);
+      const a = txt.indexOf("{"), z = txt.lastIndexOf("}");
+      const o = a >= 0 && z > a ? JSON.parse(txt.slice(a, z + 1)) : null;
+      if (o) {
+        const used = new Set(Object.values(map));
+        for (const [k, v] of Object.entries(o)) {
+          const j = +k, p = v == null ? null : +v;
+          if (!(j >= 0 && j < skH.length) || map[j] != null) continue;
+          if (p != null && p >= 0 && p < plH.length && !used.has(p)) {
+            map[j] = p;
+            used.add(p);
+          }
+        }
+      }
+    } catch (e) {
+    }
+  }
+  const out = { hash, map, manual: false, at: Math.floor(Date.now() / 1e3), sk_cols: skH.length, mapped: Object.keys(map).length };
+  if (Object.keys(map).length > 2) {
+    try {
+      await appSettingSet(env, key, JSON.stringify(out));
+    } catch (e) {
+    }
+  }
+  return out;
+}
+__name(svColMap, "svColMap");
+__name2(svColMap, "svColMap");
+async function svRowsOne(env, id) {
+  const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=sheets.properties(title)");
+  if (!meta.ok) return meta;
+  const titles = (meta.data.sheets || []).map((x) => (x.properties || {}).title).filter((t) => t && t !== SV_PANEL_TAB);
+  if (!titles.length) titles.push("Arkusz1");
+  const q = /* @__PURE__ */ __name((t) => "'" + t.replace(/'/g, "''") + "'!A1:ZZ20000", "q");
+  const v = await svGoogle(env, encodeURIComponent(id) + "/values:batchGet?" + titles.map((t) => "ranges=" + encodeURIComponent(q(t))).join("&"));
+  if (!v.ok) return v;
+  let header = null;
+  const rows = [], seen = /* @__PURE__ */ new Set(), tabs = [];
+  (v.data.valueRanges || []).forEach((vr, k) => {
+    const vals = vr.values || [], h = vals[0] || [];
+    if (header && (h.length < 20 || String(h[1] || "").trim().toLowerCase() !== String(header[1] || "").trim().toLowerCase())) return;
+    if (!header) header = h;
+    let n = 0;
+    for (const r of vals.slice(1)) {
+      if (!(r && r.length > 2 && String(r[1] || r[0] || "").trim())) continue;
+      const key = svKey(r);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(r);
+      n++;
+    }
+    tabs.push({ title: titles[k], rows: n });
+  });
+  return { ok: true, header: header || [], rows, tabs };
+}
+__name(svRowsOne, "svRowsOne");
+__name2(svRowsOne, "svRowsOne");
+async function sstTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_status (row_key TEXT PRIMARY KEY, offer_at INTEGER, contract_at INTEGER, variant INTEGER, severity INTEGER, note TEXT, updated_by TEXT, updated_at INTEGER)").run();
+  try {
+    await env.DB.prepare("ALTER TABLE survey_status ADD COLUMN no_contact INTEGER").run();
+  } catch (e) {
+  }
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_merge (row_key TEXT PRIMARY KEY, into_key TEXT, merged_by TEXT, merged_at INTEGER)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_hidden (row_key TEXT PRIMARY KEY, hidden_by TEXT, hidden_at INTEGER)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS offer_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, kind TEXT, variant INTEGER, variant_name TEXT, price INTEGER, sent_by TEXT, created_at INTEGER)").run();
+  for (const c of ["html_key TEXT", "pdf_key TEXT", "subject TEXT", "pdf_name TEXT"]) {
+    try {
+      await env.DB.prepare("ALTER TABLE offer_meta ADD COLUMN " + c).run();
+    } catch (e) {
+    }
+  }
+}
+__name(sstTable, "sstTable");
+__name2(sstTable, "sstTable");
+var SV_SEVERITY = ["", "lekkie", "\u015Brednie", "mocne"];
+async function svSetStatus(env, who, b) {
+  await sstTable(env);
+  const key = String(b.row_key || "").slice(0, 300);
+  if (!key) return { ok: false, error: "Brak ankiety" };
+  const cur = await env.DB.prepare("SELECT * FROM survey_status WHERE row_key = ?").bind(key).first() || {};
+  const now = Math.floor(Date.now() / 1e3), o = Object.assign({}, cur);
+  if (b.offer !== void 0) o.offer_at = b.offer ? cur.offer_at || now : null;
+  if (b.contract !== void 0) o.contract_at = b.contract ? cur.contract_at || now : null;
+  if (b.variant !== void 0) o.variant = Math.max(0, Math.min(9, Number(b.variant) || 0)) || null;
+  if (b.severity !== void 0) o.severity = Math.max(0, Math.min(3, Number(b.severity) || 0));
+  if (b.note !== void 0) o.note = String(b.note || "").slice(0, 2e3);
+  if (b.no_contact !== void 0) o.no_contact = b.no_contact ? 1 : 0;
+  await env.DB.prepare("INSERT INTO survey_status (row_key, offer_at, contract_at, variant, severity, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(row_key) DO UPDATE SET offer_at = excluded.offer_at, contract_at = excluded.contract_at, variant = excluded.variant, severity = excluded.severity, note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(key, o.offer_at || null, o.contract_at || null, o.variant || null, o.severity || 0, o.note || "", String(who.email || ""), now).run();
+  await env.DB.prepare("UPDATE survey_status SET no_contact = ? WHERE row_key = ?").bind(o.no_contact ? 1 : 0, key).run();
+  return { ok: true, status: o };
+}
+__name(svSetStatus, "svSetStatus");
+__name2(svSetStatus, "svSetStatus");
+async function svBulkMail(env, who, b) {
+  const okMail = /* @__PURE__ */ __name((x) => /^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i.test(x), "okMail");
+  let list = Array.isArray(b.items) ? b.items.map((it) => ({ to: String(it && it.to || "").trim().toLowerCase(), subject: String(it && it.subject || "").trim().slice(0, 200), html: String(it && it.html || "") })) : (Array.isArray(b.to) ? b.to : []).map((x) => ({ to: String(x || "").trim().toLowerCase(), subject: String(b.subject || "").trim().slice(0, 200), html: String(b.html || "") }));
+  const seenTo = /* @__PURE__ */ new Set();
+  list = list.filter((it) => okMail(it.to) && !seenTo.has(it.to) && seenTo.add(it.to)).slice(0, 150);
+  let blocked = /* @__PURE__ */ new Set();
+  try {
+    await sstTable(env);
+    blocked = new Set(((await env.DB.prepare("SELECT row_key FROM survey_status WHERE no_contact = 1").all()).results || []).map((x) => String(x.row_key).split("|").slice(1).join("|").toLowerCase()));
+  } catch (e) {
+  }
+  const skipped = list.filter((it) => blocked.has(it.to)).map((it) => it.to);
+  list = list.filter((it) => !blocked.has(it.to));
+  if (!list.length) return { ok: false, error: skipped.length ? "Wszyscy adresaci maj\u0105 \u201Enie kontaktowa\u0107\u201D" : "Brak adresat\xF3w" };
+  if (list.some((it) => !it.subject)) return { ok: false, error: "Wpisz temat" };
+  if (list.some((it) => !it.html.replace(/<[^>]*>/g, "").trim())) return { ok: false, error: "Wpisz tre\u015B\u0107" };
+  if (list.some((it) => it.html.length > 3e6)) return { ok: false, error: "Wiadomo\u015B\u0107 jest za du\u017Ca" };
+  const logPrefix = b.kind === "reminder" ? "Przypomnienie: " : "Zbiorowa: ";
+  const to = list.map((it) => it.to), subject = list[0].subject, html = list[0].html;
+  await ensureGoogleTables(env);
+  const account = await appSettingGet(env, "google_account") || "";
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+  const sent = [], failed = [];
+  for (const it of list) {
+    const e = it.to;
+    const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: e, replyTo: who.email, subject: it.subject, html: it.html }));
+    if (s.ok) {
+      sent.push(e);
+      try {
+        await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", e, logPrefix + it.subject, who.email, s.id, Math.floor(Date.now() / 1e3)).run();
+      } catch (x) {
+      }
+    } else {
+      failed.push({ to: e, error: String(s.error || "").slice(0, 200) });
+      if (/quota|rate|limit/i.test(String(s.error))) break;
+    }
+  }
+  if (b.cc_me && sent.length) {
+    try {
+      await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: who.email, subject: "[kopia, wys\u0142ano do " + sent.length + "] " + subject, html }));
+    } catch (x) {
+    }
+  }
+  return { ok: true, sent: sent.length, failed, not_sent: to.length - sent.length - failed.length, skipped };
+}
+__name(svBulkMail, "svBulkMail");
+__name2(svBulkMail, "svBulkMail");
+async function svExportSheet(env) {
+  const L = await svList(env);
+  if (!L.ok) return L;
+  const id = await svSheetId(env);
+  const sids = [...new Set(L.items.map((x) => x.student && x.student.id).filter(Boolean).map(String))];
+  const tr = {};
+  if (sids.length) {
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    try {
+      await pg.connect();
+      for (const r of (await pg.query(`SELECT r.user_id::text AS sid, COUNT(*)::int AS n,
+          SUM(CASE WHEN r.created_at > now() - interval '30 days' THEN 1 ELSE 0 END)::int AS n30,
+          SUM(CASE WHEN r.reviewed_at IS NOT NULL THEN 1 ELSE 0 END)::int AS rev,
+          SUM(CASE WHEN r.is_correct = true THEN 1 ELSE 0 END)::int AS ok,
+          MIN(COALESCE(r.date, r.created_at::date))::text AS first, MAX(COALESCE(r.date, r.created_at::date))::text AS last
+        FROM records r WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL AND r.user_id::text = ANY($1) GROUP BY 1`, [sids])).rows) tr[r.sid] = r;
+    } catch (e) {
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+  }
+  const sym = {}, ed = {};
+  try {
+    await ssTable(env);
+    for (const x of (await env.DB.prepare("SELECT * FROM student_symptoms").all()).results || []) sym[x.ns_student_id] = x;
+  } catch (e) {
+  }
+  try {
+    await seTable(env);
+    for (const x of (await env.DB.prepare("SELECT * FROM survey_edits").all()).results || []) ed[x.ns_student_id] = x;
+  } catch (e) {
+  }
+  const H = L.header || [], d = /* @__PURE__ */ __name((t) => t ? new Date(t * 1e3).toISOString().slice(0, 10) : "", "d");
+  const editsTxt = /* @__PURE__ */ __name((e) => {
+    if (!e) return "";
+    let a = {}, ad = [];
+    try {
+      a = JSON.parse(e.answers || "{}");
+    } catch (x) {
+    }
+    try {
+      ad = JSON.parse(e.added || "[]");
+    } catch (x) {
+    }
+    return Object.entries(a).map(([k, v]) => String(H[+k] || "kol. " + k).replace(/\s+/g, " ").slice(0, 60) + ": " + v).concat(ad.map((x) => (x.q || x.group || "") + ": " + (x.a || ""))).join(" | ");
+  }, "editsTxt");
+  const symTxt = /* @__PURE__ */ __name((x) => {
+    if (!x) return "";
+    let lv = {}, ex = [];
+    try {
+      lv = JSON.parse(x.levels || "{}");
+    } catch (e) {
+    }
+    try {
+      ex = JSON.parse(x.extra || "[]");
+    } catch (e) {
+    }
+    const W = ["brak", "czasami", "cz\u0119sto", "zawsze"];
+    return Object.entries(lv).map(([k, v]) => String(H[+k] || "kol. " + k).replace(/\s+/g, " ").replace(/^.*\[(.*)\]\s*$/, "$1").slice(0, 50) + ": " + W[v]).concat(ex.map((e) => e.name + ": " + W[e.level])).join(" | ");
+  }, "symTxt");
+  const head = [
+    "Klucz ankiety (data|e-mail)",
+    "Data ankiety",
+    "Osoba",
+    "E-mail",
+    "Kursant w NS (id)",
+    "Kursant w NS",
+    "Oferta wys\u0142ana",
+    "Umowa wys\u0142ana",
+    "Wariant",
+    "Start kursu",
+    "Zadatek",
+    "Przypomnienie 7 dni",
+    "Nasilenie w rozmowie (trener)",
+    "Notatka do statusu",
+    "Nagrania razem",
+    "Nagrania 30 dni",
+    "Ocenione",
+    "Poprawne %",
+    "Pierwsze nagranie",
+    "Ostatnie nagranie",
+    "Objawy wg trenera",
+    "Notatki trenera (objawy)",
+    "Poprawki i informacje od trenera",
+    "Aktualizacja",
+    "Arkusz"
+  ];
+  const now = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace("T", " ");
+  const rows = L.items.filter((x) => !x.hidden && !x.merged_into).map((x) => {
+    const sid = x.student && x.student.id ? String(x.student.id) : "", t = tr[sid] || {}, b = x.booking || {};
+    const e = sid && ed[sid] || ed["row:" + x.key], sy = sid ? sym[sid] : null;
+    return [
+      x.key,
+      String(x.row[0] || ""),
+      x.name || "",
+      x.email || "",
+      sid,
+      x.student && x.student.name || "",
+      d(x.offer_at),
+      d(x.contract_at),
+      x.variant ? "Wariant " + x.variant + (x.variant_name ? " \u2013 " + x.variant_name : "") : "",
+      b.start_date || "",
+      d(b.deposit_at),
+      b.sent_at ? "wys\u0142ane " + d(b.sent_at) : b.deposit_at || b.remind_at ? "zaplanowane" : "",
+      SV_SEVERITY[x.severity || 0] || "",
+      x.status_note || "",
+      t.n || (sid ? 0 : ""),
+      t.n30 || (sid ? 0 : ""),
+      t.rev || (sid ? 0 : ""),
+      t.rev ? Math.round(100 * t.ok / t.rev) : "",
+      t.first || "",
+      t.last || "",
+      symTxt(sy),
+      sy && sy.notes || "",
+      editsTxt(e),
+      now,
+      x.source || "PL"
+    ];
+  });
+  const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=sheets.properties(title,sheetId)");
+  if (!meta.ok) return meta;
+  if (!(meta.data.sheets || []).some((x) => x.properties.title === SV_PANEL_TAB)) {
+    const a = await svGoogle(env, encodeURIComponent(id) + ":batchUpdate", { method: "POST", body: { requests: [{ addSheet: { properties: { title: SV_PANEL_TAB, gridProperties: { frozenRowCount: 1 } } } }] } });
+    if (!a.ok) return a.code === "scope" || a.code === "no_access" ? Object.assign(a, { error: "Brak zgody na zapis w arkuszu: po\u0142\u0105cz konto Google ponownie (\u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Roz\u0142\u0105cz \u2192 Po\u0142\u0105cz) i daj kontu " + (await appSettingGet(env, "google_account") || "") + " uprawnienie \u201EEdytuj\u0105cy\u201D w arkuszu." }) : a;
+  }
+  const rng = encodeURIComponent("'" + SV_PANEL_TAB + "'!A1:ZZ50000");
+  const c = await svGoogle(env, encodeURIComponent(id) + "/values/" + rng + ":clear", { method: "POST", body: {} });
+  if (!c.ok) return c;
+  const w = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + SV_PANEL_TAB + "'!A1") + "?valueInputOption=RAW", { method: "PUT", body: { values: [head].concat(rows) } });
+  if (!w.ok) return w;
+  await appSettingSet(env, "survey_export_at", String(Math.floor(Date.now() / 1e3)));
+  return { ok: true, rows: rows.length, tab: SV_PANEL_TAB, sheet_id: id };
+}
+__name(svExportSheet, "svExportSheet");
+__name2(svExportSheet, "svExportSheet");
 async function svList(env) {
   await ensureGoogleTables(env);
   await svLinksTable(env);
@@ -10245,10 +10989,21 @@ async function svList(env) {
   await pg.connect();
   try {
     const rows = (await pg.query(`SELECT u.id::text AS id, u.first_name, u.last_name, LOWER(u.email) AS email, u.created_at, u.role,
-        (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL)::int AS recs
+        (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL)::int AS recs,
+        (SELECT MAX(r.created_at) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL) AS last_rec,
+        (SELECT MAX(d.date)::text FROM diaries d WHERE d.user_id = u.id AND d.deleted_at IS NULL) AS last_diary
       FROM users u WHERE LOWER(u.email) = ANY($1) OR u.id::text = ANY($2) OR LOWER(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,''))) = ANY($3)`, [emails, ids, names])).rows;
     for (const u of rows) {
-      const o = { id: u.id, name: ((u.first_name || "") + " " + (u.last_name || "")).trim(), email: u.email, created_at: u.created_at, recs: u.recs, role: u.role };
+      const o = {
+        id: u.id,
+        name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
+        email: u.email,
+        created_at: u.created_at,
+        recs: u.recs,
+        role: u.role,
+        last_rec: u.last_rec ? Math.floor(new Date(u.last_rec).getTime() / 1e3) : null,
+        last_diary: u.last_diary ? String(u.last_diary).slice(0, 10) : null
+      };
       users[u.id] = o;
       if (u.email) byEmail[u.email] = byEmail[u.email] || o;
       const nk = o.name.toLowerCase();
@@ -10264,21 +11019,60 @@ async function svList(env) {
   try {
     for (const x of (await env.DB.prepare("SELECT LOWER(to_email) AS e, subject, created_at FROM email_log WHERE to_email IS NOT NULL").all()).results || []) {
       const s = sent[x.e] = sent[x.e] || {};
+      if (!s.last || x.created_at > s.last) {
+        s.last = x.created_at;
+        s.last_subject = x.subject || "";
+      }
+      if (/^Przypomnienie:/i.test(x.subject || "")) s.rem = (s.rem || 0) + 1;
       if (/^Oferta/i.test(x.subject || "")) s.offer = Math.max(s.offer || 0, x.created_at);
       if (/^Rezerwacja/i.test(x.subject || "")) s.contract = Math.max(s.contract || 0, x.created_at);
     }
   } catch (e) {
   }
+  const stat = {}, meta = {}, hidden = /* @__PURE__ */ new Set(), merged = {};
+  try {
+    await sstTable(env);
+    for (const x of (await env.DB.prepare("SELECT * FROM survey_status").all()).results || []) stat[x.row_key] = x;
+    for (const x of (await env.DB.prepare("SELECT row_key FROM survey_hidden").all()).results || []) hidden.add(x.row_key);
+    for (const x of (await env.DB.prepare("SELECT row_key, into_key FROM survey_merge").all()).results || []) merged[x.row_key] = x.into_key;
+    for (const x of (await env.DB.prepare("SELECT id, LOWER(to_email) AS e, kind, variant, variant_name, price, created_at, html_key, pdf_key FROM offer_meta ORDER BY created_at").all()).results || []) {
+      const m = meta[x.e] = meta[x.e] || {};
+      m[x.kind] = x;
+      if (x.html_key) {
+        (m.docs = m.docs || []).push({ id: x.id, kind: x.kind, at: x.created_at, pdf: !!x.pdf_key, variant: x.variant });
+      }
+    }
+  } catch (e) {
+  }
   try {
     await ofTables(env);
-    for (const x of (await env.DB.prepare("SELECT id, LOWER(to_email) AS e, start_date, deposit_at, sent_at FROM course_reminders WHERE COALESCE(cancelled, 0) = 0").all()).results || []) {
+    for (const x of (await env.DB.prepare("SELECT id, LOWER(to_email) AS e, start_date, deposit_at, sent_at, remind_at FROM course_reminders WHERE COALESCE(cancelled, 0) = 0").all()).results || []) {
       const b = book[x.e];
       if (!b || x.start_date > b.start_date) book[x.e] = x;
     }
   } catch (e) {
   }
+  const edits = {};
+  try {
+    await seTable(env);
+    for (const x of (await env.DB.prepare("SELECT ns_student_id, answers FROM survey_edits").all()).results || []) {
+      try {
+        edits[x.ns_student_id] = JSON.parse(x.answers || "{}");
+      } catch (e) {
+      }
+    }
+  } catch (e) {
+  }
   const items = R.rows.map((r, i) => {
-    const key = svKey(r), em = String(r[1] || "").trim().toLowerCase(), nm = svNameOf(r);
+    const key = svKey(r), em = String(r[1] || "").trim().toLowerCase();
+    const sidGuess = links[key] || byEmail[em] && byEmail[em].id || null;
+    const ov = Object.assign({}, edits["row:" + key] || {}, sidGuess && edits[String(sidGuess)] || {});
+    let rE = r;
+    if (Object.keys(ov).length) {
+      rE = r.slice();
+      for (const [k, v] of Object.entries(ov)) rE[+k] = v;
+    }
+    const nm = svNameOf(rE);
     let stu = null, how = null, suggest = null;
     if (links[key] !== void 0) {
       stu = links[key] ? users[links[key]] || { id: links[key] } : null;
@@ -10290,6 +11084,7 @@ async function svList(env) {
       const c = byName[nm.name.toLowerCase()];
       if (c && c.length === 1) suggest = c[0];
     }
+    const st = stat[key] || {}, mt = meta[em] || {}, ctr = mt.contract || null, off = mt.offer || null;
     return {
       n: i + 2,
       key,
@@ -10301,12 +11096,33 @@ async function svList(env) {
       student: stu,
       matched_by: how,
       suggest,
-      offer_at: (sent[em] || {}).offer || null,
-      contract_at: (sent[em] || {}).contract || null,
+      offer_at: Math.max((sent[em] || {}).offer || 0, st.offer_at || 0, off && off.created_at || 0) || null,
+      contract_at: Math.max((sent[em] || {}).contract || 0, st.contract_at || 0, ctr && ctr.created_at || 0) || null,
+      offer_manual: !!st.offer_at,
+      contract_manual: !!st.contract_at,
+      variant: st.variant || ctr && ctr.variant || null,
+      variant_name: !st.variant && ctr && ctr.variant_name || null,
+      offer_variant: off && off.variant || null,
+      severity: st.severity || 0,
+      status_note: st.note || "",
+      no_contact: !!st.no_contact,
+      last_contact_at: (sent[em] || {}).last || null,
+      last_contact_subject: (sent[em] || {}).last_subject || "",
+      reminders_sent: (sent[em] || {}).rem || 0,
+      hidden: hidden.has(key),
+      merged_into: merged[key] || null,
+      sent_docs: (mt.docs || []).slice(-6),
+      source: r._src || null,
+      lang: r._lang || null,
       booking: book[em] || null
     };
   });
-  return { ok: true, header: R.header, items };
+  const byKey = {};
+  items.forEach((x) => byKey[x.key] = x);
+  items.forEach((x) => {
+    if (x.merged_into && byKey[x.merged_into]) (byKey[x.merged_into].merged = byKey[x.merged_into].merged || []).push({ key: x.key, row: x.row, name: x.name, parent: x.parent, email: x.email, child: x.child });
+  });
+  return { ok: true, header: R.header, tabs: R.tabs || [], extra_errors: R.extra_errors || [], items };
 }
 __name(svList, "svList");
 __name2(svList, "svList");
@@ -10333,12 +11149,88 @@ async function svForStudent(env, sid) {
       }
     }
     const off = new Set(((await env.DB.prepare("SELECT row_key FROM survey_links WHERE COALESCE(ns_student_id, '') = ''").all()).results || []).map((x) => x.row_key));
-    if (em) row = R.rows.filter((r) => String(r[1] || "").trim().toLowerCase() === em && !off.has(svKey(r))).pop() || null;
+    let hid = /* @__PURE__ */ new Set();
+    try {
+      await sstTable(env);
+      hid = new Set(((await env.DB.prepare("SELECT row_key FROM survey_hidden").all()).results || []).map((x) => x.row_key));
+    } catch (e) {
+    }
+    if (em) row = R.rows.filter((r) => String(r[1] || "").trim().toLowerCase() === em && !off.has(svKey(r)) && !hid.has(svKey(r))).pop() || null;
   }
-  return { ok: true, header: R.header, row };
+  let merged_rows = [];
+  try {
+    await sstTable(env);
+    const mg = (await env.DB.prepare("SELECT row_key, into_key FROM survey_merge").all()).results || [];
+    if (row) {
+      const into = (mg.find((m) => m.row_key === svKey(row)) || {}).into_key;
+      if (into) {
+        const r2 = R.rows.find((r) => svKey(r) === into);
+        if (r2) row = r2;
+      }
+    }
+    if (row) {
+      const k = svKey(row);
+      const ks = mg.filter((m) => m.into_key === k).map((m) => m.row_key);
+      merged_rows = R.rows.filter((r) => ks.includes(svKey(r)));
+    }
+  } catch (e) {
+  }
+  return { ok: true, header: R.header, row, row_key: row ? svKey(row) : null, merged_rows };
 }
 __name(svForStudent, "svForStudent");
 __name2(svForStudent, "svForStudent");
+async function trainerActivity(env) {
+  const out = {}, now = Math.floor(Date.now() / 1e3), d90 = now - 90 * 86400;
+  const put = /* @__PURE__ */ __name((em, k, v) => {
+    em = String(em || "").toLowerCase();
+    if (!em) return;
+    const o = out[em] || (out[em] = {});
+    o[k] = v;
+  }, "put");
+  const q = /* @__PURE__ */ __name(async (sql, ...b) => {
+    try {
+      return (await env.DB.prepare(sql).bind(...b).all()).results || [];
+    } catch (e) {
+      return [];
+    }
+  }, "q");
+  for (const r of await q("SELECT LOWER(trainer_email) AS e, MAX(created_at) AS last, SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS n90, COUNT(*) AS n FROM review_log GROUP BY 1", d90)) {
+    put(r.e, "last_review", r.last);
+    put(r.e, "reviews_90d", r.n90);
+    put(r.e, "reviews", r.n);
+  }
+  for (const r of await q("SELECT LOWER(trainer_email) AS e, MAX(created_at) AS last FROM call_days GROUP BY 1")) put(r.e, "last_call_day", r.last);
+  for (const r of await q("SELECT LOWER(sent_by) AS e, MAX(created_at) AS last FROM email_log GROUP BY 1")) put(r.e, "last_email", r.last);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  try {
+    await pg.connect();
+    const cols = (await pg.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'users' AND column_name IN ('last_sign_in_at','current_sign_in_at','updated_at')")).rows.map((r) => r.column_name);
+    const sign = cols.filter((c) => /sign_in/.test(c));
+    const signSql = sign.length ? "GREATEST(" + sign.map((c) => "u." + c).join(",") + ")" : "NULL";
+    const rows = (await pg.query(`SELECT LOWER(u.email) AS e, ${signSql} AS last_sign_in,
+        (SELECT COUNT(DISTINCT s.id) FROM students_groups_users sgu JOIN users s ON s.students_group_id = sgu.students_group_id AND s.deleted_at IS NULL WHERE sgu.user_id = u.id) AS students
+      FROM users u WHERE u.role IN ('trainer','admin') AND u.deleted_at IS NULL`)).rows;
+    for (const r of rows) {
+      put(r.e, "last_sign_in", r.last_sign_in ? Math.floor(new Date(r.last_sign_in).getTime() / 1e3) : null);
+      put(r.e, "students", +r.students || 0);
+    }
+  } catch (e) {
+    out._pg_error = String(e && e.message || e).slice(0, 200);
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  for (const [em, o] of Object.entries(out)) {
+    if (em[0] === "_") continue;
+    o.last_any = Math.max(o.last_review || 0, o.last_call_day || 0, o.last_email || 0, o.last_sign_in || 0) || null;
+  }
+  const pgErr = out._pg_error || null;
+  delete out._pg_error;
+  return { ok: true, items: out, pg_error: pgErr };
+}
+__name(trainerActivity, "trainerActivity");
 async function seTable(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_edits (ns_student_id TEXT PRIMARY KEY, answers TEXT, added TEXT, updated_by TEXT, updated_at INTEGER)").run();
 }
@@ -10360,6 +11252,15 @@ async function seGet(env, sid) {
 }
 __name(seGet, "seGet");
 __name2(seGet, "seGet");
+async function seMerged(env, sid, rowKey) {
+  const st = sid ? await seGet(env, sid) : { answers: {}, added: [] };
+  if (!rowKey) return st;
+  const rk = await seGet(env, "row:" + rowKey);
+  if (!rk.updated_at) return st;
+  return { answers: Object.assign({}, rk.answers, st.answers), added: (rk.added || []).concat(st.added || []), updated_by: st.updated_by || rk.updated_by, updated_at: Math.max(st.updated_at || 0, rk.updated_at || 0) };
+}
+__name(seMerged, "seMerged");
+__name2(seMerged, "seMerged");
 async function ssTable(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS student_symptoms (ns_student_id TEXT PRIMARY KEY, levels TEXT, extra TEXT, notes TEXT, updated_by TEXT, updated_at INTEGER)").run();
 }
