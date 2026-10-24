@@ -5985,6 +5985,7 @@ var worker_default = {
           return json({ ok: true, count: keys.length });
         }
         if (url.pathname === "/surveys/bulk-mail") {
+          body._base = url.origin;
           const r2 = await svBulkMail(env, who, body);
           return json(r2, r2.ok ? 200 : 400);
         }
@@ -6135,6 +6136,7 @@ var worker_default = {
       if (url.pathname === "/offers/send" && request.method === "POST") return await handleOfferSend(request, env);
       if (url.pathname === "/offers/translate" && request.method === "POST") return await handleOfferTranslate(request, env);
       if (url.pathname === "/raty" && request.method === "GET") return ofRatyPage(url);
+      if (url.pathname === "/r" && (request.method === "GET" || request.method === "POST")) return await svReplyPage(request, env, url);
       if (url.pathname === "/offers/sent-file" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -10301,6 +10303,83 @@ Zasady:
 }
 __name(handleOfferTranslate, "handleOfferTranslate");
 __name2(handleOfferTranslate, "handleOfferTranslate");
+async function svReplySalt(env) {
+  await ensureTranscriptTables(env);
+  const r = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'reply_salt'").first();
+  if (r && r.v) return r.v;
+  const b = new Uint8Array(24);
+  crypto.getRandomValues(b);
+  const v = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES ('reply_salt', ?) ON CONFLICT(k) DO NOTHING").bind(v).run();
+  const again = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = 'reply_salt'").first();
+  return again && again.v || v;
+}
+__name(svReplySalt, "svReplySalt");
+__name2(svReplySalt, "svReplySalt");
+function svB64u(t) {
+  return btoa(unescape(encodeURIComponent(t))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+__name(svB64u, "svB64u");
+function svUnB64u(t) {
+  try {
+    return decodeURIComponent(escape(atob(String(t || "").replace(/-/g, "+").replace(/_/g, "/"))));
+  } catch (e) {
+    return "";
+  }
+}
+__name(svUnB64u, "svUnB64u");
+async function svReplySig(env, email, key) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(await svReplySalt(env)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(String(email).toLowerCase() + "|" + String(key || "")));
+  return [...new Uint8Array(sig)].slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+__name(svReplySig, "svReplySig");
+async function svReplyLinks(env, base, email, key) {
+  const q = "e=" + svB64u(String(email).toLowerCase()) + "&k=" + svB64u(String(key || "")) + "&s=" + await svReplySig(env, email, key);
+  return { keep: base + "/r?" + q + "&a=keep", stop: base + "/r?" + q + "&a=stop" };
+}
+__name(svReplyLinks, "svReplyLinks");
+async function svReplyPage(request, env, url) {
+  let p = Object.fromEntries(url.searchParams.entries());
+  if (request.method === "POST") {
+    try {
+      const f = await request.formData();
+      for (const [k, v] of f.entries()) p[k] = String(v);
+    } catch (e) {
+    }
+  }
+  const email = svUnB64u(p.e).toLowerCase(), key = svUnB64u(p.k), act = p.a === "stop" ? "stop" : "keep";
+  const page = /* @__PURE__ */ __name((title, body) => new Response(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowa Mowa</title><style>body{margin:0;background:#f4f1ed;font-family:Arial,Helvetica,sans-serif;color:#2b2b2b}.w{max-width:560px;margin:0 auto;padding:16px}.h{background:#1E1E1E;color:#fff;padding:16px 20px;border-top:6px solid #F5A623;border-radius:10px 10px 0 0}.h b{color:#F5A623;font-size:12px;letter-spacing:2px}.c{background:#fff;padding:20px;border-radius:0 0 10px 10px;line-height:1.6}button{background:#E8820C;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer}button.g{background:#8C7A5C}textarea,input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #E5DCCB;border-radius:8px;font-size:15px;margin:6px 0 12px;font-family:inherit}</style></head><body><div class="w"><div class="h"><b>SZKO\u0141A NOWEJ MOWY</b><div style="font-size:20px;font-weight:bold">\u{1F5E3} Nowa Mowa</div></div><div class="c"><h2 style="margin-top:0">${title}</h2>${body}</div></div></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }), "page");
+  if (!email || !/^[0-9a-f]{24}$/.test(String(p.s || "")) || p.s !== await svReplySig(env, email, key)) return page("Link jest nieaktualny", "<p>Nie uda\u0142o si\u0119 odczyta\u0107 odpowiedzi. Wystarczy odpisa\u0107 na maila \u2014 przeczytamy wiadomo\u015B\u0107.</p>");
+  const hidden = `<input type="hidden" name="e" value="${ofEsc(p.e)}"><input type="hidden" name="k" value="${ofEsc(p.k)}"><input type="hidden" name="s" value="${ofEsc(p.s)}"><input type="hidden" name="a" value="${act}">`;
+  if (request.method === "GET") {
+    return act === "stop" ? page("Nie chcesz kolejnych wiadomo\u015Bci?", `<p>Po potwierdzeniu nie wy\u015Blemy ju\u017C przypomnie\u0144 ani wiadomo\u015Bci zbiorowych na adres <b>${ofEsc(email)}</b>.</p><form method="post">${hidden}<label>Je\u015Bli chcesz, napisz dlaczego (opcjonalnie):</label><textarea name="m" rows="3"></textarea><button class="g" type="submit">Potwierdzam \u2014 nie chc\u0119 wiadomo\u015Bci</button></form>`) : page("Super \u2014 zosta\u0144my w kontakcie! \u{1F642}", `<p>Trener odezwie si\u0119 do Ciebie. Mo\u017Cesz dopisa\u0107, kiedy najlepiej zadzwoni\u0107 albo o co chcesz zapyta\u0107:</p><form method="post">${hidden}<label>Telefon (opcjonalnie)</label><input name="t" inputmode="tel"><label>Wiadomo\u015B\u0107 dla trenera (opcjonalnie)</label><textarea name="m" rows="4"></textarea><button type="submit">\u2705 Chc\u0119 by\u0107 w kontakcie z trenerem</button></form>`);
+  }
+  const msg = String(p.m || "").slice(0, 2e3), tel = String(p.t || "").slice(0, 40), now = Math.floor(Date.now() / 1e3);
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS contact_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, row_key TEXT, action TEXT, message TEXT, phone TEXT, created_at INTEGER)").run();
+  const dup = await env.DB.prepare("SELECT id FROM contact_replies WHERE email = ? AND action = ? AND created_at > ?").bind(email, act, now - 60).first();
+  if (!dup) {
+    await env.DB.prepare("INSERT INTO contact_replies (email, row_key, action, message, phone, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(email, key, act, msg, tel, now).run();
+    if (act === "stop" && key) {
+      try {
+        await sstTable(env);
+        await env.DB.prepare("INSERT INTO survey_status (row_key, no_contact, updated_by, updated_at) VALUES (?, 1, ?, ?) ON CONFLICT(row_key) DO UPDATE SET no_contact = 1, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(key, "odpowied\u017A z maila", now).run();
+      } catch (e) {
+      }
+    }
+    try {
+      await ensureGoogleTables(env);
+      const account = await appSettingGet(env, "google_account") || "";
+      const subj = (act === "stop" ? "\u{1F6AB} Rezygnacja z wiadomo\u015Bci: " : "\u2705 Chce kontaktu z trenerem: ") + email;
+      const html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55">' + (act === "stop" ? "<p><b>" + ofEsc(email) + "</b> nie chce kolejnych wiadomo\u015Bci. W panelu ustawiono \u201E\u{1F6AB} nie kontaktowa\u0107\u201D.</p>" : "<p><b>" + ofEsc(email) + "</b> chce by\u0107 w kontakcie z trenerem.</p>") + (tel ? "<p>\u{1F4DE} Telefon: <b>" + ofEsc(tel) + "</b></p>" : "") + (msg ? '<p>\u{1F4AC} Wiadomo\u015B\u0107:</p><blockquote style="border-left:4px solid #F5A623;margin:0;padding:6px 12px;background:#FFF6E8">' + ofEsc(msg).replace(/\n/g, "<br>") + "</blockquote>" : "") + '<p style="color:#8C7A5C;font-size:13px">Ankieta: ' + ofEsc(key || "\u2014") + " \xB7 panel trenera \u2192 \u{1F4CB} Ankiety</p></div>";
+      await ofGmailSend(env, ofMime({ from: account, fromName: "Panel Nowej Mowy", to: ofReminderTo(env), replyTo: email, subject: subj, html }));
+    } catch (e) {
+    }
+  }
+  return act === "stop" ? page("Dzi\u0119kujemy \u{1F64F}", "<p>Nie wy\u015Blemy ju\u017C kolejnych wiadomo\u015Bci. Gdyby\u015B kiedy\u015B chcia\u0142(a) wr\xF3ci\u0107 do tematu \u2014 wystarczy napisa\u0107.</p>") : page("Dzi\u0119kujemy! \u{1F642}", "<p>Trener dosta\u0142 Twoj\u0105 odpowied\u017A i wkr\xF3tce si\u0119 odezwie. Trzymamy kciuki!</p>");
+}
+__name(svReplyPage, "svReplyPage");
+__name2(svReplyPage, "svReplyPage");
 function ofRatyPage(url) {
   let d = {};
   try {
@@ -10812,8 +10891,17 @@ async function svBulkMail(env, who, b) {
   const account = await appSettingGet(env, "google_account") || "";
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
   const sent = [], failed = [];
+  const rowKeys = {};
+  (Array.isArray(b.items) ? b.items : []).forEach((x) => {
+    if (x && x.to && x.row_key) rowKeys[String(x.to).trim().toLowerCase()] = String(x.row_key).slice(0, 300);
+  });
+  const base = new URL(String(b._base || "https://newspeech-backend.mowaiemocje.workers.dev")).origin;
   for (const it of list) {
     const e = it.to;
+    if (/__NM_KEEP__|__NM_STOP__/.test(it.html)) {
+      const L = await svReplyLinks(env, base, e, rowKeys[e] || "");
+      it.html = it.html.split("__NM_KEEP__").join(L.keep).split("__NM_STOP__").join(L.stop);
+    }
     const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: e, replyTo: who.email, subject: it.subject, html: it.html }));
     if (s.ok) {
       sent.push(e);
@@ -11029,7 +11117,11 @@ async function svList(env) {
     }
   } catch (e) {
   }
-  const stat = {}, meta = {}, hidden = /* @__PURE__ */ new Set(), merged = {};
+  const stat = {}, meta = {}, hidden = /* @__PURE__ */ new Set(), merged = {}, replies = {};
+  try {
+    for (const x of (await env.DB.prepare("SELECT email, action, message, phone, created_at FROM contact_replies ORDER BY created_at").all()).results || []) replies[x.email] = x;
+  } catch (e) {
+  }
   try {
     await sstTable(env);
     for (const x of (await env.DB.prepare("SELECT * FROM survey_status").all()).results || []) stat[x.row_key] = x;
@@ -11111,6 +11203,7 @@ async function svList(env) {
       reminders_sent: (sent[em] || {}).rem || 0,
       hidden: hidden.has(key),
       merged_into: merged[key] || null,
+      reply: replies[em] || null,
       sent_docs: (mt.docs || []).slice(-6),
       source: r._src || null,
       lang: r._lang || null,
