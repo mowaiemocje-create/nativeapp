@@ -5921,6 +5921,118 @@ var worker_default = {
         await env.DB.prepare("INSERT INTO student_report_job (ns_student_id, days, status, error, requested_by, created_at, started_at, finished_at, tries, extra) VALUES (?, ?, 'queued', NULL, ?, ?, NULL, NULL, 0, ?) ON CONFLICT(ns_student_id) DO UPDATE SET days = excluded.days, status = 'queued', error = NULL, requested_by = excluded.requested_by, created_at = excluded.created_at, started_at = NULL, finished_at = NULL, tries = 0, extra = excluded.extra").bind(sid, days, String(who.email || ""), now, extra).run();
         return json({ ok: true, queued: true, job: { status: "queued", days, created_at: now } });
       }
+      if (url.pathname === "/surveys/list" || url.pathname === "/surveys/link") {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : { ns_token: url.searchParams.get("ns_token"), ns_email: url.searchParams.get("ns_email"), ns_server: url.searchParams.get("ns_server") };
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/surveys/link") {
+          await svLinksTable(env);
+          const key = String(body.row_key || "");
+          if (!key) return json({ error: "Brak ankiety" }, 400);
+          if (body.clear) await env.DB.prepare("DELETE FROM survey_links WHERE row_key = ?").bind(key).run();
+          else await env.DB.prepare("INSERT INTO survey_links (row_key, ns_student_id, linked_by, linked_at) VALUES (?, ?, ?, ?) ON CONFLICT(row_key) DO UPDATE SET ns_student_id = excluded.ns_student_id, linked_by = excluded.linked_by, linked_at = excluded.linked_at").bind(key, body.student_id ? String(body.student_id) : "", String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+          return json({ ok: true });
+        }
+        const r = await svList(env);
+        return json(r, r.ok ? 200 : 400);
+      }
+      if (url.pathname === "/student-symptoms" || url.pathname === "/student-symptoms/save") {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : { ns_token: url.searchParams.get("ns_token"), ns_email: url.searchParams.get("ns_email"), ns_server: url.searchParams.get("ns_server"), student_id: url.searchParams.get("student_id") };
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(src.student_id || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        await ssTable(env);
+        if (url.pathname === "/student-symptoms/save" && request.method === "POST") {
+          const lv = {};
+          for (const [k, v] of Object.entries(body.levels || {})) {
+            const n = Number(v);
+            if (/^\d{1,3}$/.test(k) && n >= 0 && n <= 3) lv[k] = n;
+          }
+          const ex = (Array.isArray(body.extra) ? body.extra : []).slice(0, 40).map((x) => ({ name: String(x && x.name || "").slice(0, 120), level: Math.max(0, Math.min(3, Number(x && x.level) || 0)) })).filter((x) => x.name);
+          await env.DB.prepare("INSERT INTO student_symptoms (ns_student_id, levels, extra, notes, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(ns_student_id) DO UPDATE SET levels = excluded.levels, extra = excluded.extra, notes = excluded.notes, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(sid, JSON.stringify(lv), JSON.stringify(ex), String(body.notes || "").slice(0, 8e3), String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+        }
+        const row = await env.DB.prepare("SELECT levels, extra, notes, updated_by, updated_at FROM student_symptoms WHERE ns_student_id = ?").bind(sid).first();
+        let levels = {}, extra = [];
+        try {
+          levels = row && row.levels ? JSON.parse(row.levels) : {};
+        } catch (e) {
+        }
+        try {
+          extra = row && row.extra ? JSON.parse(row.extra) : [];
+        } catch (e) {
+        }
+        return json({ ok: true, levels, extra, notes: row && row.notes || "", updated_by: row && row.updated_by, updated_at: row && row.updated_at });
+      }
+      if (url.pathname === "/surveys/for-student" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(url.searchParams.get("student_id") || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        const r = await svForStudent(env, sid);
+        try {
+          r.edits = await seGet(env, sid);
+        } catch (e) {
+          r.edits = null;
+        }
+        if (!r.ok) return json({ ok: true, row: null, header: [], edits: r.edits, sheet_error: r.error || null });
+        return json(r);
+      }
+      if (url.pathname === "/surveys/edit" && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (e) {
+        }
+        const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(body.student_id || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        await seTable(env);
+        const answers = {};
+        for (const [k, v] of Object.entries(body.answers || {})) if (/^\d{1,3}$/.test(k)) answers[k] = String(v == null ? "" : v).slice(0, 4e3);
+        const added = (Array.isArray(body.added) ? body.added : []).slice(0, 100).map((x) => ({ group: String(x && x.group || "").slice(0, 60), q: String(x && x.q || "").slice(0, 300), a: String(x && x.a || "").slice(0, 4e3) })).filter((x) => x.q || x.a);
+        await env.DB.prepare("INSERT INTO survey_edits (ns_student_id, answers, added, updated_by, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(ns_student_id) DO UPDATE SET answers = excluded.answers, added = excluded.added, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(sid, JSON.stringify(answers), JSON.stringify(added), String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+        return json({ ok: true, edits: await seGet(env, sid) });
+      }
+      if (url.pathname === "/surveys/check" || url.pathname === "/surveys/sheet") {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : { ns_token: url.searchParams.get("ns_token"), ns_email: url.searchParams.get("ns_email"), ns_server: url.searchParams.get("ns_server") };
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/surveys/sheet" && request.method === "POST") {
+          const m = String(body.sheet || "").match(/[-\w]{30,}/);
+          if (!m) return json({ error: "Wklej link do arkusza Google" }, 400);
+          await ensureGoogleTables(env);
+          await appSettingSet(env, "survey_sheet_id", m[0]);
+        }
+        return json(await svCheck(env));
+      }
       if (url.pathname === "/offers/send" && request.method === "POST") return await handleOfferSend(request, env);
       if (url.pathname.startsWith("/offers/reminders")) {
         let body = {};
@@ -7919,7 +8031,7 @@ async function handleDocumentsAction(request, env, action) {
 }
 __name(handleDocumentsAction, "handleDocumentsAction");
 __name2(handleDocumentsAction, "handleDocumentsAction");
-var GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send";
+var GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/spreadsheets.readonly";
 function googleOAuthRedirectUri(url) {
   return url.origin + "/google/oauth/callback";
 }
@@ -8021,7 +8133,8 @@ async function handleGoogleOAuthStatus(request, env, url) {
     connected_by: await appSettingGet(env, "google_connected_by"),
     redirect_uri: googleOAuthRedirectUri(url),
     cc: callDaysCc(env),
-    gmail_ok: /gmail\.send/.test(await appSettingGet(env, "google_scopes") || "")
+    gmail_ok: /gmail\.send/.test(await appSettingGet(env, "google_scopes") || ""),
+    sheets_ok: /spreadsheets/.test(await appSettingGet(env, "google_scopes") || "")
   });
 }
 __name(handleGoogleOAuthStatus, "handleGoogleOAuthStatus");
@@ -10042,6 +10155,216 @@ async function ofReminderTick(env) {
 }
 __name(ofReminderTick, "ofReminderTick");
 __name2(ofReminderTick, "ofReminderTick");
+var SURVEY_SHEET_DEFAULT = "1AWb_-zkarsGS90oQX8KTQSFJT0INEhVkO-TaTc9xhO8";
+async function svSheetId(env) {
+  return await appSettingGet(env, "survey_sheet_id") || SURVEY_SHEET_DEFAULT;
+}
+__name(svSheetId, "svSheetId");
+__name2(svSheetId, "svSheetId");
+async function svGoogle(env, path) {
+  const token = await googleOAuthAccessToken(env);
+  if (!token) return { ok: false, code: "no_google", error: "Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz." };
+  const r = await fetch("https://sheets.googleapis.com/v4/spreadsheets/" + path, { headers: { Authorization: "Bearer " + token } });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok) return { ok: true, data: d };
+  const msg = d && d.error && d.error.message || "status " + r.status;
+  if (/has not been used|is disabled|SERVICE_DISABLED|accessNotConfigured/i.test(msg)) {
+    const m = msg.match(/https:\/\/console\.developers\.google\.com\/\S+?(?=\s|$)/);
+    return { ok: false, code: "api_disabled", error: "W Google Cloud nie jest w\u0142\u0105czone Google Sheets API.", link: m ? m[0] : "https://console.cloud.google.com/apis/library/sheets.googleapis.com" };
+  }
+  if (r.status === 403 && /insufficient|scope/i.test(msg)) return { ok: false, code: "scope", error: "Po\u0142\u0105czone konto Google nie ma zgody na odczyt arkuszy \u2014 po\u0142\u0105cz je ponownie (\u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Roz\u0142\u0105cz \u2192 Po\u0142\u0105cz) i zaznacz dost\u0119p do arkuszy." };
+  if (r.status === 403) return { ok: false, code: "no_access", error: "Po\u0142\u0105czone konto Google nie ma dost\u0119pu do tego arkusza \u2014 udost\u0119pnij arkusz temu kontu (Udost\u0119pnij \u2192 dodaj adres \u2192 Przegl\u0105daj\u0105cy)." };
+  if (r.status === 404) return { ok: false, code: "not_found", error: "Nie znaleziono arkusza \u2014 sprawd\u017A link." };
+  return { ok: false, code: "other", error: "Google Sheets: " + msg };
+}
+__name(svGoogle, "svGoogle");
+__name2(svGoogle, "svGoogle");
+async function svCheck(env) {
+  await ensureGoogleTables(env);
+  const id = await svSheetId(env), account = await appSettingGet(env, "google_account");
+  const scopes = await appSettingGet(env, "google_scopes") || "";
+  const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=properties.title,sheets.properties(title,gridProperties)");
+  if (!meta.ok) return { ok: false, account, sheet_id: id, scope_ok: /spreadsheets/.test(scopes), ...meta };
+  const sheets = (meta.data.sheets || []).map((s) => ({ title: s.properties.title, rows: s.properties.gridProperties && s.properties.gridProperties.rowCount, cols: s.properties.gridProperties && s.properties.gridProperties.columnCount }));
+  let filled = null, headers = 0;
+  if (sheets.length) {
+    const v = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + sheets[0].title.replace(/'/g, "''") + "'!A1:A5000") + "?majorDimension=COLUMNS");
+    if (v.ok) filled = Math.max(0, ((v.data.values || [])[0] || []).filter((x) => String(x || "").trim()).length - 1);
+    const h = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + sheets[0].title.replace(/'/g, "''") + "'!1:1"));
+    if (h.ok) headers = ((h.data.values || [])[0] || []).length;
+  }
+  return { ok: true, account, sheet_id: id, title: meta.data.properties && meta.data.properties.title, sheets, responses: filled, columns: headers };
+}
+__name(svCheck, "svCheck");
+__name2(svCheck, "svCheck");
+function svKey(row) {
+  return String(row[0] || "").trim() + "|" + String(row[1] || "").trim().toLowerCase();
+}
+__name(svKey, "svKey");
+__name2(svKey, "svKey");
+function svNameOf(row) {
+  const t = /* @__PURE__ */ __name((i) => String(row[i] || "").replace(/\s+/g, " ").trim(), "t");
+  const child = /rodzic/i.test(t(2)) || !!t(21);
+  if (child) {
+    const ln = t(20).split(" ").slice(1).join(" ");
+    return { child: true, name: (t(21) + (ln ? " " + ln : "")).trim(), parent: t(20) };
+  }
+  return { child: false, name: t(3), parent: "" };
+}
+__name(svNameOf, "svNameOf");
+__name2(svNameOf, "svNameOf");
+async function svLinksTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_links (row_key TEXT PRIMARY KEY, ns_student_id TEXT, linked_by TEXT, linked_at INTEGER)").run();
+}
+__name(svLinksTable, "svLinksTable");
+__name2(svLinksTable, "svLinksTable");
+async function svRows(env) {
+  const id = await svSheetId(env);
+  const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=sheets.properties(title)");
+  if (!meta.ok) return meta;
+  const title = (((meta.data.sheets || [])[0] || {}).properties || {}).title || "Arkusz1";
+  const v = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + title.replace(/'/g, "''") + "'!A1:ZZ5000"));
+  if (!v.ok) return v;
+  const vals = v.data.values || [];
+  return { ok: true, header: vals[0] || [], rows: vals.slice(1).filter((r) => r && r.length > 2 && String(r[1] || r[0] || "").trim()) };
+}
+__name(svRows, "svRows");
+__name2(svRows, "svRows");
+async function svList(env) {
+  await ensureGoogleTables(env);
+  await svLinksTable(env);
+  const R = await svRows(env);
+  if (!R.ok) return R;
+  const links = {};
+  for (const x of (await env.DB.prepare("SELECT row_key, ns_student_id FROM survey_links").all()).results || []) links[x.row_key] = x.ns_student_id;
+  const emails = [...new Set(R.rows.map((r) => String(r[1] || "").trim().toLowerCase()).filter((e) => /@/.test(e)))];
+  const names = R.rows.map((r) => svNameOf(r).name.toLowerCase()).filter(Boolean);
+  const ids = Object.values(links).filter(Boolean);
+  const users = {}, byEmail = {}, byName = {};
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  try {
+    const rows = (await pg.query(`SELECT u.id::text AS id, u.first_name, u.last_name, LOWER(u.email) AS email, u.created_at, u.role,
+        (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL)::int AS recs
+      FROM users u WHERE LOWER(u.email) = ANY($1) OR u.id::text = ANY($2) OR LOWER(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,''))) = ANY($3)`, [emails, ids, names])).rows;
+    for (const u of rows) {
+      const o = { id: u.id, name: ((u.first_name || "") + " " + (u.last_name || "")).trim(), email: u.email, created_at: u.created_at, recs: u.recs, role: u.role };
+      users[u.id] = o;
+      if (u.email) byEmail[u.email] = byEmail[u.email] || o;
+      const nk = o.name.toLowerCase();
+      (byName[nk] = byName[nk] || []).push(o);
+    }
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const sent = {}, book = {};
+  try {
+    for (const x of (await env.DB.prepare("SELECT LOWER(to_email) AS e, subject, created_at FROM email_log WHERE to_email IS NOT NULL").all()).results || []) {
+      const s = sent[x.e] = sent[x.e] || {};
+      if (/^Oferta/i.test(x.subject || "")) s.offer = Math.max(s.offer || 0, x.created_at);
+      if (/^Rezerwacja/i.test(x.subject || "")) s.contract = Math.max(s.contract || 0, x.created_at);
+    }
+  } catch (e) {
+  }
+  try {
+    await ofTables(env);
+    for (const x of (await env.DB.prepare("SELECT id, LOWER(to_email) AS e, start_date, deposit_at, sent_at FROM course_reminders WHERE COALESCE(cancelled, 0) = 0").all()).results || []) {
+      const b = book[x.e];
+      if (!b || x.start_date > b.start_date) book[x.e] = x;
+    }
+  } catch (e) {
+  }
+  const items = R.rows.map((r, i) => {
+    const key = svKey(r), em = String(r[1] || "").trim().toLowerCase(), nm = svNameOf(r);
+    let stu = null, how = null, suggest = null;
+    if (links[key] !== void 0) {
+      stu = links[key] ? users[links[key]] || { id: links[key] } : null;
+      how = links[key] ? "r\u0119cznie" : "od\u0142\u0105czone";
+    } else if (byEmail[em]) {
+      stu = byEmail[em];
+      how = "e-mail";
+    } else {
+      const c = byName[nm.name.toLowerCase()];
+      if (c && c.length === 1) suggest = c[0];
+    }
+    return {
+      n: i + 2,
+      key,
+      row: r,
+      child: nm.child,
+      name: nm.name,
+      parent: nm.parent,
+      email: em,
+      student: stu,
+      matched_by: how,
+      suggest,
+      offer_at: (sent[em] || {}).offer || null,
+      contract_at: (sent[em] || {}).contract || null,
+      booking: book[em] || null
+    };
+  });
+  return { ok: true, header: R.header, items };
+}
+__name(svList, "svList");
+__name2(svList, "svList");
+async function svForStudent(env, sid) {
+  await svLinksTable(env);
+  const R = await svRows(env);
+  if (!R.ok) return R;
+  const linked = (await env.DB.prepare("SELECT row_key FROM survey_links WHERE ns_student_id = ?").bind(String(sid)).all()).results || [];
+  let row = null;
+  if (linked.length) {
+    const keys = linked.map((x) => x.row_key);
+    row = R.rows.filter((r) => keys.includes(svKey(r))).pop() || null;
+  }
+  if (!row) {
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    await pg.connect();
+    let em = null;
+    try {
+      em = ((await pg.query("SELECT LOWER(email) AS e FROM users WHERE id::text = $1", [String(sid)])).rows[0] || {}).e;
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+    const off = new Set(((await env.DB.prepare("SELECT row_key FROM survey_links WHERE COALESCE(ns_student_id, '') = ''").all()).results || []).map((x) => x.row_key));
+    if (em) row = R.rows.filter((r) => String(r[1] || "").trim().toLowerCase() === em && !off.has(svKey(r))).pop() || null;
+  }
+  return { ok: true, header: R.header, row };
+}
+__name(svForStudent, "svForStudent");
+__name2(svForStudent, "svForStudent");
+async function seTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_edits (ns_student_id TEXT PRIMARY KEY, answers TEXT, added TEXT, updated_by TEXT, updated_at INTEGER)").run();
+}
+__name(seTable, "seTable");
+__name2(seTable, "seTable");
+async function seGet(env, sid) {
+  await seTable(env);
+  const r = await env.DB.prepare("SELECT answers, added, updated_by, updated_at FROM survey_edits WHERE ns_student_id = ?").bind(String(sid)).first();
+  let answers = {}, added = [];
+  try {
+    answers = r && r.answers ? JSON.parse(r.answers) : {};
+  } catch (e) {
+  }
+  try {
+    added = r && r.added ? JSON.parse(r.added) : [];
+  } catch (e) {
+  }
+  return { answers, added, updated_by: r && r.updated_by, updated_at: r && r.updated_at };
+}
+__name(seGet, "seGet");
+__name2(seGet, "seGet");
+async function ssTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS student_symptoms (ns_student_id TEXT PRIMARY KEY, levels TEXT, extra TEXT, notes TEXT, updated_by TEXT, updated_at INTEGER)").run();
+}
+__name(ssTable, "ssTable");
+__name2(ssTable, "ssTable");
 async function txRecordInfo(env, rid) {
   if (!rid || !env.HYPERDRIVE) return {};
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
