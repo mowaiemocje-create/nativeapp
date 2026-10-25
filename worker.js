@@ -5672,6 +5672,19 @@ var worker_default = {
     const url = new URL(request.url);
     SPEED_ENV = env;
     SPEED_CTX = ctx || null;
+    if (/^ask\./i.test(url.hostname)) {
+      const m = url.pathname.match(/^\/(pl|sk|cs|cz|en)\/?$/i);
+      if (url.pathname === "/" || m) {
+        if (m) url.searchParams.set("lang", m[1].toLowerCase() === "cz" ? "cs" : m[1].toLowerCase());
+        try {
+          return await svfPage(env, url, ctx);
+        } catch (e) {
+          return new Response("B\u0142\u0105d: " + (e && e.message), { status: 500 });
+        }
+      }
+      if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
+      if (!/^\/(ankieta(\/submit|\/tr)?|tydzien|r|raty)$/.test(url.pathname)) return new Response("Nie znaleziono", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
     try {
       if (url.pathname === "/student/home" && request.method === "GET") {
         return await handleStudentHome(request, env, url, ctx);
@@ -5969,6 +5982,9 @@ var worker_default = {
               const x = L[lg] || {};
               cfg.links[lg] = { film_kids: clean(x.film_kids), film_adults: clean(x.film_adults), esbs: clean(x.esbs), shop: clean(x.shop), book_title: String(x.book_title || "").trim().slice(0, 120), book_img: clean(x.book_img) };
             });
+            if (body.live === true || body.live === false) await appSettingSet(env, "svf_live", body.live ? "1" : "0");
+            const pb = String(body.public_base || "").trim().replace(/\/+$/, "");
+            cfg.public_base = /^https:\/\/[a-z0-9.-]+$/i.test(pb) ? pb : "";
             if (Array.isArray(body.hide)) cfg.hide = body.hide.map((h) => String(h || "").slice(0, 300)).filter(Boolean).slice(0, 200);
             await appSettingSet(env, "svf_cfg", JSON.stringify(cfg));
             await appSettingSet(env, "svf_def3", "");
@@ -5985,7 +6001,7 @@ var worker_default = {
           }
           const all = cfg.links || {}, flat = all.film_kids != null || all.film_adults != null || all.esbs != null;
           const links = flat ? { pl: { film_kids: all.film_kids || "", film_adults: all.film_adults || "", esbs: all.esbs || "", shop: "" } } : all;
-          return json({ ok: true, cfg, links, langs: SVF_LANGS, warm, strings: D.header ? svfStrings(D).length : 0, rest_all: D.rest_all || [], error: D.header ? null : D.error || null });
+          return json({ ok: true, live: await appSettingGet(env, "svf_live") !== "0", cfg, links, langs: SVF_LANGS, warm, strings: D.header ? svfStrings(D).length : 0, rest_all: D.rest_all || [], error: D.header ? null : D.error || null });
         }
         if (url.pathname === "/surveys/test-delete") {
           const key = String(body.row_key || "");
@@ -6224,7 +6240,7 @@ var worker_default = {
       if (url.pathname === "/offers/translate" && request.method === "POST") return await handleOfferTranslate(request, env);
       if (url.pathname === "/raty" && request.method === "GET") return ofRatyPage(url);
       if (url.pathname === "/ankieta" && request.method === "GET") return await svfPage(env, url, ctx);
-      if (url.pathname === "/ankieta/submit" && request.method === "POST") return await svfSubmit(request, env);
+      if (url.pathname === "/ankieta/submit" && request.method === "POST") return await svfSubmit(request, env, ctx);
       if (url.pathname === "/ankieta/tr" && request.method === "GET") {
         const lg = url.searchParams.get("lang");
         const D = await svfDef(env, false, ctx);
@@ -10000,7 +10016,7 @@ async function txStudentReport(env, sid, days, extra) {
         weeks: pw.map((x) => ({ week: x.week, flu: Number(x.flu) || null, mood: Number(x.mood) || null, days: x.days != null ? Number(x.days) : null, old: x.old || "" })),
         calls: pw.filter((x) => x.call === "Tak").length
       };
-      parentCorpus = pw.map((x) => "### tydzie\u0144 od " + x.week + ": mowa " + (x.flu || "?") + "/10, stara mowa: " + (x.old || "?") + ", \u0107wiczenia " + (x.days || 0) + " dni (" + (x.mins || "?") + "), technika sam(a): " + (x.own || "?") + ", samopoczucie " + (x.mood || "?") + "/5" + (Array.isArray(x.good) && x.good.length ? "\ndobrze: " + x.good.join(", ") : "") + (Array.isArray(x.hard) && x.hard.length ? "\ntrudniej: " + x.hard.join(", ") : "") + (x.moment ? "\nmoment tygodnia: " + x.moment : "") + (x.ask ? "\npytanie do trenera: " + x.ask : "")).join("\n\n").slice(0, 6e3);
+      parentCorpus = pw.map((x) => "### tydzie\u0144 od " + x.week + ": mowa " + (x.flu || "?") + "/10, stara mowa: " + (x.old || "?") + ", \u0107wiczenia " + (x.days || 0) + " dni (" + (x.mins || "?") + "), technika sam(a): " + (x.own || "?") + ", samopoczucie " + (x.mood || "?") + "/5" + (Array.isArray(x.rec) && x.rec.length ? "\nw tym tygodniu: " + x.rec.join(", ") : "") + (x.self ? "\ntrening z w\u0142asnej inicjatywy: " + x.self : "") + (x.field ? "\nostatnie \u0107wiczenia w terenie z rodzicem: " + x.field : "") + (x.tells ? "\nopowiada rodzicowi o Nowej Mowie: " + x.tells : "") + (Array.isArray(x.good) && x.good.length ? "\nspokojna Nowa Mowa: " + x.good.join(", ") : "") + (Array.isArray(x.hard) && x.hard.length ? "\nproblem z utrzymaniem techniki: " + x.hard.join(", ") : "") + (x.moment ? "\nmoment tygodnia: " + x.moment : "") + (x.ask ? "\npytanie do trenera: " + x.ask : "")).join("\n\n").slice(0, 6e3);
     }
   } catch (e) {
   }
@@ -11295,8 +11311,9 @@ function svfHelp(k, q, col, colNot, hdr) {
 __name(svfHelp, "svfHelp");
 __name2(svfHelp, "svfHelp");
 var SVF_STEPS = [
-  { t: { a: "\u{1F44B} Kto wype\u0142nia ankiet\u0119?", p: "\u{1F44B} Kto wype\u0142nia ankiet\u0119?" }, note: { a: "Dziecko do 15 lat \u2014 ankiet\u0119 wype\u0142nia rodzic razem z dzieckiem. Starsza m\u0142odzie\u017C i doro\u015Bli \u2014 samodzielnie." }, q: [
-    { k: "role", type: "cards", req: true, q: "Kto wype\u0142nia ankiet\u0119?", opts: [["rodzic", "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Rodzic lub opiekun", "razem z dzieckiem (do 15 lat)"], ["uczen", "\u{1F392} Ucze\u0144", "chodz\u0119 do szko\u0142y"], ["student", "\u{1F393} Student", "studiuj\u0119 (mo\u017Ce te\u017C pracuj\u0119)"], ["praca", "\u{1F4BC} Osoba pracuj\u0105ca", "pracuj\u0119 zawodowo"], ["inna", "\u{1F642} Inna sytuacja", "np. szukam pracy, jestem na emeryturze"]], hdr: "Kto wype\u0142nia \u2014 szczeg\xF3\u0142y" },
+  { t: { a: "\u{1F44B} Zaczynamy", p: "\u{1F44B} Zaczynamy" }, note: { a: "Dziecko do 15 lat \u2014 ankiet\u0119 wype\u0142nia rodzic razem z dzieckiem. Starsza m\u0142odzie\u017C i doro\u015Bli \u2014 samodzielnie." }, q: [
+    { k: "role", type: "cards", req: true, q: "Kto wype\u0142nia ankiet\u0119?", opts: [["rodzic", "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Rodzic lub opiekun", "razem z dzieckiem (do 15 lat)"], ["uczen", "\u{1F392} Ucze\u0144 lub student", "szko\u0142a albo studia (mo\u017Ce te\u017C pracuj\u0119)"], ["praca", "\u{1F4BC} Osoba pracuj\u0105ca", "pracuj\u0119 zawodowo"], ["inna", "\u{1F642} Inna sytuacja", "np. szukam pracy, jestem na emeryturze"]], hdr: "Kto wype\u0142nia \u2014 szczeg\xF3\u0142y" },
+    { k: "school", type: "chips", req: true, show: { role: ["uczen"] }, q: "Gdzie si\u0119 uczysz?", opts: ["Szko\u0142a podstawowa", "Liceum", "Technikum", "Szko\u0142a bran\u017Cowa", "Studia"], other: true, col: "wykszta\u0142cenie|praca|szko\u0142a", colNot: "nazwa|zaj\u0119cia|trudn|przedszkole" },
     { k: "stage", type: "cards", req: true, show: { role: SVF_PR }, q: "Na jakim etapie jest dziecko?", opts: [["przedszkole", "\u{1F9F8} Przedszkole"], ["podstawowa", "\u{1F4DA} Szko\u0142a podstawowa"], ["srednia", "\u{1F3EB} Szko\u0142a \u015Brednia"], ["dorosle", "\u{1F393} Studia lub praca"]], hdr: "Etap dziecka" }
   ] },
   { t: { a: "\u2709\uFE0F Dane kontaktowe", p: "\u2709\uFE0F Dane kontaktowe" }, q: [
@@ -11349,19 +11366,18 @@ var SVF_STEPS = [
   { t: { a: "\u{1F3EB} Szko\u0142a i praca", p: "\u{1F3EB} Przedszkole i szko\u0142a" }, q: [
     { k: "schoolName", type: "text", show: { role: SVF_PR, stage: ["przedszkole", "podstawowa", "srednia"] }, q: "Przedszkole / szko\u0142a \u2014 nazwa i klasa", hint: "np. SP 3 w Miko\u0142owie, klasa 4", col: "przedszkole ?/ ?szko\u0142a", hdr: "Przedszkole / szko\u0142a" },
     { k: "pre", type: "multi", show: { role: SVF_PR, stage: ["przedszkole"] }, q: "Jak wygl\u0105da mowa dziecka w przedszkolu?", opts: ["M\xF3wi ch\u0119tnie", "M\xF3wi mniej ni\u017C w domu", "Unika m\xF3wienia przy grupie", "Panie zauwa\u017Cy\u0142y trudno\u015Bci", "Dzieci zwracaj\u0105 uwag\u0119 na mow\u0119", "Nie wiem"], other: true, hdr: "Przedszkole" },
-    { k: "school", type: "chips", show: { role: ["uczen"] }, q: "Do jakiej szko\u0142y chodzisz?", opts: ["Szko\u0142a podstawowa", "Liceum", "Technikum", "Szko\u0142a bran\u017Cowa"], other: true, col: "wykszta\u0142cenie|praca|szko\u0142a", colNot: "nazwa|zaj\u0119cia|trudn|przedszkole" },
-    { k: "schoolType", type: "chips", show: { or: [{ role: ["uczen", "student"] }, { role: SVF_PR, stage: ["przedszkole", "podstawowa", "srednia", "dorosle"] }] }, q: { a: "Szko\u0142a / uczelnia jest:", p: "Przedszkole / szko\u0142a dziecka jest:" }, opts: ["Pa\u0144stwowa (publiczna)", "Prywatna", "Spo\u0142eczna lub inna"], hdr: "Szko\u0142a \u2014 pa\u0144stwowa / prywatna" },
-    { k: "schoolSit", type: "multi", show: { or: [{ role: ["uczen", "student"] }, SVF_SCHOOLKID] }, q: { a: "Co w szkole lub na uczelni jest najtrudniejsze?", p: "Co w szkole jest dla dziecka najtrudniejsze?" }, opts: ["Odpowied\u017A ustna", "Czytanie na g\u0142os", "Prezentacje i referaty", "Przedstawienie si\u0119 w nowej grupie", "Rozmowy z kolegami na przerwie", "Zg\u0142aszanie si\u0119 do odpowiedzi", "Egzaminy ustne"], other: true, hdr: "Szko\u0142a \u2014 trudne sytuacje" },
-    { k: "teachers", type: "chips", show: { or: [{ role: ["uczen"] }, SVF_SCHOOLKID] }, q: "Jak reaguj\u0105 nauczyciele?", opts: ["Wspieraj\u0105, daj\u0105 wi\u0119cej czasu", "Nie wiedz\u0105 o trudno\u015Bciach", "Nie zawsze rozumiej\u0105", "Trudno powiedzie\u0107"], hdr: "Szko\u0142a \u2014 nauczyciele" },
-    { k: "peers", type: "chips", show: { or: [{ role: ["uczen"] }, SVF_SCHOOLKID, { role: SVF_PR, stage: ["przedszkole"] }] }, q: "Jak jest z r\xF3wie\u015Bnikami?", opts: ["Bez problem\xF3w", "Czasem zdarzaj\u0105 si\u0119 docinki", "Zdarza si\u0119 dokuczanie", "Unikanie kontaktu", "Trudno powiedzie\u0107"], hdr: "R\xF3wie\u015Bnicy" },
-    { k: "study", type: "text", show: { role: ["student"] }, q: "Kierunek studi\xF3w", col: "wykszta\u0142cenie|praca|szko\u0142a", colNot: "nazwa|zaj\u0119cia|trudn|przedszkole" },
+    { k: "schoolType", type: "chips", show: { or: [{ role: ["uczen"] }, { role: SVF_PR, stage: ["przedszkole", "podstawowa", "srednia", "dorosle"] }] }, q: { a: "Szko\u0142a / uczelnia jest:", p: "Przedszkole / szko\u0142a dziecka jest:" }, opts: ["Pa\u0144stwowa (publiczna)", "Prywatna", "Spo\u0142eczna lub inna"], hdr: "Szko\u0142a \u2014 pa\u0144stwowa / prywatna" },
+    { k: "schoolSit", type: "multi", show: { or: [{ role: ["uczen"] }, SVF_SCHOOLKID] }, q: { a: "Co w szkole lub na uczelni jest najtrudniejsze?", p: "Co w szkole jest dla dziecka najtrudniejsze?" }, opts: ["Odpowied\u017A ustna", "Czytanie na g\u0142os", "Prezentacje i referaty", "Przedstawienie si\u0119 w nowej grupie", "Rozmowy z kolegami na przerwie", "Zg\u0142aszanie si\u0119 do odpowiedzi", "Egzaminy ustne"], other: true, hdr: "Szko\u0142a \u2014 trudne sytuacje" },
+    { k: "teachers", type: "chips", show: { or: [{ kid: true, role: ["uczen"] }, SVF_SCHOOLKID] }, q: "Jak reaguj\u0105 nauczyciele?", opts: ["Wspieraj\u0105, daj\u0105 wi\u0119cej czasu", "Nie wiedz\u0105 o trudno\u015Bciach", "Nie zawsze rozumiej\u0105", "Trudno powiedzie\u0107"], hdr: "Szko\u0142a \u2014 nauczyciele" },
+    { k: "peers", type: "chips", show: { or: [{ kid: true, role: ["uczen"] }, SVF_SCHOOLKID, { role: SVF_PR, stage: ["przedszkole"] }] }, q: "Jak jest z r\xF3wie\u015Bnikami?", opts: ["Bez problem\xF3w", "Czasem zdarzaj\u0105 si\u0119 docinki", "Zdarza si\u0119 dokuczanie", "Unikanie kontaktu", "Trudno powiedzie\u0107"], hdr: "R\xF3wie\u015Bnicy" },
+    { k: "study", type: "text", show: { role: ["uczen"], ans: { school: ["Studia"] } }, q: "Kierunek studi\xF3w", col: "wykszta\u0142cenie|praca|szko\u0142a", colNot: "nazwa|zaj\u0119cia|trudn|przedszkole" },
     { k: "job", type: "text", show: { role: ["praca", "inna"] }, q: "Wykszta\u0142cenie i zaw\xF3d", hint: "np. technik informatyk, ksi\u0119gowa", col: "wykszta\u0142cenie|praca|szko\u0142a", colNot: "nazwa|zaj\u0119cia|trudn|przedszkole" },
     { k: "jobKid", type: "text", show: { role: SVF_PR, stage: ["dorosle"] }, q: "Czym zajmuje si\u0119 dziecko (studia, praca)?", col: "wykszta\u0142cenie|praca|szko\u0142a", colNot: "nazwa|zaj\u0119cia|trudn|przedszkole" },
-    { k: "studentWork", type: "chips", show: { role: ["student"] }, q: "Czy pracujesz?", opts: ["Tak, na sta\u0142e", "Dorywczo", "Nie"], hdr: "Student \u2014 praca" },
-    { k: "firm", type: "text", show: { or: [{ role: ["praca"] }, { role: ["student"], ans: { studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Gdzie pracujesz? (stanowisko, bran\u017Ca)", hint: "nazwa firmy nie jest konieczna", col: "nazwa aktualnej|firmy" },
-    { k: "workCity", type: "text", show: { or: [{ role: ["praca"] }, { role: ["student"], ans: { studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Miejscowo\u015B\u0107, w kt\xF3rej pracujesz", hint: "je\u015Bli inna ni\u017C miejsce zamieszkania", hdr: "Miejscowo\u015B\u0107 pracy" },
-    { k: "roles", type: "multi", show: { or: [{ role: ["praca"] }, { role: ["student"], ans: { studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Co robisz w pracy?", opts: ["Kontakt z klientem", "Telefony", "Spotkania i narady", "Prezentacje", "Kieruj\u0119 zespo\u0142em", "Praca g\u0142\xF3wnie bez rozm\xF3w"], other: true, col: "role w kt\xF3rych" },
-    { k: "workImpact", type: "chips", show: { or: [{ role: ["praca", "inna"] }, { role: ["student"], ans: { studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Czy mowa wp\u0142ywa na Twoj\u0105 prac\u0119?", opts: ["Wcale", "Troch\u0119", "Mocno", "Przez mow\u0119 zmieni\u0142em(-am) lub nie podj\u0105\u0142em(-\u0119\u0142am) pracy"], hdr: "Wp\u0142yw na prac\u0119" },
+    { k: "studentWork", type: "chips", show: { role: ["uczen"], ans: { school: ["Studia"] } }, q: "Czy pracujesz?", opts: ["Tak, na sta\u0142e", "Dorywczo", "Nie"], hdr: "Student \u2014 praca" },
+    { k: "firm", type: "text", show: { or: [{ role: ["praca"] }, { role: ["uczen"], ans: { school: ["Studia"], studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Gdzie pracujesz? (stanowisko, bran\u017Ca)", hint: "nazwa firmy nie jest konieczna", col: "nazwa aktualnej|firmy" },
+    { k: "workCity", type: "text", show: { or: [{ role: ["praca"] }, { role: ["uczen"], ans: { school: ["Studia"], studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Miejscowo\u015B\u0107, w kt\xF3rej pracujesz", hint: "je\u015Bli inna ni\u017C miejsce zamieszkania", hdr: "Miejscowo\u015B\u0107 pracy" },
+    { k: "roles", type: "multi", show: { or: [{ role: ["praca"] }, { role: ["uczen"], ans: { school: ["Studia"], studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Co robisz w pracy?", opts: ["Kontakt z klientem", "Telefony", "Spotkania i narady", "Prezentacje", "Kieruj\u0119 zespo\u0142em", "Praca g\u0142\xF3wnie bez rozm\xF3w"], other: true, col: "role w kt\xF3rych" },
+    { k: "workImpact", type: "chips", show: { or: [{ role: ["praca", "inna"] }, { role: ["uczen"], ans: { school: ["Studia"], studentWork: ["Tak, na sta\u0142e", "Dorywczo"] } }] }, q: "Czy mowa wp\u0142ywa na Twoj\u0105 prac\u0119?", opts: ["Wcale", "Troch\u0119", "Mocno", "Przez mow\u0119 zmieni\u0142em(-am) lub nie podj\u0105\u0142em(-\u0119\u0142am) pracy"], hdr: "Wp\u0142yw na prac\u0119" },
     { k: "react", type: "multi", req: true, show: { role: SVF_PR }, q: "Jak dziecko reaguje, gdy mowa si\u0119 zacina?", opts: ["Spokojnie, m\xF3wi dalej", "Z\u0142o\u015Bci si\u0119", "P\u0142acze lub si\u0119 wycofuje", "Unika m\xF3wienia", "Zamienia s\u0142owa", "Prosi, \u017Ceby kto\u015B powiedzia\u0142 za nie", "Chyba nie zauwa\u017Ca"], other: true, hdr: "Reakcja dziecka na trudno\u015Bci" },
     { k: "talks", type: "chips", show: { role: SVF_PR }, q: "Czy dziecko rozmawia z Pani\u0105/Panem o swojej mowie?", opts: ["Tak, otwarcie", "Czasem", "Nie, unika tematu"], hdr: "Dziecko m\xF3wi o swojej mowie" }
   ] },
@@ -11381,8 +11397,8 @@ var SVF_STEPS = [
     { k: "divorceWhen", type: "text", show: { ans: { divorce: ["Tak, po rozwodzie", "Tak, po rozstaniu"] } }, q: "Ile lat temu? (albo rok i ile lat mia\u0142o wtedy dziecko)", hdr: "Rozw\xF3d / rozstanie \u2014 kiedy" },
     { k: "parentEdu", type: "multi", show: { role: SVF_PR }, q: "Czy ma Pani/Pan wykszta\u0142cenie:", opts: ["Pedagogiczne", "Psychologiczne", "Medyczne", "\u017Badne z tych"], other: true, hdr: "Wykszta\u0142cenie rodzica" },
     { k: "siblings", type: "text", show: { kid: true }, q: { a: "Rodze\u0144stwo \u2014 p\u0142e\u0107 i wiek", p: "Rodze\u0144stwo dziecka \u2014 p\u0142e\u0107 i wiek" }, hint: "np. siostra 8 lat, brat 3 lata; wpisz \u201Ebrak\u201D, je\u015Bli nie ma", col: "rodze\u0144stw", hdr: "Rodze\u0144stwo" },
-    { k: "kids", type: "chips", show: { role: ["student", "praca", "inna"] }, q: "Czy masz dzieci?", opts: ["Nie", "Tak"], hdr: "Ma dzieci" },
-    { k: "kidsAge", type: "text", show: { role: ["student", "praca", "inna"], ans: { kids: ["Tak"] } }, q: "W jakim wieku s\u0105 Twoje dzieci?", hint: "np. 4 i 9 lat", hdr: "Dzieci \u2014 wiek" },
+    { k: "kids", type: "chips", show: { or: [{ role: ["praca", "inna"] }, { role: ["uczen"], ans: { school: ["Studia"] } }] }, q: "Czy masz dzieci?", opts: ["Nie", "Tak"], hdr: "Ma dzieci" },
+    { k: "kidsAge", type: "text", show: { or: [{ role: ["praca", "inna"], ans: { kids: ["Tak"] } }, { role: ["uczen"], ans: { school: ["Studia"], kids: ["Tak"] } }] }, q: "W jakim wieku s\u0105 Twoje dzieci?", hint: "np. 4 i 9 lat", hdr: "Dzieci \u2014 wiek" },
     { k: "raise", type: "chips", show: { role: SVF_PR }, q: "Dziecko wychowuje Pani/Pan:", opts: ["Sam(a)", "Z ma\u0142\u017Conkiem / partnerem", "Na zmian\u0119 z drugim rodzicem", "Z pomoc\u0105 dziadk\xF3w"], other: true, hdr: "Wychowanie dziecka" },
     { k: "pPsych", type: "chips", show: { role: SVF_PR }, q: "Czy ma Pani/Pan zdiagnozowane trudno\u015Bci lub choroby natury psychologicznej (np. l\u0119ki, depresja)?", opts: ["Nie", "Tak", "Wol\u0119 nie odpowiada\u0107"], hdr: "Rodzic \u2014 trudno\u015Bci psychologiczne" },
     { k: "pPsychWhat", type: "text", show: { role: SVF_PR, ans: { pPsych: ["Tak"] } }, q: "Jakie? (opcjonalnie)", hdr: "Rodzic \u2014 trudno\u015Bci psychologiczne \u2014 jakie" },
@@ -11446,12 +11462,14 @@ function svfOrder(opts) {
 __name(svfOrder, "svfOrder");
 __name2(svfOrder, "svfOrder");
 async function svfCfg(env) {
+  let c = {};
   try {
-    const c = JSON.parse(await appSettingGet(env, "svf_cfg") || "{}");
-    return c && typeof c === "object" ? c : {};
+    c = JSON.parse(await appSettingGet(env, "svf_cfg") || "{}") || {};
   } catch (e) {
-    return {};
   }
+  if (typeof c !== "object") c = {};
+  if (c.public_base == null) c.public_base = "https://ask.nowamowa.com";
+  return c;
 }
 __name(svfCfg, "svfCfg");
 __name2(svfCfg, "svfCfg");
@@ -11480,6 +11498,7 @@ __name(svfLinksFor, "svfLinksFor");
 __name2(svfLinksFor, "svfLinksFor");
 var SVF_UI = [
   "Ankieta przed kursem",
+  "Kwestionariusz pomocny przy rozpoznaniu j\u0105kania i blok\xF3w mowy ESBS",
   "ok. 10 minut \xB7 wi\u0119kszo\u015B\u0107 odpowiedzi to klikni\u0119cia \xB7 zapisuje si\u0119 na bie\u017C\u0105co",
   "\u2190 Wstecz",
   "Dalej \u2192",
@@ -11681,7 +11700,13 @@ async function svfDef(env, fresh, ctx) {
   }, "colVals");
   const used = /* @__PURE__ */ new Set([0, 1, 2, 3, 20, 21]);
   const cfg = await svfCfg(env), hideSet = new Set((cfg.hide || []).map((h) => String(h).replace(/\s+/g, " ").trim()));
-  const map = {}, mapP = {}, mapAge = {}, all = svfAllQ();
+  const all = svfAllQ(), OWN = /* @__PURE__ */ new Set(["J\u0119zyk ankiety"]);
+  all.forEach((q) => {
+    if (q.type === "grid") [q.rows].concat(q.rowsKid ? [q.rowsKid] : []).forEach((rs) => rs.forEach((r) => OWN.add(svfHdr(q, r))));
+    else OWN.add(svfHdr(q));
+  });
+  for (let i = 0; i < H.length; i++) if (OWN.has(H[i])) used.add(i);
+  const map = {}, mapP = {}, mapAge = {};
   const find = /* @__PURE__ */ __name((pat, not, start) => {
     const rx = new RegExp(pat, "i"), no = not ? new RegExp(not, "i") : null;
     for (let i = Math.max(2, start || 2); i < H.length; i++) {
@@ -11720,6 +11745,7 @@ async function svfDef(env, fresh, ctx) {
   }
   const grids = [];
   for (let i = 2; i < H.length; i++) {
+    if (OWN.has(H[i])) continue;
     const g = H[i].match(/^(.*?)\s*\[(.+)\]\s*$/);
     if (!g) continue;
     used.add(i);
@@ -11786,8 +11812,8 @@ __name2(svfHdr, "svfHdr");
 async function svfPage(env, url, ctx) {
   const test = url.searchParams.get("test") === "1";
   const lang = SVF_LANGS[url.searchParams.get("lang")] ? url.searchParams.get("lang") : "pl";
-  const live = await appSettingGet(env, "svf_live") === "1";
-  const shell = /* @__PURE__ */ __name((body) => new Response(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Ankieta \u2014 Szko\u0142a Nowej Mowy</title><style>${SVF_CSS}</style></head><body><div class="w">${body}<p class="foot">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w \xB7 <a href="https://www.nowamowa.com">nowamowa.com</a></p></div></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }), "shell");
+  const live = await appSettingGet(env, "svf_live") !== "0";
+  const shell = /* @__PURE__ */ __name((body) => new Response(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Kwestionariusz pomocny przy rozpoznaniu j\u0105kania i blok\xF3w mowy ESBS</title><style>${SVF_CSS}</style></head><body><div class="w">${body}<p class="foot">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w \xB7 <a href="https://www.nowamowa.com">nowamowa.com</a></p></div></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }), "shell");
   if (!test && !live) return shell('<div class="hd"><b>Szko\u0142a Nowej Mowy</b><h1>Ankieta przed kursem</h1></div><div class="card"><p>Ankieta jest w przygotowaniu. Prosimy skorzysta\u0107 z linku, kt\xF3ry dosta\u0142e\u015B(-a\u015B) od trenera.</p></div>');
   const D = await svfDef(env, test && url.searchParams.get("fresh") === "1", ctx);
   if (!D.header) return shell('<div class="card"><p>Nie uda\u0142o si\u0119 wczyta\u0107 ankiety: ' + ofEsc(D.error || "") + "</p></div>");
@@ -11804,18 +11830,18 @@ async function svfPage(env, url, ctx) {
   });
   const sw = Object.keys(SVF_LANGS).map((l) => '<button type="button" class="flag' + (l === lang ? " on" : "") + '" data-lang="' + l + '" title="' + { pl: "Polski", sk: "Sloven\u010Dina", cs: "\u010Ce\u0161tina", en: "English" }[l] + '">' + SVF_FLAG[l] + "<span>" + { pl: "PL", sk: "SK", cs: "CZ", en: "EN" }[l] + "</span></button>").join("");
   const data = JSON.stringify({ test, lang, tr: TR, trs: TRS, linksAll: LKA, defC: { sk: "S\u0142owacja", cs: "Czechy" }, defCountry: { sk: "S\u0142owacja", cs: "Czechy" }[lang] || null, ctop: SVF_COUNTRY_TOP, countries: SVF_COUNTRIES, months: SVF_MONTHS, links: LKA[lang], steps: SVF_STEPS, grids: D.grids, rest: D.rest, map: test && url.searchParams.get("map") === "1" ? D.map : null, mapP: test && url.searchParams.get("map") === "1" ? D.mapP : null, header: test ? D.header : null, email: String(url.searchParams.get("e") || "").slice(0, 120) }).replace(/</g, "\\u003c");
-  return shell('<div class="hd"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b>Szko\u0142a Nowej Mowy</b><div class="flags">' + sw + '</div></div><h1 id="h1">' + ofEsc(X("Ankieta przed kursem")) + '</h1><div class="hs" id="hs">' + ofEsc(X("ok. 10 minut \xB7 wi\u0119kszo\u015B\u0107 odpowiedzi to klikni\u0119cia \xB7 zapisuje si\u0119 na bie\u017C\u0105co")) + "</div></div>" + (test && url.searchParams.get("map") === "1" ? '<div class="card testn">\u{1F9EA} <b>Wersja testowa</b> \u2014 pod pytaniami wida\u0107, do kt\xF3rej kolumny arkusza trafia odpowied\u017A.</div>' : "") + '<div class="prog"><div class="pl"><span id="stl"></span><span id="stn"></span></div><div class="bar"><div id="pb"></div></div></div><form id="f" novalidate autocomplete="on"><div id="st"></div><input type="text" name="website" id="hp" tabindex="-1" autocomplete="off" style="position:absolute;left:-5000px"><div class="nav"><button type="button" class="b2" id="bk">' + ofEsc(X("\u2190 Wstecz")) + '</button><button type="submit" id="nx">' + ofEsc(X("Dalej \u2192")) + `</button></div><div id="msg"></div></form><script>var D=${data};${SVF_JS}<\/script>`);
+  return shell('<div class="hd"><div style="display:flex;justify-content:flex-end"><div class="flags">' + sw + '</div></div><h1 id="h1">' + ofEsc(X("Kwestionariusz pomocny przy rozpoznaniu j\u0105kania i blok\xF3w mowy ESBS")) + '</h1><div class="hs" id="hs">' + ofEsc(X("ok. 10 minut \xB7 wi\u0119kszo\u015B\u0107 odpowiedzi to klikni\u0119cia \xB7 zapisuje si\u0119 na bie\u017C\u0105co")) + "</div></div>" + (test && url.searchParams.get("map") === "1" ? '<div class="card testn">\u{1F9EA} <b>Wersja testowa</b> \u2014 pod pytaniami wida\u0107, do kt\xF3rej kolumny arkusza trafia odpowied\u017A.</div>' : "") + '<div class="prog"><div class="pl"><span id="stl"></span><span id="stn"></span></div><div class="bar"><div id="pb"></div></div></div><form id="f" novalidate autocomplete="on"><div id="st"></div><input type="text" name="website" id="hp" tabindex="-1" autocomplete="off" style="position:absolute;left:-5000px"><div class="nav"><button type="button" class="b2" id="bk">' + ofEsc(X("\u2190 Wstecz")) + '</button><button type="submit" id="nx">' + ofEsc(X("Dalej \u2192")) + `</button></div><div id="msg"></div></form><script>var D=${data};${SVF_JS}<\/script>`);
 }
 __name(svfPage, "svfPage");
 __name2(svfPage, "svfPage");
-var SVF_CSS = ":root{--o:#D9822B;--o2:#FFF1DC;--ink:#2b2b2b;--mut:#6b6259;--line:#ead8c4}*{box-sizing:border-box}body{margin:0;background:#f4f1ed;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);-webkit-text-size-adjust:100%}.w{max-width:680px;margin:0 auto;padding:14px 14px 40px}.hd{background:#1E1E1E;color:#fff;padding:20px 22px;border-top:6px solid #F5A623;border-radius:14px}.hd b{color:#F5A623;font-size:12px;letter-spacing:2px;text-transform:uppercase}.hd h1{margin:4px 0 0;font-size:24px}.hs{color:#cfc6b8;font-size:13px;margin-top:6px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:12px}.testn{background:#FFF6E0;border-color:#F0D9A8;font-size:14px}.prog{margin:16px 2px 4px}.pl{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);font-weight:600}.bar{background:#E8E0D3;height:8px;border-radius:4px;margin-top:6px;overflow:hidden}#pb{background:var(--o);height:8px;width:0;transition:width .3s}h2{font-size:21px;margin:14px 2px 2px}.note{color:var(--mut);font-size:14px;margin:4px 2px 0}.q{font-weight:650;font-size:16px;line-height:1.4;margin:0 0 10px}.q .req{color:#B3261E}.hint{color:var(--mut);font-size:13px;margin:-6px 0 10px}.map{color:#9a8f80;font-size:11.5px;margin-top:8px;font-family:ui-monospace,Menlo,monospace}input[type=text],input[type=email],input[type=tel],input[type=number],textarea{width:100%;padding:12px 13px;border:1.5px solid #ddd3c4;border-radius:10px;font-size:16px;font-family:inherit;background:#fff}input:focus,textarea:focus{outline:none;border-color:var(--o);box-shadow:0 0 0 3px #f5a62333}textarea{min-height:90px;resize:vertical}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.two .card{margin-top:0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}@media(max-width:520px){.grid2{grid-template-columns:1fr}}.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{border:1.5px solid var(--line);background:#fbf8f5;padding:10px 14px;border-radius:22px;cursor:pointer;font-size:15px;user-select:none;line-height:1.2}.chip.on{border-color:var(--o);background:var(--o2);font-weight:650}.chip.on::before{content:'\u2713 ';color:var(--o)}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.cd{border:1.5px solid var(--line);background:#fbf8f5;border-radius:12px;padding:14px;cursor:pointer}.cd b{display:block;font-size:16px}.cd span{color:var(--mut);font-size:13px}.cd.on{border-color:var(--o);background:var(--o2);box-shadow:0 0 0 3px #f5a62322}.scale{display:flex;gap:6px}.scale .chip{flex:1;text-align:center;padding:11px 0;border-radius:10px}.scale .chip.on::before{content:''}.sl{display:flex;justify-content:space-between;color:var(--mut);font-size:12.5px;margin-top:5px}.gr{padding:10px 0;border-top:1px solid #f1e8dc}.gr:first-of-type{border-top:0;padding-top:0}.gr .r{font-size:15px;margin-bottom:7px}.gr .chips{gap:6px}.gr .chip{padding:8px 11px;font-size:14px}.gr .chip.on::before{content:''}.ck{display:flex;gap:12px;align-items:flex-start;cursor:pointer;font-size:15px;line-height:1.45}.ck input{width:22px;height:22px;margin:1px 0 0;accent-color:var(--o);flex:none}.oth{margin-top:8px}.nav{display:flex;gap:10px;margin-top:18px;position:sticky;bottom:0;padding:10px 0;background:linear-gradient(transparent,#f4f1ed 30%)}button{flex:2;background:var(--o);color:#fff;border:0;padding:15px 20px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;font-family:inherit}button.b2{flex:1;background:#fff;color:var(--ink);border:1.5px solid var(--line)}button:disabled{opacity:.6}.dps{display:grid;grid-template-columns:1fr 1.6fr 1.2fr;gap:8px}.dp{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--mut);font-weight:600}.dp select{font-size:17px;padding:12px 10px;border:1.5px solid #ddd3c4;border-radius:10px;background:#fff;font-family:inherit;color:var(--ink)}.dp select:focus{outline:none;border-color:var(--o)}.geo{background:#fff;color:var(--ink);border:1.5px solid var(--line);padding:9px 14px;border-radius:20px;font-size:14px;font-weight:600;width:auto}.lk{display:flex;gap:12px;align-items:center;text-decoration:none;color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:10px;margin:10px 0;text-align:left;background:#fffdf9}.lk.vid{flex-direction:column;align-items:stretch}.th{position:relative;border-radius:10px;overflow:hidden;aspect-ratio:16/9;background:#000}.th img{width:100%;height:100%;object-fit:cover;display:block}.th span{position:absolute;inset:0;margin:auto;width:62px;height:44px;border-radius:12px;background:#D9822Bee;color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center}.book img{width:84px;border-radius:4px;box-shadow:3px 3px 10px #0003}.cover{flex:none;width:84px;height:120px;border-radius:3px 6px 6px 3px;background:linear-gradient(135deg,#1E1E1E,#3a2d22);color:#fff;padding:10px 8px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:3px 3px 10px #0003;border-left:5px solid #F5A623}.cover small{color:#F5A623;font-size:9px;letter-spacing:1px;text-transform:uppercase}.cover b{font-size:11px;line-height:1.2;overflow-wrap:anywhere;hyphens:auto}.btnx{color:var(--o);font-weight:700;margin-top:6px}.btnl{display:inline-block;background:#D9822B;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700}.gr.rerr{background:#FDECEC;border-radius:8px;padding-left:8px;padding-right:8px}.gr.rerr .r{color:#B3261E;font-weight:600}.flags{display:flex;gap:6px}.flag{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;background:transparent;border:2px solid transparent;border-radius:10px;padding:5px 6px 3px;cursor:pointer;color:#cfc6b8;font-size:11px;font-weight:700;width:auto}.flag svg{display:block;border-radius:4px;box-shadow:0 0 0 1px #ffffff40}.flag.on{border-color:#F5A623;color:#F5A623;background:#ffffff12}.flag:hover{background:#ffffff1a}.err{border-color:#B3261E!important;box-shadow:0 0 0 3px #b3261e22}#msg{color:#B3261E;font-size:14px;margin-top:6px;min-height:18px}.foot{text-align:center;color:var(--mut);font-size:12px;margin-top:22px}a{color:var(--o)}.done{text-align:center;padding:30px 18px}.done .big{font-size:44px}";
+var SVF_CSS = ":root{--o:#D9822B;--o2:#FFF1DC;--ink:#2b2b2b;--mut:#6b6259;--line:#ead8c4}*{box-sizing:border-box}body{margin:0;background:#f4f1ed;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);-webkit-text-size-adjust:100%}.w{max-width:680px;margin:0 auto;padding:14px 14px 40px}.hd{background:#1E1E1E;color:#fff;padding:20px 22px;border-top:6px solid #F5A623;border-radius:14px}.hd b{color:#F5A623;font-size:12px;letter-spacing:2px;text-transform:uppercase}.hd h1{margin:10px 0 0;font-size:22px;line-height:1.3}.hs{color:#cfc6b8;font-size:13px;margin-top:6px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:12px}.testn{background:#FFF6E0;border-color:#F0D9A8;font-size:14px}.prog{margin:16px 2px 4px}.pl{display:flex;justify-content:space-between;font-size:13px;color:var(--mut);font-weight:600}.bar{background:#E8E0D3;height:8px;border-radius:4px;margin-top:6px;overflow:hidden}#pb{background:var(--o);height:8px;width:0;transition:width .3s}h2{font-size:21px;margin:14px 2px 2px}.note{color:var(--mut);font-size:14px;margin:4px 2px 0}.q{font-weight:650;font-size:16px;line-height:1.4;margin:0 0 10px}.q .req{color:#B3261E}.hint{color:var(--mut);font-size:13px;margin:-6px 0 10px}.map{color:#9a8f80;font-size:11.5px;margin-top:8px;font-family:ui-monospace,Menlo,monospace}input[type=text],input[type=email],input[type=tel],input[type=number],textarea{width:100%;padding:12px 13px;border:1.5px solid #ddd3c4;border-radius:10px;font-size:16px;font-family:inherit;background:#fff}input:focus,textarea:focus{outline:none;border-color:var(--o);box-shadow:0 0 0 3px #f5a62333}textarea{min-height:90px;resize:vertical}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.two .card{margin-top:0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}@media(max-width:520px){.grid2{grid-template-columns:1fr}}.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{border:1.5px solid var(--line);background:#fbf8f5;padding:10px 14px;border-radius:22px;cursor:pointer;font-size:15px;user-select:none;line-height:1.2}.chip.on{border-color:var(--o);background:var(--o2);font-weight:650}.chip.on::before{content:'\u2713 ';color:var(--o)}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.cd{border:1.5px solid var(--line);background:#fbf8f5;border-radius:12px;padding:14px;cursor:pointer}.cd b{display:block;font-size:16px}.cd span{color:var(--mut);font-size:13px}.cd.on{border-color:var(--o);background:var(--o2);box-shadow:0 0 0 3px #f5a62322}.scale{display:flex;gap:6px}.scale .chip{flex:1;text-align:center;padding:11px 0;border-radius:10px}.scale .chip.on::before{content:''}.sl{display:flex;justify-content:space-between;color:var(--mut);font-size:12.5px;margin-top:5px}.gr{padding:10px 0;border-top:1px solid #f1e8dc}.gr:first-of-type{border-top:0;padding-top:0}.gr .r{font-size:15px;margin-bottom:7px}.gr .chips{gap:6px}.gr .chip{padding:8px 11px;font-size:14px}.gr .chip.on::before{content:''}.ck{display:flex;gap:12px;align-items:flex-start;cursor:pointer;font-size:15px;line-height:1.45}.ck input{width:22px;height:22px;margin:1px 0 0;accent-color:var(--o);flex:none}.oth{margin-top:8px}.nav{display:flex;gap:10px;margin-top:18px;position:sticky;bottom:0;padding:10px 0;background:linear-gradient(transparent,#f4f1ed 30%)}button{flex:2;background:var(--o);color:#fff;border:0;padding:15px 20px;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;font-family:inherit}button.b2{flex:1;background:#fff;color:var(--ink);border:1.5px solid var(--line)}button:disabled{opacity:.6}.dps{display:grid;grid-template-columns:1fr 1.6fr 1.2fr;gap:8px}.dp{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--mut);font-weight:600}.dp select{font-size:17px;padding:12px 10px;border:1.5px solid #ddd3c4;border-radius:10px;background:#fff;font-family:inherit;color:var(--ink)}.dp select:focus{outline:none;border-color:var(--o)}.geo{background:#fff;color:var(--ink);border:1.5px solid var(--line);padding:9px 14px;border-radius:20px;font-size:14px;font-weight:600;width:auto}.lk{display:flex;gap:12px;align-items:center;text-decoration:none;color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:10px;margin:10px 0;text-align:left;background:#fffdf9}.lk.vid{flex-direction:column;align-items:stretch}.th{position:relative;border-radius:10px;overflow:hidden;aspect-ratio:16/9;background:#000}.th img{width:100%;height:100%;object-fit:cover;display:block}.th span{position:absolute;inset:0;margin:auto;width:62px;height:44px;border-radius:12px;background:#D9822Bee;color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center}.book img{width:84px;border-radius:4px;box-shadow:3px 3px 10px #0003}.cover{flex:none;width:84px;height:120px;border-radius:3px 6px 6px 3px;background:linear-gradient(135deg,#1E1E1E,#3a2d22);color:#fff;padding:10px 8px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:3px 3px 10px #0003;border-left:5px solid #F5A623}.cover small{color:#F5A623;font-size:9px;letter-spacing:1px;text-transform:uppercase}.cover b{font-size:11px;line-height:1.2;overflow-wrap:anywhere;hyphens:auto}.btnx{color:var(--o);font-weight:700;margin-top:6px}.btnl{display:inline-block;background:#D9822B;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700}.gr.rerr{background:#FDECEC;border-radius:8px;padding-left:8px;padding-right:8px}.gr.rerr .r{color:#B3261E;font-weight:600}.sendp{display:none;margin-top:10px}.sendl{display:flex;justify-content:space-between;font-size:14px;color:var(--mut);font-weight:600}.sendp .bar{height:10px}#spb{background:var(--o);height:10px;width:0;transition:width .15s}.flags{display:flex;gap:6px}.flag{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;background:transparent;border:2px solid transparent;border-radius:10px;padding:5px 6px 3px;cursor:pointer;color:#cfc6b8;font-size:11px;font-weight:700;width:auto}.flag svg{display:block;border-radius:4px;box-shadow:0 0 0 1px #ffffff40}.flag.on{border-color:#F5A623;color:#F5A623;background:#ffffff12}.flag:hover{background:#ffffff1a}.err{border-color:#B3261E!important;box-shadow:0 0 0 3px #b3261e22}#msg{color:#B3261E;font-size:14px;margin-top:6px;min-height:18px}.foot{text-align:center;color:var(--mut);font-size:12px;margin-top:22px}a{color:var(--o)}.done{text-align:center;padding:30px 18px}.done .big{font-size:44px}";
 var SVF_JS = String.raw`
 var KEY='nm_ankieta2_'+(D.test?'test':'live'),S={},cur=0,t0=Date.now();try{var sv=JSON.parse(localStorage.getItem(KEY)||'{}');S=sv.a||{};cur=sv.s||0;}catch(e){}
 if(D.email&&!S.email)S.email=D.email;
 D.steps.forEach(function(s){(s.q||[]).forEach(function(q){if(q.def&&S[q.k]==null)S[q.k]=(q.k==='country'&&D.defCountry)?D.defCountry:(q.k==='country'&&D.lang==='en'?'':q.def);});});
 function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function isP(){return S.role==='rodzic';}
-function isKid(){return S.role==='uczen'||(S.role==='rodzic'&&S.stage&&S.stage!=='dorosle');}
+function isKid(){return (S.role==='uczen'&&S.school!=='Studia')||(S.role==='rodzic'&&S.stage&&S.stage!=='dorosle');}
 function O(q){return isKid()&&q.optsKid?q.optsKid:q.opts;}
 function R(q){return isKid()&&q.rowsKid?q.rowsKid:q.rows;}
 function age(d){if(!d)return null;var b=new Date(d+'T12:00:00'),n=new Date(),a=n.getFullYear()-b.getFullYear();if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))a--;return a;}
@@ -11853,7 +11879,7 @@ function render(){var L=steps();if(cur>=L.length)cur=L.length-1;if(cur<0)cur=0;v
   if(s.grids)h+=D.grids.map(function(g,gi){return '<div class="card" data-q="g'+gi+'"><div class="q">'+esc(tr(g.q))+'</div>'+g.rows.map(function(rw){var k='c'+rw.i;return '<div class="gr" data-row="'+k+'"><div class="r">'+esc(tr(rw.r))+'</div>'+chips(k,isP()?g.opts.concat(['nie wiem']):g.opts,false,false)+'</div>';}).join('')+(D.map?'<div class="map">→ kolumny '+(g.rows[0].i+1)+'–'+(g.rows[g.rows.length-1].i+1)+' (jak dotąd)</div>':'')+'</div>';}).join('');
   else if(s.rest)h+='<div class="note">'+esc(tr('Te pytania są z dotychczasowej ankiety.'))+'</div>'+D.rest.map(function(q){var k='c'+q.i;var b=q.type==='chips'?chips(k,q.opts,false,q.other):q.type==='textarea'?'<textarea data-k="'+k+'">'+esc(S[k]||'')+'</textarea>':'<input type="text" data-k="'+k+'" value="'+esc(S[k]||'')+'">';return '<div class="card" data-q="'+k+'"><div class="q">'+esc(tr(q.q))+'</div>'+b+(D.map?'<div class="map">→ kolumna '+(q.i+1)+'</div>':'')+'</div>';}).join('');
   else{var parts=s.q.map(function(q){return {q:q,h:qHtml(q)};}).filter(function(x){return x.h;}),i=0;while(i<parts.length){if(parts[i].q.half&&parts[i+1]&&parts[i+1].q.half){h+='<div class="grid2">'+parts[i].h.replace('class="card"','class="card" style="margin-top:0"')+parts[i+1].h.replace('class="card"','class="card" style="margin-top:0"')+'</div>';i+=2;}else{h+=parts[i].h;i++;}}}
-  document.getElementById('st').innerHTML=h;document.getElementById('stl').textContent=T(s.t).replace(/^\S+\s/,'');document.getElementById('stn').textContent=tr('Krok %1 z %2').replace('%1',cur+1).replace('%2',L.length);document.getElementById('pb').style.width=Math.round((cur+1)*100/L.length)+'%';
+  document.getElementById('st').innerHTML=h;document.getElementById('stl').textContent=T(s.t).replace(/^\S+\s/,'');document.getElementById('stn').textContent=tr('Krok %1 z %2').replace('%1',cur+1).replace('%2',L.length)+' · '+Math.round((cur+1)*100/L.length)+'%';document.getElementById('pb').style.width=Math.round((cur+1)*100/L.length)+'%';
   document.getElementById('bk').style.visibility=cur?'visible':'hidden';document.getElementById('nx').textContent=cur===L.length-1?tr('Wyślij ankietę ✓'):tr('Dalej →');document.getElementById('msg').textContent='';}
 function save(){try{localStorage.setItem(KEY,JSON.stringify({a:S,s:cur}))}catch(e){}}
 var F=document.getElementById('f');
@@ -11881,11 +11907,14 @@ function check(){var L=steps(),s=L[cur],bad=[],rows=[];
   if(bad.length){var f=F.querySelector(rows.length?'[data-row="'+rows[0]+'"]':'[data-q="'+bad[0]+'"]')||F.querySelector('[data-q="'+bad[0]+'"]');if(f)f.scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('msg').textContent=rows.length?tr('Zaznacz odpowiedź w każdym wierszu.'):tr('Uzupełnij zaznaczone pola.');return false;}return true;}
 F.onsubmit=async function(ev){ev.preventDefault();if(!check())return;var L=steps();if(cur<L.length-1){cur++;save();render();window.scrollTo(0,0);return;}
   var b=document.getElementById('nx');b.disabled=true;document.getElementById('msg').textContent='';b.textContent=tr('⏳ Wysyłam…');
+  var sp=document.getElementById('sp');if(!sp){sp=document.createElement('div');sp.id='sp';sp.className='sendp';sp.innerHTML='<div class="sendl"><span>'+esc(tr('⏳ Wysyłam…'))+'</span><b id="spn">0%</b></div><div class="bar"><div id="spb"></div></div>';document.querySelector('.nav').after(sp);}sp.style.display='block';
+  var pct=0,tick=setInterval(function(){pct+=(92-pct)*0.12;document.getElementById('spb').style.width=pct+'%';document.getElementById('spn').textContent=Math.round(pct)+'%';},150);
+  var done=function(okk){clearInterval(tick);if(okk){document.getElementById('spb').style.width='100%';document.getElementById('spn').textContent='100%';}else sp.style.display='none';};
   var A={};for(var k in S){if(k.indexOf('_o_')===0)continue;A[k]=S[k];}
-  try{var r=await fetch('/ankieta/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({test:D.test,lang:D.lang,answers:A,website:document.getElementById('hp').value,ms:Date.now()-t0})});var d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||r.status);
+  try{var r=await fetch('/ankieta/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({test:D.test,lang:D.lang,answers:A,website:document.getElementById('hp').value,ms:Date.now()-t0})});var d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||r.status);done(true);await new Promise(function(res){setTimeout(res,350);});var spx=document.getElementById('sp');if(spx)spx.style.display='none';
     try{localStorage.removeItem(KEY)}catch(x){}document.querySelector('.prog').style.display='none';document.querySelector('.nav').style.display='none';
     var LK=(isKid()?D.links.kid:D.links.adult)||[];document.getElementById('st').innerHTML='<div class="card done"><div class="big">🙏</div><h2>'+esc(tr('Dziękujemy!'))+'</h2><p>'+esc(tr('Ankieta została zapisana. Trener przeczyta odpowiedzi i odezwie się, żeby porozmawiać.'))+'</p>'+(LK.length?'<p style="margin-top:18px"><b>'+esc(tr('Zanim porozmawiamy — warto obejrzeć:'))+'</b></p>'+LK.map(linkCard).join('')+'<p class="note">'+esc(tr('Wysłaliśmy też te linki na Twój e-mail.'))+'</p>':'')+(D.test&&D.map?'<p class="note">🧪 Test: wiersz '+(d.sheet_ok?'dopisany do zakładki „'+esc(d.tab)+'”':'NIE został dopisany ('+esc(d.sheet_error||'')+')')+'.</p>':'')+'</div>';window.scrollTo(0,0);
-  }catch(e){b.disabled=false;b.textContent=tr('Wyślij ankietę ✓');document.getElementById('msg').textContent=tr('Nie udało się wysłać:')+' '+e.message+'. '+tr('Odpowiedzi są zapamiętane — spróbuj za chwilę.');}};
+  }catch(e){done(false);b.disabled=false;b.textContent=tr('Wyślij ankietę ✓');document.getElementById('msg').textContent=tr('Nie udało się wysłać:')+' '+e.message+'. '+tr('Odpowiedzi są zapamiętane — spróbuj za chwilę.');}};
 function geo(){var m=document.getElementById('geoMsg');if(!navigator.geolocation){m.textContent=tr('Nie udało się pobrać lokalizacji.');return;}m.textContent=tr('⏳ Szukam lokalizacji…');
   navigator.geolocation.getCurrentPosition(function(pos){fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&accept-language=pl&lat='+pos.coords.latitude+'&lon='+pos.coords.longitude).then(function(r){return r.json();}).then(function(d){var a=d.address||{},cc=String(a.country_code||'').toLowerCase();
     S.country=D.countries[cc]||a.country||S.country;S.city=a.city||a.town||a.village||a.municipality||a.hamlet||S.city||'';if(cc==='pl'&&a.postcode)S.zip=a.postcode;save();var y=window.scrollY;render();window.scrollTo(0,y);}).catch(function(){m.textContent=tr('Nie udało się pobrać lokalizacji.');});},function(){m.textContent=tr('Nie udało się pobrać lokalizacji.');},{timeout:12000,maximumAge:600000});}
@@ -11894,7 +11923,7 @@ function linkCard(l){if(l.book)return '<a class="lk book" href="'+esc(l.u)+'" ta
   return '<p><a href="'+esc(l.u)+'" target="_blank" rel="noopener" class="btnl">'+esc(tr(l.t))+'</a></p>';}
 function setLang(l){
   function apply(m){D.lang=l;D.tr=m||{};D.links=D.linksAll[l];if(D.defC[l]&&(!S.country||S.country==='Polska'||Object.values(D.defC).indexOf(S.country)>=0))S.country=D.defC[l];if(l==='pl'&&Object.values(D.defC).indexOf(S.country)>=0)S.country='Polska';
-    document.querySelectorAll('.flag').forEach(function(b){b.classList.toggle('on',b.dataset.lang===l);});document.getElementById('h1').textContent=tr('Ankieta przed kursem');document.getElementById('hs').textContent=tr('ok. 10 minut · większość odpowiedzi to kliknięcia · zapisuje się na bieżąco');document.getElementById('bk').textContent=tr('← Wstecz');document.documentElement.lang=l;
+    document.querySelectorAll('.flag').forEach(function(b){b.classList.toggle('on',b.dataset.lang===l);});document.getElementById('h1').textContent=tr('Kwestionariusz pomocny przy rozpoznaniu jąkania i bloków mowy ESBS');document.title=tr('Kwestionariusz pomocny przy rozpoznaniu jąkania i bloków mowy ESBS');document.getElementById('hs').textContent=tr('ok. 10 minut · większość odpowiedzi to kliknięcia · zapisuje się na bieżąco');document.getElementById('bk').textContent=tr('← Wstecz');document.documentElement.lang=l;
     try{var u=new URL(location.href);u.searchParams.set('lang',l);history.replaceState(null,'',u.pathname+u.search);}catch(e){}save();render();}
   if(l==='pl'||D.trs[l]){apply(D.trs[l]);return;}
   document.querySelectorAll('.flag').forEach(function(b){if(b.dataset.lang===l)b.style.opacity='.5';});
@@ -11902,14 +11931,14 @@ function setLang(l){
 document.querySelectorAll('.flag').forEach(function(b){b.onclick=function(){setLang(b.dataset.lang);};});
 render();
 `;
-async function svfSubmit(request, env) {
+async function svfSubmit(request, env, ctx) {
   let b = {};
   try {
     b = await request.json();
   } catch (e) {
   }
   if (b.website) return json({ ok: true });
-  const test = !!b.test, live = await appSettingGet(env, "svf_live") === "1";
+  const test = !!b.test, live = await appSettingGet(env, "svf_live") !== "0";
   if (!test && !live) return json({ error: "Ankieta nie jest jeszcze w\u0142\u0105czona" }, 403);
   const A = b.answers && typeof b.answers === "object" ? b.answers : {};
   const val = /* @__PURE__ */ __name((k) => {
@@ -11919,7 +11948,7 @@ async function svfSubmit(request, env) {
   const email = val("email").toLowerCase();
   if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i.test(email)) return json({ error: "Podaj poprawny adres e-mail" }, 400);
   if (val("consent") !== "Tak") return json({ error: "Potrzebna jest zgoda na przetwarzanie danych" }, 400);
-  const D = await svfDef(env);
+  const D = await svfDef(env, false, ctx);
   if (!D.header) return json({ error: D.error || "Brak definicji ankiety" }, 500);
   const lang = SVF_LANGS[b.lang] ? b.lang : "pl";
   const H = D.header, parent = val("role") === "rodzic";
@@ -11932,7 +11961,7 @@ async function svfSubmit(request, env) {
     row[20] = (cap(val("pfirst")) + " " + cap(val("plast"))).trim();
     row[21] = (cap(val("cfirst")) + " " + (cap(val("clast")) || svSurnameFor(cap(val("plast")), svFemName(val("cfirst"))))).trim();
   } else row[3] = (cap(val("first")) + " " + cap(val("last"))).trim();
-  const stage = val("stage"), kid = val("role") === "uczen" || parent && stage && stage !== "dorosle";
+  const stage = val("stage"), kid = val("role") === "uczen" && val("school") !== "Studia" || parent && stage && stage !== "dorosle";
   const S0 = {};
   Object.keys(A).forEach((k) => {
     S0[k] = A[k];
@@ -12002,76 +12031,97 @@ async function svfSubmit(request, env) {
   const ins = await env.DB.prepare("INSERT INTO survey_online (created_at, test, email, data, fill_ms) VALUES (?, ?, ?, ?, ?)").bind(now, test ? 1 : 0, email, JSON.stringify({ answers: A, row, ext }), Number(b.ms) || 0).run();
   const id = ins.meta && ins.meta.last_row_id;
   let tab = SVF_TEST_TAB, ok = false, err = "";
-  try {
-    const sid = await svSheetId(env);
-    const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title)");
-    if (!meta.ok) throw new Error(meta.error);
-    const titles = (meta.data.sheets || []).map((x) => x.properties.title);
-    if (!test) tab = titles[0];
-    if (titles.indexOf(tab) < 0) {
-      const a = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ addSheet: { properties: { title: tab, gridProperties: { frozenRowCount: 1 } } } }] } });
-      if (!a.ok) throw new Error(a.error);
-    }
-    const q = /* @__PURE__ */ __name((r) => encodeURIComponent("'" + tab.replace(/'/g, "''") + "'!" + r), "q");
-    const hv = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("1:1"));
-    if (!hv.ok) throw new Error(hv.error);
-    let head = ((hv.data.values || [])[0] || []).map(String);
-    if (test) {
-      const extra = head.slice(H.length);
-      head = H.slice().concat(extra);
-    }
-    if (!head.length) throw new Error("Brak nag\u0142\xF3wk\xF3w w zak\u0142adce");
-    const pos = ext.map(([h]) => {
-      let j = head.indexOf(h);
-      if (j < 0) {
-        head.push(h);
-        j = head.length - 1;
+  const sheetJob = /* @__PURE__ */ __name(async () => {
+    try {
+      const sid = await svSheetId(env);
+      const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title)");
+      if (!meta.ok) throw new Error(meta.error);
+      const titles = (meta.data.sheets || []).map((x) => x.properties.title);
+      if (!test) tab = titles[0];
+      if (titles.indexOf(tab) < 0) {
+        const a = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ addSheet: { properties: { title: tab, gridProperties: { frozenRowCount: 1 } } } }] } });
+        if (!a.ok) throw new Error(a.error);
       }
-      return j;
-    });
-    const w = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + "?valueInputOption=RAW", { method: "PUT", body: { values: [head] } });
-    if (!w.ok) throw new Error(w.error);
-    const out = new Array(head.length).fill("");
-    row.forEach((v, i) => {
-      if (i < out.length) out[i] = v;
-    });
-    pos.forEach((j, k) => {
-      if (ext[k][1] || !out[j]) out[j] = ext[k][1];
-    });
-    const ap = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", { method: "POST", body: { values: [out] } });
-    if (!ap.ok) throw new Error(ap.error);
-    ok = true;
-  } catch (e) {
-    err = String(e && e.message || e).slice(0, 300);
-  }
-  try {
-    await env.DB.prepare("UPDATE survey_online SET sheet_tab = ?, sheet_ok = ?, sheet_error = ? WHERE id = ?").bind(tab, ok ? 1 : 0, err || null, id).run();
-  } catch (e) {
-  }
-  try {
-    await ensureGoogleTables(env);
-    const account = await appSettingGet(env, "google_account") || "";
-    const who = parent ? row[21] + " (rodzic: " + row[20] + ")" : row[3];
-    await ofGmailSend(env, ofMime({
-      from: account,
-      fromName: "Panel Nowej Mowy",
-      to: ofReminderTo(env),
-      replyTo: email,
-      subject: (test ? "\u{1F9EA} Test: " : "\u{1F4DD} ") + "nowa ankieta \u2014 " + (who || email),
-      html: '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px"><p>Nowa ankieta online: <b>' + ofEsc(who || "") + "</b> \xB7 " + ofEsc(email) + (val("phone") ? " \xB7 \u{1F4DE} " + ofEsc(val("phone")) : "") + "</p><p>Arkusz: " + (ok ? "\u2705 dopisano do zak\u0142adki \u201E" + ofEsc(tab) + "\u201D" : "\u274C nie dopisano (" + ofEsc(err) + ") \u2014 odpowiedzi s\u0105 zapisane w bazie panelu") + "</p></div>"
-    }));
-  } catch (e) {
-  }
-  try {
-    const LK = svfLinksFor(await svfCfg(env), kid, lang);
-    if (LK.length) {
-      const TRm = await svfTr(env, lang, SVF_UI), X = /* @__PURE__ */ __name((s) => TRm[s] || s, "X");
-      const account = await appSettingGet(env, "google_account") || "";
-      const hi = parent ? X("Dzie\u0144 dobry,") : X("Cze\u015B\u0107") + (val("first") ? " " + cap(val("first")) : "") + ",";
-      const html = '<div style="background:#f4f1ed;padding:16px 8px;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden"><tr><td style="background:#1E1E1E;padding:16px 24px;border-top:6px solid #F5A623"><span style="color:#F5A623;font-size:12px;letter-spacing:2px;font-weight:bold">SZKO\u0141A NOWEJ MOWY</span><div style="color:#fff;font-size:20px;font-weight:bold;margin-top:2px">' + ofEsc(X("\u{1F64F} Dzi\u0119kujemy za ankiet\u0119")) + '</div></td></tr><tr><td style="padding:22px 24px;font-size:15px;line-height:1.6;color:#2b2b2b"><p style="margin:0 0 12px">' + ofEsc(hi) + '</p><p style="margin:0 0 12px">' + ofEsc(X("dzi\u0119kujemy za wype\u0142nienie ankiety. Trener przeczyta odpowiedzi i odezwie si\u0119, \u017Ceby porozmawia\u0107.")) + '</p><p style="margin:0 0 8px"><b>' + ofEsc(X("Zanim porozmawiamy \u2014 warto obejrze\u0107:")) + "</b></p>" + LK.map((l) => l.th ? '<p style="margin:12px 0"><a href="' + ofEsc(l.u) + '" style="text-decoration:none;color:#2b2b2b"><img src="' + ofEsc(l.th) + '" width="480" style="width:100%;max-width:480px;border-radius:10px;display:block" alt=""><b style="display:block;margin-top:6px">\u25B6 ' + ofEsc(X(l.t)) + "</b></a></p>" : l.book ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:12px 0"><tr>' + (l.img ? '<td style="padding-right:12px"><a href="' + ofEsc(l.u) + '"><img src="' + ofEsc(l.img) + '" width="90" style="width:90px;border-radius:4px" alt=""></a></td>' : "") + '<td style="vertical-align:middle"><span style="color:#8C7A5C;font-size:13px">' + ofEsc(X("\u{1F4DA} Polecamy ksi\u0105\u017Ck\u0119")) + "</span><br><b>" + ofEsc(X(l.book)) + '</b><br><a href="' + ofEsc(l.u) + '" style="color:#E8820C;font-weight:bold">' + ofEsc(X("Zobacz w sklepie")) + " \u2192</a></td></tr></table>" : '<p style="margin:8px 0"><a href="' + ofEsc(l.u) + '" style="display:inline-block;background:#E8820C;color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;font-weight:bold">' + ofEsc(X(l.t)) + "</a></p>").join("") + '<p style="margin:16px 0 0;color:#8C7A5C;font-size:13px">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w</p></td></tr></table></div>';
-      await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: email, subject: (test ? "[TEST] " : "") + X("Dzi\u0119kujemy za ankiet\u0119 \u2014 Nowa Mowa"), html }));
+      const q = /* @__PURE__ */ __name((r) => encodeURIComponent("'" + tab.replace(/'/g, "''") + "'!" + r), "q");
+      const hv = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("1:1"));
+      if (!hv.ok) throw new Error(hv.error);
+      let head = ((hv.data.values || [])[0] || []).map(String);
+      if (test) {
+        const extra = head.slice(H.length);
+        head = H.slice().concat(extra);
+      }
+      if (!head.length) throw new Error("Brak nag\u0142\xF3wk\xF3w w zak\u0142adce");
+      const head0 = ((hv.data.values || [])[0] || []).map(String).join("");
+      const pos = ext.map(([h]) => {
+        let j = head.indexOf(h);
+        if (j < 0) {
+          head.push(h);
+          j = head.length - 1;
+        }
+        return j;
+      });
+      if (head.join("") !== head0) {
+        const w = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + "?valueInputOption=RAW", { method: "PUT", body: { values: [head] } });
+        if (!w.ok) throw new Error(w.error);
+      }
+      const out = new Array(head.length).fill("");
+      row.forEach((v, i) => {
+        if (i < out.length) out[i] = v;
+      });
+      pos.forEach((j, k) => {
+        if (ext[k][1] || !out[j]) out[j] = ext[k][1];
+      });
+      const ap = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", { method: "POST", body: { values: [out] } });
+      if (!ap.ok) throw new Error(ap.error);
+      ok = true;
+    } catch (e) {
+      err = String(e && e.message || e).slice(0, 300);
     }
-  } catch (e) {
+    try {
+      await env.DB.prepare("UPDATE survey_online SET sheet_tab = ?, sheet_ok = ?, sheet_error = ? WHERE id = ?").bind(tab, ok ? 1 : 0, err || null, id).run();
+    } catch (e) {
+    }
+  }, "sheetJob");
+  const mailJob = /* @__PURE__ */ __name(async () => {
+    try {
+      await ensureGoogleTables(env);
+      const account = await appSettingGet(env, "google_account") || "";
+      const who = parent ? row[21] + " (rodzic: " + row[20] + ")" : row[3];
+      await ofGmailSend(env, ofMime({
+        from: account,
+        fromName: "Panel Nowej Mowy",
+        to: ofReminderTo(env),
+        replyTo: email,
+        subject: (test ? "\u{1F9EA} Test: " : "\u{1F4DD} ") + "nowa ankieta \u2014 " + (who || email),
+        html: '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px"><p>Nowa ankieta online: <b>' + ofEsc(who || "") + "</b> \xB7 " + ofEsc(email) + (val("phone") ? " \xB7 \u{1F4DE} " + ofEsc(val("phone")) : "") + "</p><p>Arkusz: " + (ok ? "\u2705 dopisano do zak\u0142adki \u201E" + ofEsc(tab) + "\u201D" : "\u274C nie dopisano (" + ofEsc(err) + ") \u2014 odpowiedzi s\u0105 zapisane w bazie panelu") + "</p></div>"
+      }));
+    } catch (e) {
+    }
+    try {
+      const LK = svfLinksFor(await svfCfg(env), kid, lang);
+      if (LK.length) {
+        const TRm = await svfTr(env, lang, SVF_UI), X = /* @__PURE__ */ __name((s) => TRm[s] || s, "X");
+        const account = await appSettingGet(env, "google_account") || "";
+        const hi = parent ? X("Dzie\u0144 dobry,") : X("Cze\u015B\u0107") + (val("first") ? " " + cap(val("first")) : "") + ",";
+        const html = '<div style="background:#f4f1ed;padding:16px 8px;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden"><tr><td style="background:#1E1E1E;padding:16px 24px;border-top:6px solid #F5A623"><span style="color:#F5A623;font-size:12px;letter-spacing:2px;font-weight:bold">SZKO\u0141A NOWEJ MOWY</span><div style="color:#fff;font-size:20px;font-weight:bold;margin-top:2px">' + ofEsc(X("\u{1F64F} Dzi\u0119kujemy za ankiet\u0119")) + '</div></td></tr><tr><td style="padding:22px 24px;font-size:15px;line-height:1.6;color:#2b2b2b"><p style="margin:0 0 12px">' + ofEsc(hi) + '</p><p style="margin:0 0 12px">' + ofEsc(X("dzi\u0119kujemy za wype\u0142nienie ankiety. Trener przeczyta odpowiedzi i odezwie si\u0119, \u017Ceby porozmawia\u0107.")) + '</p><p style="margin:0 0 8px"><b>' + ofEsc(X("Zanim porozmawiamy \u2014 warto obejrze\u0107:")) + "</b></p>" + LK.map((l) => l.th ? '<p style="margin:12px 0"><a href="' + ofEsc(l.u) + '" style="text-decoration:none;color:#2b2b2b"><img src="' + ofEsc(l.th) + '" width="480" style="width:100%;max-width:480px;border-radius:10px;display:block" alt=""><b style="display:block;margin-top:6px">\u25B6 ' + ofEsc(X(l.t)) + "</b></a></p>" : l.book ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:12px 0"><tr>' + (l.img ? '<td style="padding-right:12px"><a href="' + ofEsc(l.u) + '"><img src="' + ofEsc(l.img) + '" width="90" style="width:90px;border-radius:4px" alt=""></a></td>' : "") + '<td style="vertical-align:middle"><span style="color:#8C7A5C;font-size:13px">' + ofEsc(X("\u{1F4DA} Polecamy ksi\u0105\u017Ck\u0119")) + "</span><br><b>" + ofEsc(X(l.book)) + '</b><br><a href="' + ofEsc(l.u) + '" style="color:#E8820C;font-weight:bold">' + ofEsc(X("Zobacz w sklepie")) + " \u2192</a></td></tr></table>" : '<p style="margin:8px 0"><a href="' + ofEsc(l.u) + '" style="display:inline-block;background:#E8820C;color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;font-weight:bold">' + ofEsc(X(l.t)) + "</a></p>").join("") + '<p style="margin:16px 0 0;color:#8C7A5C;font-size:13px">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w</p></td></tr></table></div>';
+        await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: email, subject: (test ? "[TEST] " : "") + X("Dzi\u0119kujemy za ankiet\u0119 \u2014 Nowa Mowa"), html }));
+      }
+    } catch (e) {
+    }
+  }, "mailJob");
+  if (test) {
+    await sheetJob();
+    if (ctx) ctx.waitUntil(mailJob().catch(() => {
+    }));
+    else await mailJob();
+  } else if (ctx) {
+    ctx.waitUntil(sheetJob().then(mailJob).catch(() => {
+    }));
+    ok = true;
+    tab = "g\u0142\xF3wna zak\u0142adka (w tle)";
+  } else {
+    await sheetJob();
+    await mailJob();
   }
   return json({ ok: true, id, sheet_ok: ok, sheet_error: err || null, tab });
 }
@@ -12082,11 +12132,15 @@ var PW_Q = [
   { k: "old", type: "chips", q: "Jak cz\u0119sto pojawia\u0142a si\u0119 stara mowa (bloki, powt\xF3rzenia, przeci\u0105ganie)?", opts: ["Wcale", "Rzadko", "Czasami", "Cz\u0119sto", "Bardzo cz\u0119sto"] },
   { k: "days", type: "scale", min: 0, max: 7, q: "Ile dni w tym tygodniu {imie} {cw} (nagrania, \u0107wiczenia z trenerem)?", lo: "ani jednego", hi: "codziennie" },
   { k: "mins", type: "chips", q: "Ile czasu dziennie, \u015Brednio?", opts: ["do 10 minut", "10\u201320 minut", "20\u201340 minut", "ponad 40 minut"] },
-  { k: "own", type: "chips", q: "Czy {imie} {sam} {uz} techniki Nowej Mowy poza \u0107wiczeniami?", opts: ["Tak, cz\u0119sto", "Czasem", "Nie", "Nie wiem"] },
-  { k: "good", type: "multi", q: "Gdzie m\xF3wi\u0142o si\u0119 DOBRZE?", opts: ["W domu", "Z rodze\u0144stwem", "Z kolegami", "W szkole / przedszkolu", "W sklepie", "Przez telefon", "Z obcymi osobami"], other: true },
-  { k: "hard", type: "multi", q: "Gdzie by\u0142o TRUDNIEJ?", opts: ["W domu", "Z rodze\u0144stwem", "Z kolegami", "W szkole / przedszkolu", "W sklepie", "Przez telefon", "Z obcymi osobami"], other: true },
+  { k: "rec", type: "multi", q: "Co {imie} {robil} w tym tygodniu?", opts: ["Nagrania w aplikacji", "Telefony do innych kursant\xF3w", "\u0106wiczenia z trenerem", "\u0106wiczenia w terenie", "Nic z tych rzeczy"] },
+  { k: "self", type: "chips", q: "Czy {imie} {sam} od siebie wykonuje trening \u2014 nagrania w domu i w terenie?", opts: ["Regularnie", "Cz\u0119sto", "Rzadko", "Tylko gdy przypomn\u0119", "M\xF3wi, \u017Ce {jej} si\u0119 nie chce", "Robi awantur\u0119"] },
+  { k: "own", type: "chips", q: "Czy {imie} {sam} {uz} techniki Nowej Mowy poza \u0107wiczeniami?", opts: ["Zawsze", "Cz\u0119sto", "Czasem", "Rzadko", "Nie", "Nie wiem"] },
+  { k: "field", type: "chips", q: "Kiedy ostatnio by\u0142(a) Pani/Pan z {imie_n} na \u0107wiczeniach w terenie?", opts: ["Dzi\u015B", "Wczoraj", "W tym tygodniu", "W zesz\u0142ym tygodniu", "Dawno", "Nie pami\u0119tam"] },
+  { k: "good", type: "multi", q: "Gdzie {imie} {mowil} spokojn\u0105 Now\u0105 Mow\u0105?", opts: ["W domu", "Z rodze\u0144stwem", "Z kolegami", "Na przerwie", "Na lekcji / przy odpowiedzi", "W przedszkolu", "W sklepie", "Przez telefon", "Z obcymi osobami", "Pytanie o drog\u0119", "Przy czytaniu na g\u0142os", "W restauracji / kawiarni"], other: true },
+  { k: "hard", type: "multi", q: "Gdzie {imie} {mial} problem z utrzymaniem techniki Nowej Mowy?", opts: ["W domu", "Z rodze\u0144stwem", "Z kolegami", "Na przerwie", "Na lekcji / przy odpowiedzi", "W przedszkolu", "W sklepie", "Przez telefon", "Z obcymi osobami", "Pytanie o drog\u0119", "Przy czytaniu na g\u0142os", "W restauracji / kawiarni"], other: true },
+  { k: "tells", type: "chips", q: "Czy {imie} opowiada Pani/Panu o swoich do\u015Bwiadczeniach z Now\u0105 Mow\u0105?", opts: ["Tak, ch\u0119tnie", "Ma\u0142o", "Tylko gdy poprosz\u0119", "Nie", "Nigdy"] },
   { k: "mood", type: "scale", min: 1, max: 5, q: "Samopoczucie i motywacja {imie_d} w tym tygodniu", lo: "\u{1F61F} s\u0142abo", hi: "\u{1F600} \u015Bwietnie", labels: ["\u{1F61F}", "\u{1F641}", "\u{1F610}", "\u{1F642}", "\u{1F600}"] },
-  { k: "moment", type: "textarea", q: "Najwa\u017Cniejszy moment tygodnia \u2014 sukces albo trudno\u015B\u0107", hint: "np. pierwszy raz samo zam\xF3wi\u0142o w sklepie" },
+  { k: "moment", type: "textarea", q: "Najwa\u017Cniejszy moment tygodnia \u2014 sukces albo trudno\u015B\u0107", hint: "np. pierwszy raz {sam} {zam} co\u015B w sklepie" },
   { k: "ask", type: "textarea", q: "Pytanie albo pro\u015Bba do trenera (opcjonalnie)" },
   { k: "call", type: "check", q: "Prosz\u0119 o telefon od trenera" }
 ];
@@ -12116,6 +12170,15 @@ async function pwTables(env) {
 }
 __name(pwTables, "pwTables");
 __name2(pwTables, "pwTables");
+function pwIns(n) {
+  const l = n.toLowerCase();
+  if (/a$/.test(l)) return n.slice(0, -1) + "\u0105";
+  if (/ek$/.test(l)) return n.slice(0, -2) + "kiem";
+  if (/(k|g)$/.test(l)) return n + "iem";
+  return n + "em";
+}
+__name(pwIns, "pwIns");
+__name2(pwIns, "pwIns");
 function pwGen(n) {
   if (!n) return "dziecka";
   const l = n.toLowerCase();
@@ -12138,8 +12201,8 @@ async function pwPage(request, env, url) {
   await pwTables(env);
   const week = pwWeek(), prev = await env.DB.prepare("SELECT data FROM parent_weekly WHERE ns_student_id = ? AND week = ?").bind(sid, week).first();
   const fem = name ? svFemName(name) : null, g3 = /* @__PURE__ */ __name((m, f, n) => name ? fem ? f : m : n, "g3");
-  const fill = /* @__PURE__ */ __name((t) => String(t).replace(/\{imie\}/g, name || "dziecko").replace(/\{imie_d\}/g, name ? pwGen(name) : "dziecka").replace(/\{cw\}/g, g3("\u0107wiczy\u0142", "\u0107wiczy\u0142a", "\u0107wiczy\u0142o")).replace(/\{sam\}/g, g3("sam", "sama", "samo")).replace(/\{uz\}/g, g3("u\u017Cywa\u0142", "u\u017Cywa\u0142a", "u\u017Cywa\u0142o")), "fill");
-  const qs = PW_Q.map((q) => Object.assign({}, q, { q: fill(q.q) }));
+  const fill = /* @__PURE__ */ __name((t) => String(t).replace(/\{imie\}/g, name || "dziecko").replace(/\{imie_d\}/g, name ? pwGen(name) : "dziecka").replace(/\{cw\}/g, g3("\u0107wiczy\u0142", "\u0107wiczy\u0142a", "\u0107wiczy\u0142o")).replace(/\{sam\}/g, g3("sam", "sama", "samo")).replace(/\{uz\}/g, g3("u\u017Cywa\u0142", "u\u017Cywa\u0142a", "u\u017Cywa\u0142o")).replace(/\{robil\}/g, g3("robi\u0142", "robi\u0142a", "robi\u0142o")).replace(/\{mowil\}/g, g3("m\xF3wi\u0142", "m\xF3wi\u0142a", "m\xF3wi\u0142o")).replace(/\{mial\}/g, g3("mia\u0142", "mia\u0142a", "mia\u0142o")).replace(/\{jej\}/g, g3("mu", "jej", "mu")).replace(/\{zam\}/g, g3("zam\xF3wi\u0142", "zam\xF3wi\u0142a", "zam\xF3wi\u0142o")).replace(/\{imie_n\}/g, name ? pwIns(name) : "dzieckiem"), "fill");
+  const qs = PW_Q.map((q) => Object.assign({}, q, { q: fill(q.q), hint: q.hint ? fill(q.hint) : q.hint, opts: q.opts ? q.opts.map(fill) : q.opts }));
   const wEnd = /* @__PURE__ */ new Date(week + "T12:00:00Z");
   wEnd.setUTCDate(wEnd.getUTCDate() + 6);
   const lbl = ofLong ? ofLong(week).replace(/ \d{4}$/, "") + " \u2013 " + ofLong(wEnd.toISOString().slice(0, 10)) : week;
@@ -12230,7 +12293,7 @@ async function pwTick(env) {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", weekday: "short", hour: "2-digit", hourCycle: "h23" }).formatToParts(/* @__PURE__ */ new Date());
   if ((p.find((x) => x.type === "weekday") || {}).value !== "Sun" || Number((p.find((x) => x.type === "hour") || {}).value) < 17) return;
   await pwTables(env);
-  const wk = pwWeek(), base = "https://newspeech-backend.mowaiemocje.workers.dev";
+  const wk = pwWeek(), base = (await svfCfg(env)).public_base || "https://newspeech-backend.mowaiemocje.workers.dev";
   const rows = (await env.DB.prepare("SELECT * FROM parent_weekly_sub WHERE on_flag = 1 AND (last_week IS NULL OR last_week < ?) LIMIT 30").bind(wk).all()).results || [];
   for (const r of rows) {
     const s = await pwSend(env, r, base);
@@ -12260,13 +12323,13 @@ async function pwPanel(request, env, url) {
     await env.DB.prepare("INSERT INTO parent_weekly_sub (ns_student_id, email, name, on_flag, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(ns_student_id) DO UPDATE SET email = excluded.email, name = excluded.name, on_flag = excluded.on_flag, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(sid, email, String(body.name || "").slice(0, 120), body.on === false ? 0 : 1, String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
     if (body.send_now) {
       const sub2 = await env.DB.prepare("SELECT * FROM parent_weekly_sub WHERE ns_student_id = ?").bind(sid).first();
-      const s = await pwSend(env, sub2, url.origin);
+      const s = await pwSend(env, sub2, (await svfCfg(env)).public_base || url.origin);
       if (!s.ok) return json({ error: s.error || "Nie uda\u0142o si\u0119 wys\u0142a\u0107" }, 502);
     }
   }
   const entries = ((await env.DB.prepare("SELECT week, data, updated_at FROM parent_weekly WHERE ns_student_id = ? ORDER BY week DESC LIMIT 52").bind(sid).all()).results || []).map((r) => ({ week: r.week, at: r.updated_at, a: JSON.parse(r.data || "{}") }));
   const sub = await env.DB.prepare("SELECT email, name, on_flag, last_sent FROM parent_weekly_sub WHERE ns_student_id = ?").bind(sid).first();
-  return json({ ok: true, entries, sub: sub || null, link: await pwLink(env, url.origin, sid, String(src.name || sub && sub.name || "").split(" ")[0]), questions: PW_Q.map((q) => ({ k: q.k, q: q.q, type: q.type })) });
+  return json({ ok: true, entries, sub: sub || null, link: await pwLink(env, (await svfCfg(env)).public_base || url.origin, sid, String(src.name || sub && sub.name || "").split(" ")[0]), questions: PW_Q.map((q) => ({ k: q.k, q: q.q, type: q.type })) });
 }
 __name(pwPanel, "pwPanel");
 __name2(pwPanel, "pwPanel");
