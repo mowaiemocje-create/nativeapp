@@ -5907,6 +5907,7 @@ var worker_default = {
         } catch (e) {
         }
         const sid = String(url.searchParams.get("student_id") || "");
+        await auditLog(env, ctx, request, who, "\u{1F9FE} raport \u2014 podgl\u0105d", "kursant:" + sid, "");
         const row = await env.DB.prepare("SELECT report FROM student_report WHERE ns_student_id = ? ORDER BY created_at DESC LIMIT 1").bind(sid).first();
         let rep = null;
         try {
@@ -5928,6 +5929,7 @@ var worker_default = {
         if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
         const sid = String(body.student_id || "");
         if (!sid) return json({ error: "Brak student_id" }, 400);
+        await auditLog(env, ctx, request, who, "\u{1F9FE} raport \u2014 generowanie", "kursant:" + sid, "dni: " + (body.days || ""));
         await srJobTable(env);
         const days = Math.min(366, Math.max(7, Number(body.days) || 30)), now = Math.floor(Date.now() / 1e3);
         const range = body.range && /^\d{4}-\d{2}-\d{2}$/.test(String(body.range.from || "")) && /^\d{4}-\d{2}-\d{2}$/.test(String(body.range.to || "")) ? { from: body.range.from, to: body.range.to, label: String(body.range.label || "").slice(0, 80) } : null;
@@ -5955,6 +5957,7 @@ var worker_default = {
           else await env.DB.prepare("INSERT INTO survey_links (row_key, ns_student_id, linked_by, linked_at) VALUES (?, ?, ?, ?) ON CONFLICT(row_key) DO UPDATE SET ns_student_id = excluded.ns_student_id, linked_by = excluded.linked_by, linked_at = excluded.linked_at").bind(key, body.student_id ? String(body.student_id) : "", String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
           return json({ ok: true });
         }
+        await auditLog(env, ctx, request, who, "\u{1F4CB} lista ankiet", "", "");
         const r = await svList(env);
         return json(r, r.ok ? 200 : 400);
       }
@@ -6009,22 +6012,30 @@ var worker_default = {
           const id = await svSheetId(env);
           const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=sheets.properties(sheetId,title)");
           if (!meta.ok) return json(meta, 400);
-          const sh = (meta.data.sheets || []).find((x) => x.properties.title === SVF_TEST_TAB);
-          if (!sh) return json({ error: "Brak zak\u0142adki testowej" }, 404);
-          const v = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + SVF_TEST_TAB + "'!A1:B2000"));
-          if (!v.ok) return json(v, 400);
-          const rows = v.data.values || [];
-          let at = -1;
-          for (let i = rows.length - 1; i >= 1; i--) {
-            if (svKey(rows[i] || []) === key) {
-              at = i;
-              break;
+          const sheets = (meta.data.sheets || []).map((x) => x.properties), tabs = [sheets.find((x) => x.title === SVF_TEST_TAB), sheets[0]].filter(Boolean);
+          for (const sh of tabs) {
+            const v = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + sh.title.replace(/'/g, "''") + "'!A1:ZZ6000"));
+            if (!v.ok) continue;
+            const rows = v.data.values || [], head = (rows[0] || []).map((h) => String(h || "").trim()), li = head.indexOf("J\u0119zyk ankiety");
+            let at = -1;
+            for (let i = rows.length - 1; i >= 1; i--) {
+              if (svKey(rows[i] || []) === key) {
+                at = i;
+                break;
+              }
             }
+            if (at < 0) continue;
+            if (sh.title !== SVF_TEST_TAB && !(li >= 0 && String((rows[at] || [])[li] || "").trim())) return json({ error: "To odpowied\u017A z Formularza Google \u2014 t\u0119 ankiet\u0119 mo\u017Cna tylko ukry\u0107 w panelu (\u{1F5D1} Usu\u0144 z panelu)." }, 400);
+            const d = await svGoogle(env, encodeURIComponent(id) + ":batchUpdate", { method: "POST", body: { requests: [{ deleteDimension: { range: { sheetId: sh.sheetId, dimension: "ROWS", startIndex: at, endIndex: at + 1 } } }] } });
+            if (!d.ok) return json(d, 400);
+            try {
+              await env.DB.prepare("DELETE FROM survey_online WHERE email = ? AND json_extract(data, '$.row[0]') = ?").bind(String(key.split("|").slice(1).join("|")), String(key.split("|")[0])).run();
+            } catch (e) {
+            }
+            await auditLog(env, ctx, request, who, "\u{1F5D1} usuni\u0119cie ankiety", "ankieta:" + key, sh.title);
+            return json({ ok: true, tab: sh.title });
           }
-          if (at < 0) return json({ error: "Nie znaleziono wiersza w zak\u0142adce testowej" }, 404);
-          const d = await svGoogle(env, encodeURIComponent(id) + ":batchUpdate", { method: "POST", body: { requests: [{ deleteDimension: { range: { sheetId: sh.properties.sheetId, dimension: "ROWS", startIndex: at, endIndex: at + 1 } } }] } });
-          if (!d.ok) return json(d, 400);
-          return json({ ok: true });
+          return json({ error: "Nie znaleziono tego wiersza w arkuszu" }, 404);
         }
         if (url.pathname === "/surveys/expand") {
           const q = String(body.q || "").replace(/\s+/g, " ").trim().slice(0, 120);
@@ -6066,6 +6077,8 @@ var worker_default = {
           }
           return json({ ok: true, count: keys.length });
         }
+        if (url.pathname === "/surveys/export-sheet") await auditLog(env, ctx, request, who, "\u{1F4E4} eksport do arkusza", "", "");
+        if (url.pathname === "/surveys/bulk-mail") await auditLog(env, ctx, request, who, "\u2709\uFE0F wysy\u0142ka zbiorowa", "", (Array.isArray(body.items) ? body.items.length : (body.to || []).length) + " adresat\xF3w");
         if (url.pathname === "/surveys/bulk-mail") {
           body._base = url.origin;
           const r2 = await svBulkMail(env, who, body);
@@ -6088,6 +6101,7 @@ var worker_default = {
         if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
         const sid = String(src.student_id || "");
         if (!sid) return json({ error: "Brak student_id" }, 400);
+        await auditLog(env, ctx, request, who, url.pathname === "/student-symptoms/save" ? "\u{1FA7A} objawy \u2014 zapis" : "\u{1FA7A} objawy \u2014 podgl\u0105d", "kursant:" + sid, "");
         await ssTable(env);
         if (url.pathname === "/student-symptoms/save" && request.method === "POST" && !body.delete_check) {
           const lv = {};
@@ -6146,6 +6160,32 @@ var worker_default = {
         if (!r.ok) return json({ ok: true, row: null, header: [], edits: r.edits, sheet_error: r.error || null });
         return json(r);
       }
+      if (url.pathname === "/admin/access-log" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko admin" }, 403);
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS access_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, who TEXT, role TEXT, action TEXT, target TEXT, detail TEXT, ip TEXT, ua TEXT)").run();
+        const days = Math.max(1, Math.min(730, Number(url.searchParams.get("days")) || 30)), since = Math.floor(Date.now() / 1e3) - days * 86400;
+        const qWho = String(url.searchParams.get("who") || "").toLowerCase().trim(), qTarget = String(url.searchParams.get("target") || "").trim();
+        let sql = "SELECT at, who, role, action, target, detail, ip, ua FROM access_log WHERE at >= ?", args = [since];
+        if (qWho) {
+          sql += " AND LOWER(who) LIKE ?";
+          args.push("%" + qWho + "%");
+        }
+        if (qTarget) {
+          sql += " AND target LIKE ?";
+          args.push("%" + qTarget + "%");
+        }
+        const rows = (await env.DB.prepare(sql + " ORDER BY at DESC LIMIT 1000").bind(...args).all()).results || [];
+        const byWho = {};
+        rows.forEach((r) => {
+          const o = byWho[r.who] = byWho[r.who] || { who: r.who, role: r.role, n: 0, last: 0, ips: {} };
+          o.n++;
+          if (r.at > o.last) o.last = r.at;
+          if (r.ip) o.ips[r.ip] = 1;
+        });
+        return json({ ok: true, days, rows, summary: Object.values(byWho).map((o) => ({ who: o.who, role: o.role, n: o.n, last: o.last, ips: Object.keys(o.ips).length })).sort((a, b) => b.n - a.n) });
+      }
       if (url.pathname === "/admin/trainer-activity" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -6178,6 +6218,7 @@ var worker_default = {
         if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
         const sidQ = url.searchParams.get("student_id"), rk = url.searchParams.get("row_key");
         if (!sidQ && !rk) return json({ error: "Brak student_id albo row_key" }, 400);
+        await auditLog(env, ctx, request, who, "\u{1F4C4} ankieta otwarta", sidQ ? "kursant:" + sidQ : "ankieta:" + rk, "");
         return json({ ok: true, edits: await seMerged(env, sidQ, rk) });
       }
       if (url.pathname === "/surveys/check" || url.pathname === "/surveys/sheet") {
@@ -6256,6 +6297,7 @@ var worker_default = {
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
         if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
         await sstTable(env);
+        await auditLog(env, ctx, request, who, "\u{1F4CE} wys\u0142ana oferta/umowa", "oferta:" + (url.searchParams.get("id") || ""), url.searchParams.get("part") || "");
         const r = await env.DB.prepare("SELECT html_key, pdf_key, pdf_name FROM offer_meta WHERE id = ?").bind(Number(url.searchParams.get("id")) || 0).first();
         const k = r && (url.searchParams.get("part") === "pdf" ? r.pdf_key : r.html_key);
         if (!k) return json({ error: "Brak kopii tej wiadomo\u015Bci" }, 404);
@@ -10016,7 +10058,7 @@ async function txStudentReport(env, sid, days, extra) {
         weeks: pw.map((x) => ({ week: x.week, flu: Number(x.flu) || null, mood: Number(x.mood) || null, days: x.days != null ? Number(x.days) : null, old: x.old || "" })),
         calls: pw.filter((x) => x.call === "Tak").length
       };
-      parentCorpus = pw.map((x) => "### tydzie\u0144 od " + x.week + ": mowa " + (x.flu || "?") + "/10, stara mowa: " + (x.old || "?") + ", \u0107wiczenia " + (x.days || 0) + " dni (" + (x.mins || "?") + "), technika sam(a): " + (x.own || "?") + ", samopoczucie " + (x.mood || "?") + "/5" + (Array.isArray(x.rec) && x.rec.length ? "\nw tym tygodniu: " + x.rec.join(", ") : "") + (x.self ? "\ntrening z w\u0142asnej inicjatywy: " + x.self : "") + (x.field ? "\nostatnie \u0107wiczenia w terenie z rodzicem: " + x.field : "") + (x.tells ? "\nopowiada rodzicowi o Nowej Mowie: " + x.tells : "") + (Array.isArray(x.good) && x.good.length ? "\nspokojna Nowa Mowa: " + x.good.join(", ") : "") + (Array.isArray(x.hard) && x.hard.length ? "\nproblem z utrzymaniem techniki: " + x.hard.join(", ") : "") + (x.moment ? "\nmoment tygodnia: " + x.moment : "") + (x.ask ? "\npytanie do trenera: " + x.ask : "")).join("\n\n").slice(0, 6e3);
+      parentCorpus = pw.map((x) => "### tydzie\u0144 od " + x.week + ": mowa " + (x.flu || "?") + "/10, stara mowa: " + (x.old || "?") + ", \u0107wiczenia " + (x.days || 0) + " dni (" + (x.mins || "?") + "), technika sam(a): " + (x.own || "?") + ", samopoczucie " + (x.mood || "?") + "/5" + (Array.isArray(x.rec) && x.rec.length ? "\nw tym tygodniu: " + x.rec.join(", ") : "") + (x.self ? "\nnagrywa rozmowy w terenie i dzwoni do kursant\xF3w: " + x.self : "") + (x.field ? "\nostatnie \u0107wiczenia w terenie z rodzicem: " + x.field : "") + (x.tells ? "\nopowiada rodzicowi o Nowej Mowie: " + x.tells : "") + (Array.isArray(x.good) && x.good.length ? "\nspokojna Nowa Mowa: " + x.good.join(", ") : "") + (Array.isArray(x.hard) && x.hard.length ? "\nproblem z utrzymaniem techniki: " + x.hard.join(", ") : "") + (x.moment ? "\nmoment tygodnia: " + x.moment : "") + (x.ask ? "\npytanie do trenera: " + x.ask : "")).join("\n\n").slice(0, 6e3);
     }
   } catch (e) {
   }
@@ -11326,7 +11368,7 @@ var SVF_STEPS = [
     { k: "birth", type: "date", req: true, show: { role: SVF_SELF }, q: "Data urodzenia", col: "^data urodzenia(?! dziecka)|^rok urodzenia(?! dziecka)", ageCol: "^wiek(?! dziecka)", hdr: "Data urodzenia" },
     { k: "cbirth", type: "date", req: true, show: { role: SVF_PR }, q: "Data urodzenia dziecka", col: "data urodzenia dziecka", ageCol: "wiek dziecka", hdr: "Data urodzenia dziecka" },
     { k: "email", type: "email", req: true, q: "Adres e-mail", ac: "email", colIdx: 1 },
-    { k: "phone", type: "tel", req: true, q: { a: "Telefon", p: "Telefon do rodzica" }, hint: "trener zadzwoni, \u017Ceby porozmawia\u0107 o wynikach ankiety", ac: "tel", col: "^(numer |nr )?telefon(u)?( kontaktowy)?\\s*$|numer telefonu", colNot: "rodzic", colP: "telefon do rodzica", hdr: "Telefon" },
+    { k: "phone", type: "tel", req: true, q: { a: "Telefon", p: "Telefon do rodzica" }, ac: "tel", col: "^(numer |nr )?telefon(u)?( kontaktowy)?\\s*$|numer telefonu", colNot: "rodzic", colP: "telefon do rodzica", hdr: "Telefon" },
     { k: "country", type: "country", q: "Kraj zamieszkania", def: "Polska", col: "^kraj|pa\u0144stw", colP: "kraj zamieszkania", hdr: "Kraj" },
     { k: "zip", type: "zip", half: true, show: { ans: { country: ["Polska"] } }, q: "Kod pocztowy", ac: "postal-code", hdr: "Kod pocztowy" },
     { k: "city", type: "text", req: true, half: true, q: "Miejscowo\u015B\u0107 zamieszkania", ac: "address-level2", col: "miejscowo|miasto|miejsce zamieszkania", colNot: "kraj|pa\u0144stw|\\(zamieszkanie\\)", colP: "miejscowo.*\\(?zamieszk", hdr: "Miejscowo\u015B\u0107" }
@@ -11391,7 +11433,7 @@ var SVF_STEPS = [
     ]
   ) },
   { t: { a: "\u{1F3E0} Ty i Twoje otoczenie", p: "\u{1F3E0} Dziecko i otoczenie" }, q: [
-    { k: "live", type: "chips", q: { a: "Z kim mieszkasz?", p: "Z kim mieszka dziecko?" }, opts: ["Z partnerem / partnerk\u0105", "Z rodzicami", "Sam(a)", "Ze znajomymi"], optsKid: ["Z obojgiem rodzic\xF3w", "Z jednym rodzicem", "Na zmian\u0119 u ka\u017Cdego z rodzic\xF3w", "Z rodzicami i dziadkami", "Z dziadkami"], other: true, col: "z kim mieszka", colNot: "dziecko", colP: "z kim mieszka dziecko" },
+    { k: "live", type: "multi", q: { a: "Z kim mieszkasz?", p: "Z kim mieszka dziecko?" }, opts: ["Z \u017Con\u0105 / m\u0119\u017Cem", "Z partnerem / partnerk\u0105", "Z dzie\u0107mi", "Z rodzicami", "Z dziadkami", "Sam(a)", "Ze znajomymi"], optsKid: ["Z obojgiem rodzic\xF3w", "Z mam\u0105", "Z tat\u0105", "Na zmian\u0119 u ka\u017Cdego z rodzic\xF3w", "Z rodze\u0144stwem", "Z dziadkami", "Z partnerem mamy / taty"], other: true, col: "z kim mieszka", colNot: "dziecko", colP: "z kim mieszka dziecko" },
     { k: "alive", type: "chips", show: { kid: true }, q: { a: "Czy oboje Twoi rodzice \u017Cyj\u0105?", p: "Czy oboje rodzice dziecka \u017Cyj\u0105?" }, opts: ["Tak, oboje", "Jedno z rodzic\xF3w nie \u017Cyje", "Oboje nie \u017Cyj\u0105"], hdr: "Rodzice \u017Cyj\u0105" },
     { k: "divorce", type: "chips", show: { kid: true }, q: { a: "Czy Twoi rodzice s\u0105 po rozwodzie lub rozstaniu?", p: "Czy rodzice dziecka s\u0105 po rozwodzie lub rozstaniu?" }, opts: ["Nie", "Tak, po rozwodzie", "Tak, po rozstaniu", "Wol\u0119 nie odpowiada\u0107"], hdr: "Rozw\xF3d / rozstanie rodzic\xF3w" },
     { k: "divorceWhen", type: "text", show: { ans: { divorce: ["Tak, po rozwodzie", "Tak, po rozstaniu"] } }, q: "Ile lat temu? (albo rok i ile lat mia\u0142o wtedy dziecko)", hdr: "Rozw\xF3d / rozstanie \u2014 kiedy" },
@@ -11402,8 +11444,8 @@ var SVF_STEPS = [
     { k: "raise", type: "chips", show: { role: SVF_PR }, q: "Dziecko wychowuje Pani/Pan:", opts: ["Sam(a)", "Z ma\u0142\u017Conkiem / partnerem", "Na zmian\u0119 z drugim rodzicem", "Z pomoc\u0105 dziadk\xF3w"], other: true, hdr: "Wychowanie dziecka" },
     { k: "pPsych", type: "chips", show: { role: SVF_PR }, q: "Czy ma Pani/Pan zdiagnozowane trudno\u015Bci lub choroby natury psychologicznej (np. l\u0119ki, depresja)?", opts: ["Nie", "Tak", "Wol\u0119 nie odpowiada\u0107"], hdr: "Rodzic \u2014 trudno\u015Bci psychologiczne" },
     { k: "pPsychWhat", type: "text", show: { role: SVF_PR, ans: { pPsych: ["Tak"] } }, q: "Jakie? (opcjonalnie)", hdr: "Rodzic \u2014 trudno\u015Bci psychologiczne \u2014 jakie" },
-    { k: "close", type: "multi", q: { a: "Jak bliscy reaguj\u0105 na Twoje trudno\u015Bci w mowie?", p: "Jak rodzina reaguje na trudno\u015Bci dziecka?" }, opts: ["Wspieraj\u0105", "Nie zwracaj\u0105 uwagi", "Bagatelizuj\u0105", "Denerwuj\u0105 si\u0119 lub poganiaj\u0105", "Ko\u0144cz\u0105 zdania", "Nie wiem"], other: true, col: "bliscy postrzegaj\u0105|postrzegaj\u0105" },
-    { k: "who", type: "multi", q: { a: "Kto wie o Twoich trudno\u015Bciach?", p: "Kto wie o trudno\u015Bciach dziecka?" }, opts: ["Rodzina", "Partner / partnerka", "Przyjaciele", "Szko\u0142a lub praca", "Nikt"], optsKid: ["Rodzina", "Przyjaciele", "Nauczyciele", "Koledzy z klasy", "Nikt"], col: "kto wie o" },
+    { k: "close", type: "multi", q: { a: "Jak bliscy reaguj\u0105 na Twoje trudno\u015Bci w mowie?", p: "Jak rodzina reaguje na trudno\u015Bci dziecka?" }, opts: ["Wspieraj\u0105", "Przyzwyczaili si\u0119", "Nie zwracaj\u0105 uwagi", "Nie widz\u0105 problemu", "Udaj\u0105, \u017Ce nie ma problemu", "Bagatelizuj\u0105", "Poprawiaj\u0105", "Krytykuj\u0105 za mow\u0119", "Denerwuj\u0105 si\u0119 lub poganiaj\u0105", "Ko\u0144cz\u0105 zdania", "Nie wiem"], other: true, col: "bliscy postrzegaj\u0105|postrzegaj\u0105" },
+    { k: "who", type: "multi", q: { a: "Kto wie o Twoich trudno\u015Bciach?", p: "Kto wie o trudno\u015Bciach dziecka?" }, opts: ["Mama", "Tata", "Rodze\u0144stwo", "Dziadkowie", "Partner / partnerka", "Znajomi", "W szkole", "W pracy", "Nauczyciel", "Szef", "Nikt"], optsKid: ["Mama", "Tata", "Rodze\u0144stwo", "Dziadkowie", "Koledzy", "Nauczyciel", "W szkole", "Nikt"], col: "kto wie o" },
     { k: "hobby", type: "multi", q: { a: "Twoje zainteresowania", p: "Zainteresowania dziecka" }, opts: ["Sport", "Muzyka", "Gry", "Ksi\u0105\u017Cki", "Taniec", "Rysunek, sztuka", "Technika, komputery", "Przyroda, zwierz\u0119ta"], other: true, col: "zainteres|hobby", colNot: "dziecka|rozwi\u0144", colP: "zainteresowania dziecka" },
     { k: "sportWhat", type: "text", show: { ans: { hobby: ["Sport"] } }, q: "Jaki sport?", hint: "np. pi\u0142ka no\u017Cna, p\u0142ywanie", hdr: "Sport \u2014 jaki" },
     { k: "sportHow", type: "chips", show: { ans: { hobby: ["Sport"] } }, q: "Sport \u2014 jak?", opts: ["Tylko ogl\u0105dam", "Rekreacyjnie", "Trenuj\u0119 w klubie", "Startuj\u0119 w zawodach"], hdr: "Sport \u2014 jak" },
@@ -11419,16 +11461,7 @@ var SVF_STEPS = [
     { k: "medsWhat", type: "text", show: { ans: { meds: ["Tak"] } }, q: "Jakie?", hdr: "Leki \u2014 jakie" }
   ] },
   { t: { a: "\u{1F3AF} Cel i kurs", p: "\u{1F3AF} Cel i kurs" }, q: [
-    {
-      k: "goal",
-      type: "multi",
-      req: true,
-      q: { a: "Czego oczekujesz po kursie?", p: "Czego oczekuje Pani/Pan po kursie?" },
-      opts: ["Swobodne rozmowy przez telefon", "Przedstawianie si\u0119 bez stresu", "Pewno\u015B\u0107 siebie", "Wyst\u0105pienia i prezentacje", "Rozmowy w pracy i z klientami", "Mniej unikania sytuacji"],
-      optsKid: ["Swobodne odpowiedzi w szkole", "Swobodne rozmowy z kolegami", "Czytanie na g\u0142os bez stresu", "Przedstawianie si\u0119 bez stresu", "Pewno\u015B\u0107 siebie", "Rozmowy przez telefon", "Mniej unikania sytuacji"],
-      other: true,
-      col: "oczekujesz|oczekiwania|cel kursu"
-    },
+    { k: "goal", type: "textarea", req: true, q: { a: "Czego oczekujesz po kursie?", p: "Czego oczekuje Pani/Pan po kursie?" }, hint: "napisz w\u0142asnymi s\u0142owami", col: "oczekujesz|oczekiwania|cel kursu" },
     { k: "impact", type: "grid", q: { a: "Na ile mowa Ci\u0119 ogranicza?", p: "Na ile mowa ogranicza dziecko?" }, hq: "Na ile mowa Ci\u0119 ogranicza?", rows: ["w szkole lub pracy", "w relacjach z lud\u017Ami", "w codziennych sprawach", "w planach i decyzjach"], rowsKid: ["w szkole / przedszkolu", "w relacjach z r\xF3wie\u015Bnikami", "w codziennych sprawach", "w zabawie i zaj\u0119ciach dodatkowych"], opts: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], hint: "0 = wcale, 10 = bardzo" },
     { k: "form", type: "chips", req: true, q: "Jaka forma kursu odpowiada?", opts: ["Na miejscu w Miko\u0142owie", "Online", "Ka\u017Cda mi odpowiada", "Jeszcze nie wiem"], hdr: "Forma kursu" },
     { k: "when", type: "chips", req: true, q: "Kiedy chcesz zacz\u0105\u0107?", opts: ["Jak najszybciej", "W ci\u0105gu 3 miesi\u0119cy", "P\xF3\u017Aniej", "Jeszcze nie wiem"], hdr: "Kiedy zacz\u0105\u0107" },
@@ -11461,6 +11494,30 @@ function svfOrder(opts) {
 }
 __name(svfOrder, "svfOrder");
 __name2(svfOrder, "svfOrder");
+async function auditLog(env, ctx, request, who, action, target, detail) {
+  const job = (async () => {
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS access_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, who TEXT, role TEXT, action TEXT, target TEXT, detail TEXT, ip TEXT, ua TEXT)").run();
+      const h = request && request.headers ? request.headers : new Headers();
+      await env.DB.prepare("INSERT INTO access_log (at, who, role, action, target, detail, ip, ua) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(
+        Math.floor(Date.now() / 1e3),
+        String(who && who.email || ""),
+        who && who.admin ? "admin" : "trener",
+        String(action || "").slice(0, 60),
+        String(target || "").slice(0, 200),
+        String(detail || "").slice(0, 300),
+        String(h.get("CF-Connecting-IP") || "").slice(0, 60),
+        String(h.get("User-Agent") || "").slice(0, 160)
+      ).run();
+      if (Math.random() < 0.02) await env.DB.prepare("DELETE FROM access_log WHERE at < ?").bind(Math.floor(Date.now() / 1e3) - 2 * 365 * 86400).run();
+    } catch (e) {
+    }
+  })();
+  if (ctx && ctx.waitUntil) ctx.waitUntil(job);
+  else await job;
+}
+__name(auditLog, "auditLog");
+__name2(auditLog, "auditLog");
 async function svfCfg(env) {
   let c = {};
   try {
@@ -11523,6 +11580,7 @@ var SVF_UI = [
   "\u{1F393} Wyk\u0142ad o ESBS",
   "\u{1F4DA} Ksi\u0105\u017Cki i materia\u0142y \u2014 sklep Nowej Mowy",
   "\u{1F64F} Dzi\u0119kujemy za ankiet\u0119",
+  "\u2705 Zaznacz wszystkie zgody",
   "nie wiem",
   "Zaznacz odpowied\u017A w ka\u017Cdym wierszu.",
   "Dzie\u0144 dobry,",
@@ -11878,12 +11936,13 @@ function qHtml(q){if(!cond(q.show))return '';var r=q.req?' <span class="req">*</
 function render(){var L=steps();if(cur>=L.length)cur=L.length-1;if(cur<0)cur=0;var s=L[cur],h='<h2>'+esc(T(s.t))+'</h2>'+(s.note?'<div class="note">'+esc(T(s.note))+'</div>':'');
   if(s.grids)h+=D.grids.map(function(g,gi){return '<div class="card" data-q="g'+gi+'"><div class="q">'+esc(tr(g.q))+'</div>'+g.rows.map(function(rw){var k='c'+rw.i;return '<div class="gr" data-row="'+k+'"><div class="r">'+esc(tr(rw.r))+'</div>'+chips(k,isP()?g.opts.concat(['nie wiem']):g.opts,false,false)+'</div>';}).join('')+(D.map?'<div class="map">→ kolumny '+(g.rows[0].i+1)+'–'+(g.rows[g.rows.length-1].i+1)+' (jak dotąd)</div>':'')+'</div>';}).join('');
   else if(s.rest)h+='<div class="note">'+esc(tr('Te pytania są z dotychczasowej ankiety.'))+'</div>'+D.rest.map(function(q){var k='c'+q.i;var b=q.type==='chips'?chips(k,q.opts,false,q.other):q.type==='textarea'?'<textarea data-k="'+k+'">'+esc(S[k]||'')+'</textarea>':'<input type="text" data-k="'+k+'" value="'+esc(S[k]||'')+'">';return '<div class="card" data-q="'+k+'"><div class="q">'+esc(tr(q.q))+'</div>'+b+(D.map?'<div class="map">→ kolumna '+(q.i+1)+'</div>':'')+'</div>';}).join('');
-  else{var parts=s.q.map(function(q){return {q:q,h:qHtml(q)};}).filter(function(x){return x.h;}),i=0;while(i<parts.length){if(parts[i].q.half&&parts[i+1]&&parts[i+1].q.half){h+='<div class="grid2">'+parts[i].h.replace('class="card"','class="card" style="margin-top:0"')+parts[i+1].h.replace('class="card"','class="card" style="margin-top:0"')+'</div>';i+=2;}else{h+=parts[i].h;i++;}}}
+  else{if(s.q.some(function(q){return q.k==='consent';}))h+='<div style="margin-top:12px"><button type="button" class="geo" data-allcons="1" style="font-size:15px">'+esc(tr('✅ Zaznacz wszystkie zgody'))+'</button></div>';
+  var parts=s.q.map(function(q){return {q:q,h:qHtml(q)};}).filter(function(x){return x.h;}),i=0;while(i<parts.length){if(parts[i].q.half&&parts[i+1]&&parts[i+1].q.half){h+='<div class="grid2">'+parts[i].h.replace('class="card"','class="card" style="margin-top:0"')+parts[i+1].h.replace('class="card"','class="card" style="margin-top:0"')+'</div>';i+=2;}else{h+=parts[i].h;i++;}}}
   document.getElementById('st').innerHTML=h;document.getElementById('stl').textContent=T(s.t).replace(/^\S+\s/,'');document.getElementById('stn').textContent=tr('Krok %1 z %2').replace('%1',cur+1).replace('%2',L.length)+' · '+Math.round((cur+1)*100/L.length)+'%';document.getElementById('pb').style.width=Math.round((cur+1)*100/L.length)+'%';
   document.getElementById('bk').style.visibility=cur?'visible':'hidden';document.getElementById('nx').textContent=cur===L.length-1?tr('Wyślij ankietę ✓'):tr('Dalej →');document.getElementById('msg').textContent='';}
 function save(){try{localStorage.setItem(KEY,JSON.stringify({a:S,s:cur}))}catch(e){}}
 var F=document.getElementById('f');
-F.addEventListener('click',function(e){var g=e.target.closest('[data-geo]');if(g){geo();return;}var c=e.target.closest('.chip,.cd');if(!c)return;var k=c.dataset.k,v=c.dataset.v,m=c.dataset.m==='1';
+F.addEventListener('click',function(e){var g=e.target.closest('[data-geo]');if(g){geo();return;}if(e.target.closest('[data-allcons]')){['consent','consentMail','consentResearch'].forEach(function(k){S[k]='Tak';});save();var yy=window.scrollY;render();window.scrollTo(0,yy);return;}var c=e.target.closest('.chip,.cd');if(!c)return;var k=c.dataset.k,v=c.dataset.v,m=c.dataset.m==='1';
   if(c.classList.contains('cd')){S[k]=v;if(k==='role'&&v!=='rodzic')delete S.stage;save();render();return;}
   if(v==='__o'){var on=!S['_o_'+k];S['_o_'+k]=on;if(!on){if(m)S[k]=(S[k]||[]).filter(function(x){return Array.prototype.some.call(c.parentNode.querySelectorAll('.chip'),function(n){return n.dataset.v===x;});});else if(S[k]&&!Array.prototype.some.call(c.parentNode.querySelectorAll('.chip'),function(n){return n.dataset.v===S[k];}))delete S[k];}else if(!m)S[k]='';}
   else if(m){var a=Array.isArray(S[k])?S[k].slice():[];var ix=a.indexOf(v);if(ix>=0)a.splice(ix,1);else a.push(v);S[k]=a;}
@@ -12087,13 +12146,61 @@ async function svfSubmit(request, env, ctx) {
       await ensureGoogleTables(env);
       const account = await appSettingGet(env, "google_account") || "";
       const who = parent ? row[21] + " (rodzic: " + row[20] + ")" : row[3];
+      const lbl = /* @__PURE__ */ __name((q) => {
+        const x = q.q;
+        return typeof x === "string" ? x : parent ? x.p || x.a : x.a;
+      }, "lbl");
+      const sec = [];
+      let cur = null;
+      SVF_STEPS.forEach((st) => {
+        if (st.grids) {
+          const items = [];
+          (D.grids || []).forEach((g) => g.rows.forEach((rw) => {
+            const v = String(A["c" + rw.i] || "");
+            if (/^(często|zawsze)/i.test(v)) items.push([rw.r, v]);
+          }));
+          sec.push({ t: (parent ? st.t.p : st.t.a) + " \u2014 cz\u0119sto / zawsze", items });
+          return;
+        }
+        if (st.rest) {
+          const items = [];
+          (D.rest || []).forEach((q) => {
+            const v = val("c" + q.i);
+            if (v) items.push([q.q, v]);
+          });
+          if (items.length) sec.push({ t: "Pytania z dawnego formularza", items });
+          return;
+        }
+        cur = { t: parent ? st.t.p : st.t.a, items: [] };
+        sec.push(cur);
+        (st.q || []).forEach((q) => {
+          if (!cond(q.show) || /^consent/.test(q.k) && false) return;
+          if (q.type === "grid") {
+            const rs = kid && q.rowsKid ? q.rowsKid : q.rows;
+            rs.forEach((r, j) => {
+              const v2 = val(q.k + "_" + j);
+              if (v2) cur.items.push([lbl(q).replace(/\?$/, "") + ": " + r, v2]);
+            });
+            return;
+          }
+          let v = val(q.k);
+          if (!v) return;
+          if (q.k === "role" || q.k === "stage") v = (q.opts.find((o) => o[0] === v) || [v, v])[1];
+          if (q.type === "date") {
+            const a2 = ageOf(v);
+            v = plDate(v) + (a2 != null ? " (" + a2 + " lat)" : "");
+          }
+          cur.items.push([lbl(q), v]);
+        });
+      });
+      const sumHtml = sec.filter((s) => s.items.length).map((s) => '<tr><td colspan="2" style="padding:12px 0 4px;font-weight:bold;font-size:15px;color:#6B4E16;border-bottom:2px solid #F5A623">' + ofEsc(s.t) + "</td></tr>" + s.items.map((it) => '<tr><td style="padding:4px 10px 4px 0;vertical-align:top;color:#6b6259;width:45%;border-bottom:1px solid #f0e6d8">' + ofEsc(it[0]) + '</td><td style="padding:4px 0;vertical-align:top;border-bottom:1px solid #f0e6d8"><b>' + ofEsc(it[1]).replace(/\n/g, "<br>") + "</b></td></tr>").join("")).join("");
       await ofGmailSend(env, ofMime({
         from: account,
         fromName: "Panel Nowej Mowy",
         to: ofReminderTo(env),
         replyTo: email,
         subject: (test ? "\u{1F9EA} Test: " : "\u{1F4DD} ") + "nowa ankieta \u2014 " + (who || email),
-        html: '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px"><p>Nowa ankieta online: <b>' + ofEsc(who || "") + "</b> \xB7 " + ofEsc(email) + (val("phone") ? " \xB7 \u{1F4DE} " + ofEsc(val("phone")) : "") + "</p><p>Arkusz: " + (ok ? "\u2705 dopisano do zak\u0142adki \u201E" + ofEsc(tab) + "\u201D" : "\u274C nie dopisano (" + ofEsc(err) + ") \u2014 odpowiedzi s\u0105 zapisane w bazie panelu") + "</p></div>"
+        html: '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px"><p>Nowa ankieta online: <b>' + ofEsc(who || "") + "</b> \xB7 " + ofEsc(email) + (val("phone") ? " \xB7 \u{1F4DE} " + ofEsc(val("phone")) : "") + "</p><p>Arkusz: " + (ok ? "\u2705 dopisano do zak\u0142adki \u201E" + ofEsc(tab) + "\u201D" : "\u274C nie dopisano (" + ofEsc(err) + ") \u2014 odpowiedzi s\u0105 zapisane w bazie panelu") + (lang !== "pl" ? " \xB7 j\u0119zyk ankiety: " + lang.toUpperCase() : "") + '</p><table cellpadding="0" cellspacing="0" style="width:100%;max-width:720px;border-collapse:collapse;font-size:14px;line-height:1.45">' + sumHtml + "</table></div>"
       }));
     } catch (e) {
     }
@@ -12133,7 +12240,7 @@ var PW_Q = [
   { k: "days", type: "scale", min: 0, max: 7, q: "Ile dni w tym tygodniu {imie} {cw} (nagrania, \u0107wiczenia z trenerem)?", lo: "ani jednego", hi: "codziennie" },
   { k: "mins", type: "chips", q: "Ile czasu dziennie, \u015Brednio?", opts: ["do 10 minut", "10\u201320 minut", "20\u201340 minut", "ponad 40 minut"] },
   { k: "rec", type: "multi", q: "Co {imie} {robil} w tym tygodniu?", opts: ["Nagrania w aplikacji", "Telefony do innych kursant\xF3w", "\u0106wiczenia z trenerem", "\u0106wiczenia w terenie", "Nic z tych rzeczy"] },
-  { k: "self", type: "chips", q: "Czy {imie} {sam} od siebie wykonuje trening \u2014 nagrania w domu i w terenie?", opts: ["Regularnie", "Cz\u0119sto", "Rzadko", "Tylko gdy przypomn\u0119", "M\xF3wi, \u017Ce {jej} si\u0119 nie chce", "Robi awantur\u0119"] },
+  { k: "self", type: "chips", q: "Czy {imie} nagrywa rozmowy w terenie i czy dzwoni do kursant\xF3w?", opts: ["Regularnie", "Cz\u0119sto", "Rzadko", "Tylko gdy przypomn\u0119", "M\xF3wi, \u017Ce {jej} si\u0119 nie chce", "Robi awantur\u0119"] },
   { k: "own", type: "chips", q: "Czy {imie} {sam} {uz} techniki Nowej Mowy poza \u0107wiczeniami?", opts: ["Zawsze", "Cz\u0119sto", "Czasem", "Rzadko", "Nie", "Nie wiem"] },
   { k: "field", type: "chips", q: "Kiedy ostatnio by\u0142(a) Pani/Pan z {imie_n} na \u0107wiczeniach w terenie?", opts: ["Dzi\u015B", "Wczoraj", "W tym tygodniu", "W zesz\u0142ym tygodniu", "Dawno", "Nie pami\u0119tam"] },
   { k: "good", type: "multi", q: "Gdzie {imie} {mowil} spokojn\u0105 Now\u0105 Mow\u0105?", opts: ["W domu", "Z rodze\u0144stwem", "Z kolegami", "Na przerwie", "Na lekcji / przy odpowiedzi", "W przedszkolu", "W sklepie", "Przez telefon", "Z obcymi osobami", "Pytanie o drog\u0119", "Przy czytaniu na g\u0142os", "W restauracji / kawiarni"], other: true },
@@ -12316,6 +12423,7 @@ async function pwPanel(request, env, url) {
   if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
   const sid = String(src.student_id || "");
   if (!sid) return json({ error: "Brak student_id" }, 400);
+  await auditLog(env, null, request, who, "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} obserwacje rodzica", "kursant:" + sid, url.pathname === "/parent-weekly/sub" ? "zmiana ustawie\u0144" : "");
   await pwTables(env);
   if (url.pathname === "/parent-weekly/sub" && request.method === "POST") {
     const email = String(body.email || "").trim().toLowerCase();
@@ -12754,6 +12862,7 @@ async function svList(env) {
       why_asked_at: (sent[em] || {}).why || null,
       why_reply_at: (sent[em] || {}).whyRe || null,
       sent_docs: (mt.docs || []).slice(-6),
+      online: langIdx >= 0 && !!String(r[langIdx] || "").trim(),
       source: r._src || null,
       lang: r._lang || (langIdx >= 0 && /^(sk|cs|en)$/.test(String(r[langIdx] || "")) ? String(r[langIdx]) : null),
       test: !!r._test,
