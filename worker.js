@@ -6327,9 +6327,22 @@ var worker_default = {
             const r0 = await env.DB.prepare("INSERT INTO course_reminders (to_email, student_name, start_date, child, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(to, String(body.name || "").slice(0, 120), start, body.child ? 1 : 0, who.email, Math.floor(Date.now() / 1e3)).run();
             id = r0.meta && r0.meta.last_row_id;
           }
+          if (/^(pl|sk|cs|en)$/.test(String(body.lang || ""))) {
+            try {
+              await env.DB.prepare("UPDATE course_reminders SET lang = ? WHERE id = ?").bind(body.lang, id).run();
+            } catch (e) {
+            }
+          }
+          const before = await env.DB.prepare("SELECT deposit_at FROM course_reminders WHERE id = ?").bind(id).first();
           await env.DB.prepare("UPDATE course_reminders SET deposit_at = ?, deposit_by = ? WHERE id = ?").bind(on ? Math.floor(Date.now() / 1e3) : null, on ? String(who.email || "") : null, id).run();
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(id).first();
-          return json({ ok: true, id, send_on: r ? ofAddDays(r.start_date, -7) : null });
+          let mailed = false, mailErr = null;
+          if (on && r && !(before && before.deposit_at) && body.mail !== false) {
+            const s = await ofSendDepositConfirm(env, r, who);
+            mailed = !!s.ok;
+            if (!s.ok) mailErr = s.error || "nie wys\u0142ano";
+          }
+          return json({ ok: true, id, send_on: r ? ofAddDays(r.start_date, -7) : null, mailed, mail_error: mailErr });
         }
         if (url.pathname === "/offers/reminders/remind" && request.method === "POST") {
           const on = body.on !== false, now = Math.floor(Date.now() / 1e3);
@@ -6341,6 +6354,12 @@ var worker_default = {
             id = r2.meta && r2.meta.last_row_id;
           }
           await env.DB.prepare("UPDATE course_reminders SET remind_at = ?, remind_by = ? WHERE id = ?").bind(on ? now : null, on ? String(who.email || "") : null, id).run();
+          if (/^(pl|sk|cs|en)$/.test(String(body.lang || ""))) {
+            try {
+              await env.DB.prepare("UPDATE course_reminders SET lang = ? WHERE id = ?").bind(body.lang, id).run();
+            } catch (e) {
+            }
+          }
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(id).first();
           return json({ ok: true, id, send_on: r ? ofAddDays(r.start_date, -7) : null, sent_at: r && r.sent_at });
         }
@@ -6351,7 +6370,7 @@ var worker_default = {
           return json(res.ok ? { ok: true } : { error: res.error }, res.ok ? 200 : 502);
         }
         if (url.pathname === "/offers/reminders/preview" && request.method === "GET") {
-          return json({ ok: true, html: ofCourseInfoHtml(String(url.searchParams.get("start") || "2026-01-01")) });
+          return json({ ok: true, html: ofCourseInfoHtml(String(url.searchParams.get("start") || "2026-01-01"), url.searchParams.get("lang")) });
         }
         if (url.pathname === "/offers/reminders/cancel" && request.method === "POST") {
           await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
@@ -10615,7 +10634,7 @@ function ofReminderTo(env) {
 __name(ofReminderTo, "ofReminderTo");
 async function ofTables(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS course_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, student_name TEXT, start_date TEXT NOT NULL, child INTEGER, created_by TEXT, created_at INTEGER, sent_at INTEGER, cancelled INTEGER DEFAULT 0, error TEXT, deposit_at INTEGER, deposit_by TEXT)").run();
-  for (const c of ["deposit_at INTEGER", "deposit_by TEXT", "remind_at INTEGER", "remind_by TEXT"]) {
+  for (const c of ["deposit_at INTEGER", "deposit_by TEXT", "remind_at INTEGER", "remind_by TEXT", "lang TEXT"]) {
     try {
       await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
     } catch (e) {
@@ -10995,16 +11014,167 @@ function ofCourseInfoText(start) {
 }
 __name(ofCourseInfoText, "ofCourseInfoText");
 __name2(ofCourseInfoText, "ofCourseInfoText");
-function ofCourseInfoHtml(start) {
-  const L = "color:#1a4fd6;";
-  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222"><p>Witaj!</p><p>Ju\u017C <b>' + ofLong(start) + '</b> rozpoczynamy Kurs Nowej Mowy. Poni\u017Cej przesy\u0142amy najwa\u017Cniejsze informacje organizacyjne dotycz\u0105ce dop\u0142aty do kursu oraz przygotowania do zaj\u0119\u0107.</p><p style="margin-top:16px"><b>P\u0142atno\u015Bci</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li><b>Przelew:</b> je\u015Bli planujesz op\u0142aci\u0107 kurs przelewem, prosimy o uregulowanie wp\u0142aty najp\xF3\u017Aniej do <b>' + ofLong(ofAddDays(start, -3)) + '</b> na ten sam numer konta, na kt\xF3ry wp\u0142acany by\u0142 zadatek.</li><li><b>Got\xF3wka:</b> w przypadku p\u0142atno\u015Bci got\xF3wk\u0105 na miejscu, prosimy o przybycie do Szko\u0142y Nowa Mowa o godzinie <b>8:50</b>.</li></ul><p><b>Co nale\u017Cy ze sob\u0105 zabra\u0107</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li><b>Notes:</b> b\u0119dzie potrzebny do komunikacji z trenerem w trakcie tzw. dni \u201Ekartkowych\u201D.</li><li><b>Wygodne obuwie i ciep\u0142e ubranie:</b> planujemy treningi w przestrzeni miejskiej, dlatego przydadz\u0105 si\u0119 wygodne buty oraz co\u015B cieplejszego do ubrania na wypadek ch\u0142odniejszej pogody.</li></ul><p>Do zobaczenia na zaj\u0119ciach! W razie jakichkolwiek pyta\u0144 zapraszamy do kontaktu.</p><p><b>PARKINGI</b><br><a href="https://www.google.com/maps/d/u/0/edit?mid=1H5gc1803KRf8s34QoN37T_PXqxMkoWA&usp=sharing" style="' + L + '">Mapa parking\xF3w w pobli\u017Cu Szko\u0142y Nowej Mowy</a></p><p>Szko\u0142a Nowej Mowy<br>Rynek 3/1A, Miko\u0142\xF3w</p></div>';
+var OF_MONTHS_L = {
+  sk: ["janu\xE1ra", "febru\xE1ra", "marca", "apr\xEDla", "m\xE1ja", "j\xFAna", "j\xFAla", "augusta", "septembra", "okt\xF3bra", "novembra", "decembra"],
+  cs: ["ledna", "\xFAnora", "b\u0159ezna", "dubna", "kv\u011Btna", "\u010Dervna", "\u010Dervence", "srpna", "z\xE1\u0159\xED", "\u0159\xEDjna", "listopadu", "prosince"],
+  en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+};
+function ofLang(l) {
+  return ["sk", "cs", "en"].indexOf(l) >= 0 ? l : "pl";
+}
+__name(ofLang, "ofLang");
+function ofDateL(ymd, lang, year) {
+  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z"), y = year ? " " + d.getUTCFullYear() : "";
+  lang = ofLang(lang);
+  if (lang === "pl") return d.getUTCDate() + " " + OF_MONTHS[d.getUTCMonth()] + y;
+  if (lang === "en") return d.getUTCDate() + " " + OF_MONTHS_L.en[d.getUTCMonth()] + y;
+  return d.getUTCDate() + ". " + OF_MONTHS_L[lang][d.getUTCMonth()] + y;
+}
+__name(ofDateL, "ofDateL");
+var OF_TXT = {
+  pl: {
+    depT: "\u2705 Potwierdzenie zadatku",
+    depS: "Potwierdzenie zadatku \u2014 Kurs Nowej Mowy od %d",
+    hiA: "Cze\u015B\u0107 %n,",
+    hiC: "Dzie\u0144 dobry,",
+    hi0: "Dzie\u0144 dobry,",
+    dep: 'potwierdzamy wp\u0142at\u0119 zadatku i tym samym <b>%w w Kursie Nowej Mowy od <span style="color:#D9822B">%d</span></b>. \u{1F389}',
+    whoA: "Tw\xF3j udzia\u0142",
+    whoC: "udzia\u0142 %g",
+    whoC0: "udzia\u0142 dziecka",
+    dep2: "Na 7 dni przed rozpocz\u0119ciem kursu prze\u015Blemy wiadomo\u015B\u0107 z informacjami o dop\u0142acie i o tym, jak przygotowa\u0107 si\u0119 do zaj\u0119\u0107.",
+    q: "W razie pyta\u0144 \u2014 wystarczy odpisa\u0107 na tego maila.",
+    bye: "Do zobaczenia!",
+    infS: "Kurs Nowej Mowy od %d \u2014 dop\u0142ata i przygotowanie",
+    infHi: "Witaj!",
+    inf1: "Ju\u017C <b>%d</b> rozpoczynamy Kurs Nowej Mowy. Poni\u017Cej przesy\u0142amy najwa\u017Cniejsze informacje organizacyjne dotycz\u0105ce dop\u0142aty do kursu oraz przygotowania do zaj\u0119\u0107.",
+    pay: "P\u0142atno\u015Bci",
+    payT: "<b>Przelew:</b> je\u015Bli planujesz op\u0142aci\u0107 kurs przelewem, prosimy o uregulowanie wp\u0142aty najp\xF3\u017Aniej do <b>%p</b> na ten sam numer konta, na kt\xF3ry wp\u0142acany by\u0142 zadatek.",
+    payC: "<b>Got\xF3wka:</b> w przypadku p\u0142atno\u015Bci got\xF3wk\u0105 na miejscu, prosimy o przybycie do Szko\u0142y Nowa Mowa o godzinie <b>8:50</b>.",
+    take: "Co nale\u017Cy ze sob\u0105 zabra\u0107",
+    note: "<b>Notes:</b> b\u0119dzie potrzebny do komunikacji z trenerem w trakcie tzw. dni \u201Ekartkowych\u201D.",
+    shoes: "<b>Wygodne obuwie i ciep\u0142e ubranie:</b> planujemy treningi w przestrzeni miejskiej, dlatego przydadz\u0105 si\u0119 wygodne buty oraz co\u015B cieplejszego do ubrania na wypadek ch\u0142odniejszej pogody.",
+    see: "Do zobaczenia na zaj\u0119ciach! W razie jakichkolwiek pyta\u0144 zapraszamy do kontaktu.",
+    park: "PARKINGI",
+    parkL: "Mapa parking\xF3w w pobli\u017Cu Szko\u0142y Nowej Mowy"
+  },
+  sk: {
+    depT: "\u2705 Potvrdenie z\xE1lohy",
+    depS: "Potvrdenie z\xE1lohy \u2014 kurz Nowa Mowa od %d",
+    hiA: "Dobr\xFD de\u0148, %n,",
+    hiC: "Dobr\xFD de\u0148,",
+    hi0: "Dobr\xFD de\u0148,",
+    dep: 'potvrdzujeme prijatie z\xE1lohy, a t\xFDm aj <b>%w v kurze Nowa Mowa od <span style="color:#D9822B">%d</span></b>. \u{1F389}',
+    whoA: "Va\u0161u \xFA\u010Das\u0165",
+    whoC: "\xFA\u010Das\u0165 V\xE1\u0161ho die\u0165a\u0165a",
+    whoC0: "\xFA\u010Das\u0165 V\xE1\u0161ho die\u0165a\u0165a",
+    dep2: "7 dn\xED pred za\u010Diatkom kurzu V\xE1m po\u0161leme spr\xE1vu s inform\xE1ciami o doplatku a o tom, ako sa na kurz pripravi\u0165.",
+    q: "Ak m\xE1te ot\xE1zky, sta\u010D\xED odpoveda\u0165 na tento e-mail.",
+    bye: "Te\u0161\xEDme sa na V\xE1s!",
+    infS: "Kurz Nowa Mowa od %d \u2014 doplatok a pr\xEDprava",
+    infHi: "Dobr\xFD de\u0148!",
+    inf1: "U\u017E <b>%d</b> za\u010D\xEDname kurz Nowa Mowa. Ni\u017E\u0161ie posielame najd\xF4le\u017Eitej\u0161ie organiza\u010Dn\xE9 inform\xE1cie o doplatku za kurz a o pr\xEDprave na tr\xE9ning.",
+    pay: "Platby",
+    payT: "<b>Prevodom:</b> ak pl\xE1nujete zaplati\u0165 kurz prevodom, pros\xEDme o \xFAhradu najnesk\xF4r do <b>%p</b> na rovnak\xE9 \u010D\xEDslo \xFA\u010Dtu, na ktor\xE9 ste platili z\xE1lohu.",
+    payC: "<b>V hotovosti:</b> ak budete plati\u0165 v hotovosti na mieste, pros\xEDme, pr\xED\u010Fte do Szko\u0142y Nowej Mowy o <b>8:50</b>.",
+    take: "\u010Co si vzia\u0165 so sebou",
+    note: "<b>Z\xE1pisn\xEDk:</b> bude potrebn\xFD na komunik\xE1ciu s tr\xE9nerom po\u010Das takzvan\xFDch \u201Ekarti\u010Dkov\xFDch\u201C dn\xED.",
+    shoes: "<b>Pohodln\xFA obuv a tepl\xE9 oble\u010Denie:</b> pl\xE1nujeme tr\xE9ningy v meste, preto sa z\xEDdu pohodln\xE9 top\xE1nky a nie\u010Do teplej\u0161ie na oble\u010Denie pre pr\xEDpad chladnej\u0161ieho po\u010Dasia.",
+    see: "Te\u0161\xEDme sa na V\xE1s na tr\xE9ningu! Ak m\xE1te ak\xE9ko\u013Evek ot\xE1zky, nev\xE1hajte n\xE1s kontaktova\u0165.",
+    park: "PARKOVANIE",
+    parkL: "Mapa parkov\xEDsk v bl\xEDzkosti Szko\u0142y Nowej Mowy"
+  },
+  cs: {
+    depT: "\u2705 Potvrzen\xED z\xE1lohy",
+    depS: "Potvrzen\xED z\xE1lohy \u2014 kurz Nowa Mowa od %d",
+    hiA: "Dobr\xFD den, %n,",
+    hiC: "Dobr\xFD den,",
+    hi0: "Dobr\xFD den,",
+    dep: 'potvrzujeme p\u0159ijet\xED z\xE1lohy, a t\xEDm i <b>%w v kurzu Nowa Mowa od <span style="color:#D9822B">%d</span></b>. \u{1F389}',
+    whoA: "Va\u0161i \xFA\u010Dast",
+    whoC: "\xFA\u010Dast Va\u0161eho d\xEDt\u011Bte",
+    whoC0: "\xFA\u010Dast Va\u0161eho d\xEDt\u011Bte",
+    dep2: "7 dn\xED p\u0159ed za\u010D\xE1tkem kurzu V\xE1m po\u0161leme zpr\xE1vu s informacemi o doplatku a o tom, jak se na kurz p\u0159ipravit.",
+    q: "Pokud m\xE1te dotazy, sta\u010D\xED odpov\u011Bd\u011Bt na tento e-mail.",
+    bye: "T\u011B\u0161\xEDme se na V\xE1s!",
+    infS: "Kurz Nowa Mowa od %d \u2014 doplatek a p\u0159\xEDprava",
+    infHi: "Dobr\xFD den!",
+    inf1: "U\u017E <b>%d</b> za\u010D\xEDn\xE1me kurz Nowa Mowa. N\xED\u017Ee pos\xEDl\xE1me nejd\u016Fle\u017Eit\u011Bj\u0161\xED organiza\u010Dn\xED informace o doplatku za kurz a o p\u0159\xEDprav\u011B na tr\xE9nink.",
+    pay: "Platby",
+    payT: "<b>P\u0159evodem:</b> pokud pl\xE1nujete zaplatit kurz p\u0159evodem, pros\xEDme o \xFAhradu nejpozd\u011Bji do <b>%p</b> na stejn\xE9 \u010D\xEDslo \xFA\u010Dtu, na kter\xE9 jste platili z\xE1lohu.",
+    payC: "<b>V hotovosti:</b> pokud budete platit v hotovosti na m\xEDst\u011B, pros\xEDme, p\u0159ij\u010Fte do Szko\u0142y Nowej Mowy v <b>8:50</b>.",
+    take: "Co si vz\xEDt s sebou",
+    note: "<b>Z\xE1pisn\xEDk:</b> bude pot\u0159eba ke komunikaci s tren\xE9rem b\u011Bhem takzvan\xFDch \u201Ekarti\u010Dkov\xFDch\u201C dn\u016F.",
+    shoes: "<b>Pohodlnou obuv a tepl\xE9 oble\u010Den\xED:</b> pl\xE1nujeme tr\xE9ninky ve m\u011Bst\u011B, proto se hod\xED pohodln\xE9 boty a n\u011Bco teplej\u0161\xEDho na sebe pro p\u0159\xEDpad chladn\u011Bj\u0161\xEDho po\u010Das\xED.",
+    see: "T\u011B\u0161\xEDme se na V\xE1s na tr\xE9ninku! Pokud m\xE1te jak\xE9koli dotazy, nev\xE1hejte n\xE1s kontaktovat.",
+    park: "PARKOV\xC1N\xCD",
+    parkL: "Mapa parkovi\u0161\u0165 v bl\xEDzkosti Szko\u0142y Nowej Mowy"
+  },
+  en: {
+    depT: "\u2705 Deposit confirmation",
+    depS: "Deposit confirmation \u2014 Nowa Mowa course from %d",
+    hiA: "Hello %n,",
+    hiC: "Hello,",
+    hi0: "Hello,",
+    dep: 'we confirm receipt of your deposit and thereby <b>%w on the Nowa Mowa course starting <span style="color:#D9822B">%d</span></b>. \u{1F389}',
+    whoA: "your place",
+    whoC: "your child's place",
+    whoC0: "your child's place",
+    dep2: "7 days before the course starts, we will send you a message with information about the remaining payment and how to prepare for the sessions.",
+    q: "If you have any questions, simply reply to this email.",
+    bye: "See you soon!",
+    infS: "Nowa Mowa course from %d \u2014 remaining payment and preparation",
+    infHi: "Hello!",
+    inf1: "On <b>%d</b> we start the Nowa Mowa course. Below you will find the most important information about the remaining payment and how to prepare for the sessions.",
+    pay: "Payment",
+    payT: "<b>Bank transfer:</b> if you plan to pay by bank transfer, please make the payment by <b>%p</b> at the latest, to the same account number you used for the deposit.",
+    payC: "<b>Cash:</b> if you are paying in cash on site, please arrive at Szko\u0142a Nowej Mowy at <b>8:50</b>.",
+    take: "What to bring",
+    note: "<b>A notebook:</b> you will need it to communicate with the trainer during the so-called \u201Ccard days\u201D.",
+    shoes: "<b>Comfortable shoes and warm clothes:</b> we plan training sessions around the town, so comfortable shoes and something warmer to wear in case of colder weather will be useful.",
+    see: "See you at the sessions! If you have any questions, please get in touch.",
+    park: "PARKING",
+    parkL: "Map of car parks near Szko\u0142a Nowej Mowy"
+  }
+};
+function ofT(lang) {
+  return OF_TXT[ofLang(lang)];
+}
+__name(ofT, "ofT");
+function ofCourseInfoHtml(start, lang) {
+  const L = "color:#1a4fd6;", T = ofT(lang);
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222"><p>' + T.infHi + "</p><p>" + T.inf1.replace("%d", ofDateL(start, lang)) + '</p><p style="margin-top:16px"><b>' + T.pay + '</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li>' + T.payT.replace("%p", ofDateL(ofAddDays(start, -3), lang)) + "</li><li>" + T.payC + "</li></ul><p><b>" + T.take + '</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li>' + T.note + "</li><li>" + T.shoes + "</li></ul><p>" + T.see + "</p><p><b>" + T.park + '</b><br><a href="https://www.google.com/maps/d/u/0/edit?mid=1H5gc1803KRf8s34QoN37T_PXqxMkoWA&usp=sharing" style="' + L + '">' + T.parkL + "</a></p><p>Szko\u0142a Nowej Mowy<br>Rynek 3/1A, Miko\u0142\xF3w</p></div>";
 }
 __name(ofCourseInfoHtml, "ofCourseInfoHtml");
 __name2(ofCourseInfoHtml, "ofCourseInfoHtml");
+function ofDepositHtml(r) {
+  const T = ofT(r.lang), first = String(r.student_name || "").trim().split(/\s+/)[0] || "";
+  const hi = r.child ? T.hiC : first ? T.hiA.replace("%n", first) : T.hi0;
+  const who = r.child ? first && ofLang(r.lang) === "pl" ? T.whoC.replace("%g", pwGen(first)) : T.whoC0 : T.whoA;
+  return '<div style="background:#f4f1ed;padding:16px 8px;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden"><tr><td style="background:#1E1E1E;padding:16px 24px;border-top:6px solid #F5A623"><span style="color:#F5A623;font-size:12px;letter-spacing:2px;font-weight:bold">SZKO\u0141A NOWEJ MOWY</span><div style="color:#fff;font-size:20px;font-weight:bold;margin-top:2px">' + T.depT + '</div></td></tr><tr><td style="padding:22px 24px;font-size:15px;line-height:1.6;color:#2b2b2b"><p style="margin:0 0 12px">' + ofEsc(hi) + '</p><p style="margin:0 0 12px">' + T.dep.replace("%w", ofEsc(who)).replace("%d", ofEsc(ofDateL(r.start_date, r.lang, true))) + '</p><p style="margin:0 0 12px">' + T.dep2 + '</p><p style="margin:0 0 12px">' + T.q + '</p><p style="margin:16px 0 0">' + T.bye + '<br><b>Szko\u0142a Nowej Mowy</b><br><span style="color:#8C7A5C">Rynek 3/1A, Miko\u0142\xF3w</span></p></td></tr></table></div>';
+}
+__name(ofDepositHtml, "ofDepositHtml");
+__name2(ofDepositHtml, "ofDepositHtml");
+async function ofSendDepositConfirm(env, r, who) {
+  await ensureGoogleTables(env);
+  const account = await appSettingGet(env, "google_account") || "";
+  const subj = ofT(r.lang).depS.replace("%d", ofDateL(r.start_date, r.lang, true));
+  const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: subj, html: ofDepositHtml(r) }));
+  if (s.ok) {
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+      await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", r.to_email, subj, String(who && who.email || ""), s.id || "", Math.floor(Date.now() / 1e3)).run();
+    } catch (e) {
+    }
+  }
+  return s;
+}
+__name(ofSendDepositConfirm, "ofSendDepositConfirm");
+__name2(ofSendDepositConfirm, "ofSendDepositConfirm");
 async function ofSendCourseInfo(env, r) {
   const account = await appSettingGet(env, "google_account") || "";
-  const subj = "Kurs Nowej Mowy od " + ofLong(r.start_date) + " \u2014 dop\u0142ata i przygotowanie";
-  const mime = ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: subj, html: ofCourseInfoHtml(r.start_date) });
+  const subj = ofT(r.lang).infS.replace("%d", ofDateL(r.start_date, r.lang));
+  const mime = ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: subj, html: ofCourseInfoHtml(r.start_date, r.lang) });
   const s = await ofGmailSend(env, mime);
   if (s.ok) await env.DB.prepare("UPDATE course_reminders SET sent_at = ?, error = NULL WHERE id = ?").bind(Math.floor(Date.now() / 1e3), r.id).run();
   else await env.DB.prepare("UPDATE course_reminders SET error = ? WHERE id = ?").bind(String(s.error).slice(0, 300), r.id).run();
