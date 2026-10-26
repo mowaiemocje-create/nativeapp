@@ -5974,6 +5974,21 @@ var worker_default = {
         if (url.pathname === "/surveys/status") return json(await svSetStatus(env, who, body));
         if (url.pathname === "/surveys/form-cfg") {
           const cfg = await svfCfg(env);
+          if (body.save_names && body.name_forms && typeof body.name_forms === "object") {
+            const nf = {};
+            Object.keys(body.name_forms).slice(0, 500).forEach((k) => {
+              const v = body.name_forms[k] || {};
+              const key = String(k).trim().slice(0, 40);
+              if (!key) return;
+              nf[key] = { n: String(v.n || "").trim().slice(0, 40), g: String(v.g || "").trim().slice(0, 40), i: String(v.i || "").trim().slice(0, 40) };
+            });
+            cfg.name_forms = Object.assign(cfg.name_forms || {}, nf);
+            Object.keys(cfg.name_forms).forEach((k) => {
+              const v = cfg.name_forms[k];
+              if (!v.n && !v.g && !v.i) delete cfg.name_forms[k];
+            });
+            await appSettingSet(env, "svf_cfg", JSON.stringify(cfg));
+          }
           if (body.save) {
             const clean = /* @__PURE__ */ __name((u) => {
               u = String(u || "").trim().slice(0, 500);
@@ -10819,6 +10834,8 @@ var SV_WHY = {
   cena: ["\u{1F4B0}", "Cena", "Dzi\u0119kujemy za szczero\u015B\u0107 \u{1F64F}", '<p>Koszt kursu bywa przeszkod\u0105 \u2014 dlatego s\u0105 sposoby, \u017Ceby go obni\u017Cy\u0107 albo roz\u0142o\u017Cy\u0107:</p><ul><li><b>Raty</b> \u2014 kurs mo\u017Cna roz\u0142o\u017Cy\u0107 nawet na 60 rat (p\u0142atno\u015B\u0107 ratalna imoje).</li><li><b>Dofinansowanie</b> (PCPR / MOPS / GOPS i inne) \u2014 <a href="https://nowamowa.com/dofinansowania/">jak to zrobi\u0107 krok po kroku</a>.</li><li><b>Fundacja Nowa Mowa</b> wspiera osoby w trudniejszej sytuacji \u2014 <a href="https://nowamowa.org">nowamowa.org</a>.</li><li><b>Trening online</b> \u2014 mo\u017Cna zacz\u0105\u0107 od pojedynczych sesji 50 min.</li></ul>'],
   termin: ["\u{1F4C5}", "Termin", "Dzi\u0119kujemy! \u{1F4C5}", "<p>Kursy startuj\u0105 regularnie. Napisz, kt\xF3ry miesi\u0105c albo dni tygodnia Ci pasuj\u0105 \u2014 trener zaproponuje najbli\u017Cszy dogodny termin.</p>"],
   dojazd: ["\u{1F697}", "Dojazd", "Dzi\u0119kujemy! \u{1F697}", "<p>Kurs stacjonarny odbywa si\u0119 w Miko\u0142owie (Rynek 3/1A). Je\u015Bli dojazd jest trudny, mo\u017Cesz zacz\u0105\u0107 od <b>treningu online</b> \u2014 indywidualne sesje 50 min z trenerem przez internet. Napisz, sk\u0105d doje\u017Cd\u017Casz \u2014 podpowiemy najlepsze rozwi\u0105zanie.</p>"],
+  czas: ["\u23F0", "Brak czasu", "Rozumiemy \u{1F642}", "<p>Trening da si\u0119 dopasowa\u0107 do codziennego planu \u2014 du\u017Ca cz\u0119\u015B\u0107 pracy to kr\xF3tkie \u0107wiczenia w zwyk\u0142ych sytuacjach (rozmowa w sklepie, telefon). Napisz, ile czasu m\xF3g\u0142by\u015B/mog\u0142aby\u015B po\u015Bwi\u0119ci\u0107 \u2014 trener zaproponuje realny plan.</p>"],
+  obawa: ["\u{1F914}", "Obawa, czy to pomo\u017Ce", "Dzi\u0119kujemy za szczero\u015B\u0107 \u{1F64F}", "<p>To bardzo naturalne pytanie \u2014 zw\u0142aszcza je\u015Bli wcze\u015Bniej pr\xF3bowa\u0142e\u015B/a\u015B innych sposob\xF3w. Trener ch\u0119tnie opowie, jak wygl\u0105da trening krok po kroku i jakie zmiany zauwa\u017Caj\u0105 kursanci w podobnej sytuacji. Napisz, co budzi Twoje w\u0105tpliwo\u015Bci.</p>"],
   pozniej: ["\u23F3", "Jeszcze nie teraz", "Rozumiemy \u{1F642}", "<p>To wa\u017Cna decyzja i musi przyj\u015B\u0107 w dobrym momencie. Wybierz, kiedy mo\u017Cemy si\u0119 odezwa\u0107 \u2014 do tego czasu nie b\u0119dziemy przypomina\u0107.</p>"],
   online: ["\u{1F4BB}", "Wol\u0119 online", "\u015Awietnie! \u{1F4BB}", "<p>Trening online to <b>indywidualne sesje 50 min</b> z trenerem przez internet. Trener odezwie si\u0119 z propozycj\u0105 termin\xF3w.</p>"],
   inne: ["\u{1F4AC}", "Inny pow\xF3d", "Dzi\u0119kujemy \u{1F64F}", "<p>Napisz, co sprawia trudno\u015B\u0107 \u2014 ka\u017Cda odpowied\u017A pomaga nam lepiej dopasowa\u0107 kurs.</p>"]
@@ -10836,14 +10853,15 @@ async function svReplyPage(request, env, url) {
   const whyC = (String(p.a || "").match(/^why_(\w+)$/) || [])[1], why = whyC && SV_WHY[whyC] ? whyC : null;
   const act = why ? "why_" + why : p.a === "stop" ? "stop" : "keep";
   const page = /* @__PURE__ */ __name((title, body) => new Response(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowa Mowa</title><style>body{margin:0;background:#f4f1ed;font-family:Arial,Helvetica,sans-serif;color:#2b2b2b}.w{max-width:560px;margin:0 auto;padding:16px}.h{background:#1E1E1E;color:#fff;padding:16px 20px;border-top:6px solid #F5A623;border-radius:10px 10px 0 0}.h b{color:#F5A623;font-size:12px;letter-spacing:2px}.c{background:#fff;padding:20px;border-radius:0 0 10px 10px;line-height:1.6}button{background:#E8820C;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer}button.g{background:#8C7A5C}textarea,input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #E5DCCB;border-radius:8px;font-size:15px;margin:6px 0 12px;font-family:inherit}</style></head><body><div class="w"><div class="h"><b>SZKO\u0141A NOWEJ MOWY</b><div style="font-size:20px;font-weight:bold">\u{1F5E3} Nowa Mowa</div></div><div class="c"><h2 style="margin-top:0">${title}</h2>${body}</div></div></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }), "page");
+  if (p.preview) return page("To kopia maila \u{1F4CB}", "<p>Klikn\u0105\u0142e\u015B przycisk w kopii, kt\xF3r\u0105 dosta\u0142e\u015B jako nadawca. U adresat\xF3w te przyciski zapisuj\u0105 ich odpowied\u017A i wysy\u0142aj\u0105 Ci powiadomienie \u2014 w kopii s\u0105 nieaktywne, \u017Ceby nie zapisa\u0107 odpowiedzi za kogo\u015B.</p>");
   if (!email || !/^[0-9a-f]{24}$/.test(String(p.s || "")) || p.s !== await svReplySig(env, email, key)) return page("Link jest nieaktualny", "<p>Nie uda\u0142o si\u0119 odczyta\u0107 odpowiedzi. Wystarczy odpisa\u0107 na maila \u2014 przeczytamy wiadomo\u015B\u0107.</p>");
   const hidden = `<input type="hidden" name="e" value="${ofEsc(p.e)}"><input type="hidden" name="k" value="${ofEsc(p.k)}"><input type="hidden" name="s" value="${ofEsc(p.s)}"><input type="hidden" name="a" value="${act}">`;
   if (why) {
     const W = SV_WHY[why];
-    const extraF = why === "zapis" ? `<label>Telefon (opcjonalnie)</label><input name="t" inputmode="tel">` : why === "termin" ? `<label>Jaki termin by pasowa\u0142? (np. miesi\u0105c, dni tygodnia)</label><input name="w">` : why === "pozniej" ? `<label>Kiedy mo\u017Cemy si\u0119 odezwa\u0107?</label><select name="z" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:15px;box-sizing:border-box"><option value="1">za miesi\u0105c</option><option value="3" selected>za 3 miesi\u0105ce</option><option value="6">za p\xF3\u0142 roku</option><option value="12">za rok</option></select>` : why === "dojazd" ? `<label>Sk\u0105d doje\u017Cd\u017Casz? (opcjonalnie)</label><input name="w">` : "";
+    const extraF = why === "zapis" ? `<label>Telefon (opcjonalnie)</label><input name="t" inputmode="tel">` : why === "termin" ? `<label>Jaki termin by pasowa\u0142? (np. miesi\u0105c, dni tygodnia)</label><input name="w">` : why === "pozniej" ? `<label>Kiedy mo\u017Cemy si\u0119 odezwa\u0107?</label><select name="z" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:15px;box-sizing:border-box"><option value="1">za miesi\u0105c</option><option value="3" selected>za 3 miesi\u0105ce</option><option value="6">za p\xF3\u0142 roku</option><option value="12">za rok</option></select>` : why === "dojazd" ? `<label>Sk\u0105d doje\u017Cd\u017Casz? (opcjonalnie)</label><input name="w">` : why === "czas" ? `<label>Ile czasu m\xF3g\u0142by\u015B/mog\u0142aby\u015B po\u015Bwi\u0119ci\u0107? (np. 20 minut dziennie, weekendy)</label><input name="w">` : "";
     if (request.method === "GET") return page(W[0] + " " + W[1], W[3] + `<form method="post">${hidden}${extraF}<label>${why === "inne" ? "Co sprawia trudno\u015B\u0107?" : "Chcesz co\u015B dopisa\u0107? (opcjonalnie)"}</label><textarea name="m" rows="3"></textarea><button type="submit">Wy\u015Blij odpowied\u017A</button></form><p style="font-size:13px;color:#8C7A5C">Odpowied\u017A trafi tylko do trenera.</p>`);
     const z = why === "pozniej" ? Math.max(0, Math.min(24, Number(p.z) || 0)) : 0, w = String(p.w || "").slice(0, 300).trim();
-    const msg2 = ((z ? "[za " + z + " mies.] " : "") + (w ? (why === "termin" ? "Termin: " : why === "dojazd" ? "Sk\u0105d: " : "") + w + (p.m ? " \xB7 " : "") : "") + String(p.m || "")).slice(0, 2e3).trim();
+    const msg2 = ((z ? "[za " + z + " mies.] " : "") + (w ? (why === "termin" ? "Termin: " : why === "dojazd" ? "Sk\u0105d: " : why === "czas" ? "Czas: " : "") + w + (p.m ? " \xB7 " : "") : "") + String(p.m || "")).slice(0, 2e3).trim();
     const tel2 = String(p.t || "").slice(0, 40), now2 = Math.floor(Date.now() / 1e3);
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS contact_replies (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT, row_key TEXT, action TEXT, message TEXT, phone TEXT, created_at INTEGER)").run();
     const dup2 = await env.DB.prepare("SELECT id FROM contact_replies WHERE email = ? AND action = ? AND created_at > ?").bind(email, act, now2 - 60).first();
@@ -10857,7 +10875,7 @@ async function svReplyPage(request, env, url) {
       } catch (e) {
       }
     }
-    return page(W[2], (/^(cena|dojazd|online)$/.test(why) ? W[3] : "") + (why === "pozniej" ? "<p>Odezwiemy si\u0119 " + (z === 1 ? "za miesi\u0105c" : z === 12 ? "za rok" : z === 6 ? "za p\xF3\u0142 roku" : "za " + (z || 3) + " miesi\u0105ce") + ". Do tego czasu nie b\u0119dziemy przypomina\u0107.</p>" : "") + "<p><b>Trener dosta\u0142 Twoj\u0105 odpowied\u017A.</b> Dzi\u0119kujemy!</p>");
+    return page(W[2], (/^(cena|dojazd|online|czas|obawa)$/.test(why) ? W[3] : "") + (why === "pozniej" ? "<p>Odezwiemy si\u0119 " + (z === 1 ? "za miesi\u0105c" : z === 12 ? "za rok" : z === 6 ? "za p\xF3\u0142 roku" : "za " + (z || 3) + " miesi\u0105ce") + ". Do tego czasu nie b\u0119dziemy przypomina\u0107.</p>" : "") + "<p><b>Trener dosta\u0142 Twoj\u0105 odpowied\u017A.</b> Dzi\u0119kujemy!</p>");
   }
   if (request.method === "GET") {
     return act === "stop" ? page("Nie chcesz kolejnych wiadomo\u015Bci?", `<p>Po potwierdzeniu nie wy\u015Blemy ju\u017C przypomnie\u0144 ani wiadomo\u015Bci zbiorowych na adres <b>${ofEsc(email)}</b>.</p><form method="post">${hidden}<label>Je\u015Bli chcesz, napisz dlaczego (opcjonalnie):</label><textarea name="m" rows="3"></textarea><button class="g" type="submit">Potwierdzam \u2014 nie chc\u0119 wiadomo\u015Bci</button></form>`) : page("Super \u2014 zosta\u0144my w kontakcie! \u{1F642}", `<p>Trener odezwie si\u0119 do Ciebie. Mo\u017Cesz dopisa\u0107, kiedy najlepiej zadzwoni\u0107 albo o co chcesz zapyta\u0107:</p><form method="post">${hidden}<label>Telefon (opcjonalnie)</label><input name="t" inputmode="tel"><label>Wiadomo\u015B\u0107 dla trenera (opcjonalnie)</label><textarea name="m" rows="4"></textarea><button type="submit">\u2705 Chc\u0119 by\u0107 w kontakcie z trenerem</button></form>`);
@@ -12725,7 +12743,9 @@ async function svBulkMail(env, who, b) {
   }
   if (b.cc_me && sent.length) {
     try {
-      await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: who.email, subject: "[kopia, wys\u0142ano do " + sent.length + "] " + subject, html }));
+      const pv = base + "/r?preview=1";
+      const htmlCopy = '<div style="font-family:Arial,Helvetica,sans-serif;background:#FFF6E0;border:1px solid #F0D9A8;padding:8px 12px;margin:0 0 10px;font-size:13px">\u{1F4CB} To kopia dla Ciebie \u2014 wys\u0142ano do ' + sent.length + " os. Przyciski w kopii s\u0105 nieaktywne; u adresat\xF3w dzia\u0142aj\u0105.</div>" + String(html).replace(/__NM_(KEEP|STOP|WHY_\w+)__/g, pv);
+      await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: who.email, subject: "[kopia, wys\u0142ano do " + sent.length + "] " + subject, html: htmlCopy }));
     } catch (x) {
     }
   }
