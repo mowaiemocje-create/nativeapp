@@ -5916,7 +5916,13 @@ var worker_default = {
         }
         await srJobTable(env);
         const job = await env.DB.prepare("SELECT status, days, error, created_at, started_at, finished_at FROM student_report_job WHERE ns_student_id = ?").bind(sid).first();
-        return json({ ok: true, report: rep, job: job || null });
+        let note = "";
+        try {
+          const nr = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = ?").bind("rnote:" + sid).first();
+          note = nr && nr.v || "";
+        } catch (e) {
+        }
+        return json({ ok: true, report: rep, job: job || null, trainer_note: note });
       }
       if (url.pathname === "/student-report/run" && request.method === "POST") {
         let body = {};
@@ -5933,7 +5939,13 @@ var worker_default = {
         await srJobTable(env);
         const days = Math.min(366, Math.max(7, Number(body.days) || 30)), now = Math.floor(Date.now() / 1e3);
         const range = body.range && /^\d{4}-\d{2}-\d{2}$/.test(String(body.range.from || "")) && /^\d{4}-\d{2}-\d{2}$/.test(String(body.range.to || "")) ? { from: body.range.from, to: body.range.to, label: String(body.range.label || "").slice(0, 80) } : null;
-        const extra = JSON.stringify({ tasks: Array.isArray(body.tasks) ? body.tasks.slice(0, 60) : [], range }).slice(0, 6e4);
+        const note = String(body.trainer_note || "").slice(0, 4e3);
+        try {
+          await ensureTranscriptTables(env);
+          await env.DB.prepare("INSERT INTO tx_kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind("rnote:" + sid, note).run();
+        } catch (e) {
+        }
+        const extra = JSON.stringify({ tasks: Array.isArray(body.tasks) ? body.tasks.slice(0, 60) : [], range, trainer_note: note }).slice(0, 6e4);
         await env.DB.prepare("INSERT INTO student_report_job (ns_student_id, days, status, error, requested_by, created_at, started_at, finished_at, tries, extra) VALUES (?, ?, 'queued', NULL, ?, ?, NULL, NULL, 0, ?) ON CONFLICT(ns_student_id) DO UPDATE SET days = excluded.days, status = 'queued', error = NULL, requested_by = excluded.requested_by, created_at = excluded.created_at, started_at = NULL, finished_at = NULL, tries = 0, extra = excluded.extra").bind(sid, days, String(who.email || ""), now, extra).run();
         return json({ ok: true, queued: true, job: { status: "queued", days, created_at: now } });
       }
@@ -6651,6 +6663,28 @@ var worker_default = {
       }
       if (url.pathname.startsWith("/call-days/") && request.method === "POST") {
         return await handleCallDaysAction(request, env, url.pathname.slice("/call-days/".length));
+      }
+      if (url.pathname === "/contact-calls/log" && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (e) {
+        }
+        const me = await coachStudentFromRequest(request, env, null, body);
+        if (!me || !me.id) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        return json(await contactCallLog(env, me.id, body));
+      }
+      if (url.pathname === "/contact-calls/lookup" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        return json(await contactCallsLookup(env, url.searchParams));
+      }
+      if (url.pathname === "/contact-calls" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        return json(await contactCallsGet(env, url.searchParams.get("student_id"), url.searchParams.get("from"), url.searchParams.get("to")));
       }
       if (url.pathname === "/contact-lists/mine" && request.method === "GET") {
         return await handleMyContactList(request, env, url);
@@ -9771,6 +9805,49 @@ async function txStudentReport(env, sid, days, extra) {
     }
   }
   if (!recs.length) return { ok: false, error: "Brak przepisanych nagra\u0144 kursanta w tym okresie" };
+  const field = (() => {
+    const ev = [];
+    for (const r of own) {
+      if (isNotCountedReview(r.review_details)) continue;
+      const f = String(r.record_file || ""), tm = f.match(/_(\d{2})h-(\d{2})m-(\d{2})s_/);
+      if (!tm) continue;
+      const cat = String(r.category || ""), t0 = Number(tm[1]) * 3600 + Number(tm[2]) * 60 + Number(tm[3]), tt = ownT[r.id], dur = tt && Number(tt.dur) > 0 ? Number(tt.dur) : 60;
+      const ter2 = f.match(/teren-(\d+(?:\.\d+)?)km/), kind = /sklep/i.test(cat) ? "shop" : /przechod/i.test(cat) ? "pass" : /phone|telefon/i.test(cat) && /miast|urz|firm|sklep|usług/i.test(cat) ? "cphone" : null;
+      if (kind) ev.push({ d: ymd(r.d), t0, t1: t0 + dur, dur, kind, km: ter2 ? Number(ter2[1]) : null, gps: /_GPS-?\d/.test(f) });
+    }
+    const sess = /* @__PURE__ */ __name((list, gap) => {
+      const out = [];
+      list.slice().sort((a, b) => a.t0 - b.t0).forEach((e) => {
+        const s = out[out.length - 1];
+        if (s && e.t0 - s.t1 <= gap) {
+          s.t1 = Math.max(s.t1, e.t1);
+          s.n++;
+          s.talk += e.dur;
+          if (e.km != null) s.km = Math.max(s.km || 0, e.km);
+        } else out.push({ t0: e.t0, t1: e.t1, n: 1, talk: e.dur, km: e.km });
+      });
+      return out;
+    }, "sess");
+    const sum = /* @__PURE__ */ __name((ss) => ({
+      min: Math.round(ss.reduce((a, s) => a + (s.t1 - s.t0), 0) / 60),
+      talkMin: Math.round(ss.reduce((a, s) => a + s.talk, 0) / 60),
+      n: ss.reduce((a, s) => a + s.n, 0),
+      outings: ss.length,
+      km: ss.reduce((a, s) => Math.max(a, s.km || 0), 0) || null,
+      from: ss.length ? Math.min(...ss.map((s) => s.t0)) : null,
+      to: ss.length ? Math.max(...ss.map((s) => s.t1)) : null
+    }), "sum");
+    const hm = /* @__PURE__ */ __name((x) => x == null ? "" : String(Math.floor(x / 3600)).padStart(2, "0") + ":" + String(Math.floor(x % 3600 / 60)).padStart(2, "0"), "hm");
+    const byDay = {};
+    ev.forEach((e) => (byDay[e.d] = byDay[e.d] || []).push(e));
+    const dayRows2 = Object.keys(byDay).sort().map((d) => {
+      const L = byDay[d];
+      const shop = sum(sess(L.filter((e) => e.kind === "shop"), 1800)), pass = sum(sess(L.filter((e) => e.kind === "pass"), 1800)), both = sum(sess(L.filter((e) => e.kind !== "cphone"), 1800)), cph = sum(sess(L.filter((e) => e.kind === "cphone"), 1200));
+      return { d, shop, pass, both: Object.assign(both, { span: both.from != null ? hm(both.from) + "\u2013" + hm(both.to) : "" }), cphone: Object.assign(cph, { span: cph.from != null ? hm(cph.from) + "\u2013" + hm(cph.to) : "" }) };
+    }).filter((r) => r.both.n || r.cphone.n);
+    const tot = /* @__PURE__ */ __name((k) => ({ min: dayRows2.reduce((a, r) => a + r[k].min, 0), talkMin: dayRows2.reduce((a, r) => a + r[k].talkMin, 0), n: dayRows2.reduce((a, r) => a + r[k].n, 0), days: dayRows2.filter((r) => r[k].n).length }), "tot");
+    return { days: dayRows2, total: { shop: tot("shop"), pass: tot("pass"), both: tot("both"), cphone: tot("cphone") }, rule: "wyj\u015Bcie = nagrania z przerwami do 30 min (telefony: do 20 min); czas od startu pierwszego do ko\u0144ca ostatniego nagrania" };
+  })();
   const ownR = recs.filter((r) => r.own), durs = recs.map((r) => r.dur);
   const totalDur = durs.reduce((s, x) => s + x, 0);
   const byLen = recs.slice().sort((a, b) => a.dur - b.dur);
@@ -9965,6 +10042,7 @@ async function txStudentReport(env, sid, days, extra) {
     to,
     days,
     questions,
+    field,
     total: {
       n: recs.length,
       own: ownR.length,
@@ -10098,14 +10176,16 @@ async function txStudentReport(env, sid, days, extra) {
   }
   const diaryCorpus = dList.filter((x) => x.txt.length || x.med != null || x.old != null).map((x) => "### " + x.d + (x.med != null ? " \xB7 relaksacja \xD7" + x.med : "") + (x.old != null ? x.old ? " \xB7 u\u017Cywa\u0142 starej mowy" : " \xB7 bez starej mowy" : "") + "\n" + x.txt.join("\n")).join("\n\n").slice(0, 14e3);
   const corpus = recs.slice().sort((a, b) => a.d.localeCompare(b.d)).map((r) => "### " + r.d + " \xB7 " + r.cat + (r.own ? "" : " \xB7 (nagranie z konta: " + r.owner + ")") + " \xB7 " + Math.round(r.dur) + " s\n" + r.dialog.slice(0, per)).join("\n\n");
-  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzeteln\u0105 analiz\u0119 dla trenera \u2014 jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Niep\u0142ynno\u015Bci nazywaj \u201Ebloki mowy\u201D (nigdy \u201Eblokady\u201D, \u201Estaropolskie\u201D); dawny spos\xF3b m\xF3wienia to \u201Estara mowa\u201D. Daty pisz s\u0142ownie: \u201E12 pa\u017Adziernika\u201D (nigdy \u201E12 10\u201D, \u201E12.10\u201D, \u201E2026-10-12\u201D). Nie podawaj imion sprzedawc\xF3w, przechodni\xF3w ani innych obcych rozm\xF3wc\xF3w \u2014 znamy tylko ich role (chyba \u017Ce imi\u0119 wyra\u017Anie pada w tek\u015Bcie). Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami, phone.inne = pozosta\u0142e telefony (rodzina, znajomi, urz\u0119dy, sklepy). Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"rodzic":{"podsumowanie":"2\u20134 zdania: co wynika z cotygodniowych obserwacji rodzica (tylko je\u015Bli s\u0105 dane)","zmiany":["zmiany tydzie\u0144 po tygodniu (mowa, \u0107wiczenia, samopoczucie) z liczbami"],"wskazowki":["co rodzic mo\u017Ce robi\u0107 w domu, \u017Ceby wspiera\u0107 trening"]},"dziennik":{"podsumowanie":"2\u20134 zdania: co wynika z dziennika (regularno\u015B\u0107, samopoczucie, relaksacja, stara mowa, sen, motywacja)","najwazniejsze":["najwa\u017Cniejsze obserwacje z wpis\xF3w, z kr\xF3tkimi cytatami"],"wplyw":[{"tytul":"\u2026","opis":"jak to wp\u0142ywa na trening Nowej Mowy i co z tym zrobi\u0107"}],"sygnaly":["sygna\u0142y ostrzegawcze (spadek motywacji, powr\xF3t starej mowy, brak relaksacji, zm\u0119czenie) \u2014 tylko je\u015Bli s\u0105 w danych"]},"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
+  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzeteln\u0105 analiz\u0119 dla trenera \u2014 jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Niep\u0142ynno\u015Bci nazywaj \u201Ebloki mowy\u201D (nigdy \u201Eblokady\u201D, \u201Estaropolskie\u201D); dawny spos\xF3b m\xF3wienia to \u201Estara mowa\u201D. Daty pisz s\u0142ownie: \u201E12 pa\u017Adziernika\u201D (nigdy \u201E12 10\u201D, \u201E12.10\u201D, \u201E2026-10-12\u201D). Nie podawaj imion sprzedawc\xF3w, przechodni\xF3w ani innych obcych rozm\xF3wc\xF3w \u2014 znamy tylko ich role (chyba \u017Ce imi\u0119 wyra\u017Anie pada w tek\u015Bcie). Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami, phone.inne = pozosta\u0142e telefony (rodzina, znajomi, urz\u0119dy, sklepy). Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"skrot":{"wstep":"3\u20134 zdania podsumowania okresu dla kursanta i rodzica (ciep\u0142o, konkretnie, z liczbami)","mocne":["3 najwi\u0119ksze post\u0119py \u2014 ka\u017Cdy max 1 zdanie z liczb\u0105 lub cytatem"],"praca":["2\u20133 rzeczy do dalszej pracy \u2014 max 1 zdanie ka\u017Cda"],"teren":"1\u20132 zdania o czasie w terenie (stats.field: sklepy, przechodnie, razem, telefony do miasta) i co z tego wynika","speciale":[{"zadanie":"\u2026","opis":"1\u20132 zdania: jak posz\u0142o i co to da\u0142o \u2014 wykorzystaj kontekst od trenera"}],"trener":"1\u20133 zdania z kontekstu trenera, wplecione naturalnie (je\u015Bli jest)","dalej":["3 konkretne kroki na najbli\u017Cszy okres"]},"rodzic":{"podsumowanie":"2\u20134 zdania: co wynika z cotygodniowych obserwacji rodzica (tylko je\u015Bli s\u0105 dane)","zmiany":["zmiany tydzie\u0144 po tygodniu (mowa, \u0107wiczenia, samopoczucie) z liczbami"],"wskazowki":["co rodzic mo\u017Ce robi\u0107 w domu, \u017Ceby wspiera\u0107 trening"]},"dziennik":{"podsumowanie":"2\u20134 zdania: co wynika z dziennika (regularno\u015B\u0107, samopoczucie, relaksacja, stara mowa, sen, motywacja)","najwazniejsze":["najwa\u017Cniejsze obserwacje z wpis\xF3w, z kr\xF3tkimi cytatami"],"wplyw":[{"tytul":"\u2026","opis":"jak to wp\u0142ywa na trening Nowej Mowy i co z tym zrobi\u0107"}],"sygnaly":["sygna\u0142y ostrzegawcze (spadek motywacji, powr\xF3t starej mowy, brak relaksacji, zm\u0119czenie) \u2014 tylko je\u015Bli s\u0105 w danych"]},"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
+  const trainerNote = String(extra && extra.trainer_note || "").trim();
+  stats.trainer_note = trainerNote;
   const statsBrief = JSON.stringify({ ...stats, otherRecs: void 0, tasks: tasks.map((x) => ({ zadanie: x.code + " " + x.title, opis: x.desc, notatka: x.note, wykonane: x.done, w_okresie: x.inPeriod })) });
   let ai = null;
   try {
     ai = txParseJson(await txLlm(
       env,
       sys + " Dostajesz te\u017C DZIENNIK kursanta (codzienne wpisy: relaksacja, stara mowa, samopoczucie, trudne i \u0142atwe sytuacje, motywacja, sen) \u2014 przeanalizuj go w polu \u201Edziennik\u201D: wy\u0142uskaj to, co najwa\u017Cniejsze i ma wp\u0142yw na trening Nowej Mowy; \u0142\u0105cz go z nagraniami (np. gorsze samopoczucie \u2194 mniej nagra\u0144). stats.diary to liczby z dziennika.",
-      "LICZBY (wyliczone dok\u0142adnie):\n" + statsBrief + (parentCorpus ? "\n\nOBSERWACJE RODZICA (co tydzie\u0144, ankieta rodzica; stats.parent to liczby):\n" + parentCorpus : "") + "\n\nDZIENNIK KURSANTA (" + diary.days + " dni z wpisem na " + days + "):\n" + (diaryCorpus || "(brak wpis\xF3w w tym okresie)") + "\n\nTEKSTY NAGRA\u0143:\n" + corpus,
+      (trainerNote ? "KONTEKST OD TRENERA (najwa\u017Cniejszy \u2014 trener zna sytuacj\u0119; wple\u0107 go naturalnie w raport, zw\u0142aszcza przy zadaniach specjalnych; nie cytuj dos\u0142ownie, nie zmieniaj fakt\xF3w):\n" + trainerNote + "\n\n" : "") + "LICZBY (wyliczone dok\u0142adnie):\n" + statsBrief + (parentCorpus ? "\n\nOBSERWACJE RODZICA (co tydzie\u0144, ankieta rodzica; stats.parent to liczby):\n" + parentCorpus : "") + "\n\nDZIENNIK KURSANTA (" + diary.days + " dni z wpisem na " + days + "):\n" + (diaryCorpus || "(brak wpis\xF3w w tym okresie)") + "\n\nTEKSTY NAGRA\u0143:\n" + corpus,
       1e4
     ));
   } catch (e) {
@@ -14820,6 +14900,127 @@ async function handleCallDaysIcs(request, env, url) {
 }
 __name(handleCallDaysIcs, "handleCallDaysIcs");
 __name2(handleCallDaysIcs, "handleCallDaysIcs");
+async function ensureContactCalls(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS contact_calls (ns_record_id TEXT PRIMARY KEY, caller_id TEXT NOT NULL, callee_id TEXT, callee_name TEXT, list_id TEXT, rec_date TEXT, created_at INTEGER)`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_contact_calls_caller ON contact_calls(caller_id)").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_contact_calls_callee ON contact_calls(callee_id)").run();
+  } catch (e) {
+  }
+}
+__name(ensureContactCalls, "ensureContactCalls");
+async function contactCallLog(env, sid, b) {
+  const rid = String(b.record_id || "");
+  if (!rid) return { ok: false, error: "Brak record_id" };
+  const calleeId = String(b.callee_id || "").slice(0, 64), calleeName = String(b.callee_name || "").slice(0, 120);
+  if (!calleeId && !calleeName) return { ok: false, error: "Brak osoby" };
+  const ri = await txRecordInfo(env, rid);
+  if (!ri.uid || String(ri.uid) !== String(sid)) return { ok: false, error: "Nie twoje nagranie" };
+  await ensureContactCalls(env);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || "")) ? String(b.date) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  await env.DB.prepare(`INSERT INTO contact_calls (ns_record_id, caller_id, callee_id, callee_name, list_id, rec_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(ns_record_id) DO UPDATE SET callee_id = excluded.callee_id, callee_name = excluded.callee_name, list_id = excluded.list_id, rec_date = excluded.rec_date`).bind(rid, String(sid), calleeId || null, calleeName || null, b.list_id != null ? String(b.list_id) : null, day, Math.floor(Date.now() / 1e3)).run();
+  return { ok: true };
+}
+__name(contactCallLog, "contactCallLog");
+async function contactCallsGet(env, sid, from, to) {
+  await ensureContactCalls(env);
+  if (!sid) return { ok: false, error: "Brak student_id" };
+  let q = "SELECT * FROM contact_calls WHERE (caller_id = ? OR callee_id = ?)";
+  const args = [String(sid), String(sid)];
+  if (from) {
+    q += " AND rec_date >= ?";
+    args.push(String(from));
+  }
+  if (to) {
+    q += " AND rec_date <= ?";
+    args.push(String(to));
+  }
+  q += " ORDER BY rec_date DESC, created_at DESC LIMIT 500";
+  const rows = (await env.DB.prepare(q).bind(...args).all()).results || [];
+  const ids = [...new Set(rows.map((r) => r.caller_id).filter(Boolean))];
+  const names = {};
+  if (ids.length) {
+    try {
+      const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+      await pg.connect();
+      try {
+        for (const u of (await pg.query("SELECT id::text AS id, first_name, last_name FROM users WHERE id::text = ANY($1)", [ids])).rows) names[u.id] = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      } finally {
+        try {
+          await pg.end();
+        } catch (e) {
+        }
+      }
+    } catch (e) {
+    }
+  }
+  const made = [], received = [];
+  for (const r of rows) {
+    const it = { record_id: r.ns_record_id, date: r.rec_date, caller_id: r.caller_id, caller_name: names[r.caller_id] || null, callee_id: r.callee_id, callee_name: r.callee_name, list_id: r.list_id };
+    if (String(r.caller_id) === String(sid)) made.push(it);
+    else received.push(it);
+  }
+  return { ok: true, made, received, people_called: [...new Set(made.map((x) => x.callee_id || x.callee_name))].length };
+}
+__name(contactCallsGet, "contactCallsGet");
+async function contactCallsLookup(env, qs) {
+  await ensureContactCalls(env);
+  const split = /* @__PURE__ */ __name((k) => String(qs.get(k) || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 300), "split");
+  const sid = String(qs.get("student_id") || ""), callees = split("callee_ids"), rids = split("record_ids"), from = qs.get("from"), to = qs.get("to");
+  const conds = [], args = [];
+  if (sid) {
+    conds.push("caller_id = ? OR callee_id = ?");
+    args.push(sid, sid);
+  }
+  if (callees.length) {
+    conds.push("callee_id IN (" + callees.map(() => "?").join(",") + ")");
+    args.push(...callees);
+  }
+  if (rids.length) {
+    conds.push("ns_record_id IN (" + rids.map(() => "?").join(",") + ")");
+    args.push(...rids);
+  }
+  if (!conds.length) return { ok: true, calls: [] };
+  let q = "SELECT * FROM contact_calls WHERE (" + conds.join(" OR ") + ")";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(from || ""))) {
+    q += " AND rec_date >= ?";
+    args.push(String(from));
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(to || ""))) {
+    q += " AND rec_date <= ?";
+    args.push(String(to));
+  }
+  q += " ORDER BY rec_date DESC, created_at DESC LIMIT 1000";
+  const rows = (await env.DB.prepare(q).bind(...args).all()).results || [];
+  const names = {}, files = {};
+  if (rows.length && env.HYPERDRIVE) {
+    try {
+      const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+      await pg.connect();
+      try {
+        const ids = [...new Set(rows.map((r) => r.caller_id).filter(Boolean))];
+        if (ids.length) for (const u of (await pg.query("SELECT id::text AS id, first_name, last_name FROM users WHERE id::text = ANY($1)", [ids])).rows) names[u.id] = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+        const tpl = await txPathTpl(env);
+        const fr = await pg.query(`SELECT r.id::text AS id, r.user_id::text AS uid, r.record_file, ${TX_PATH_SQL_COLS} FROM records r LEFT JOIN users u ON u.id = r.user_id
+          LEFT JOIN record_categories rc ON rc.id = r.record_category_id LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+          WHERE r.id::text = ANY($1)`, [rows.map((r) => String(r.ns_record_id))]);
+        for (const r of fr.rows) files[r.id] = r.record_file ? txPathFill(tpl, txPathVars(r, r.id, r.uid, r.record_file)) : null;
+      } finally {
+        try {
+          await pg.end();
+        } catch (e) {
+        }
+      }
+    } catch (e) {
+    }
+  }
+  return { ok: true, calls: rows.map((r) => ({ record_id: r.ns_record_id, date: r.rec_date, caller_id: r.caller_id, caller_name: names[r.caller_id] || null, callee_id: r.callee_id, callee_name: r.callee_name, list_id: r.list_id, path: files[String(r.ns_record_id)] || null })) };
+}
+__name(contactCallsLookup, "contactCallsLookup");
 async function handleMyContactList(request, env, url) {
   const nsToken = url.searchParams.get("ns_token"), nsEmail = url.searchParams.get("ns_email"), nsServer = url.searchParams.get("ns_server");
   const valid = await validateNsToken(nsToken, nsEmail, nsServer);
@@ -14877,6 +15078,14 @@ async function handleMyContactList(request, env, url) {
       members: members.filter((m) => m.list_id === l.id && String(m.ns_student_id) !== me).map((m) => ({ ns_student_id: String(m.ns_student_id), name: m.name, phone: m.phone, note: m.note || "" }))
     };
   }).filter(Boolean);
+  try {
+    await ensureContactCalls(env);
+    const calls = (await env.DB.prepare("SELECT callee_id, callee_name, rec_date FROM contact_calls WHERE caller_id = ?").bind(me).all()).results || [];
+    for (const l of out) {
+      l.called = [...new Set(calls.filter((c) => (!l.period_from || c.rec_date > l.period_from) && (!l.visit_date || c.rec_date <= l.visit_date)).map((c) => c.callee_id).filter(Boolean).map(String))];
+    }
+  } catch (e) {
+  }
   return json({ ok: true, list: out[0] || null, lists: out });
 }
 __name(handleMyContactList, "handleMyContactList");
