@@ -426,6 +426,13 @@ public class DescribeSheet {
             if (st != null && !m.note.contains(st.shortName())) m.note = "🎬 " + st.shortName() + (m.note.isEmpty() ? "" : " — " + m.note);
             if (ContactList.CATEGORY.equals(selCat[0]) && !selContact[0].isEmpty() && !m.note.contains(selContact[0]))
                 m.note = "📞 " + selContact[0] + (m.note.isEmpty() ? "" : " — " + m.note);
+            // 📞 osoba z listy — id kursanta, żeby trener wiedział, do kogo dzwonił (zapis w workerze po wysłaniu)
+            if (ContactList.CATEGORY.equals(selCat[0])) {
+                String oldId = m.contactId;
+                m.contactId = ""; m.contactName = "";
+                for (ContactList.Member cm : ContactList.members(a)) if (cm.label.equals(selContact[0])) { m.contactId = cm.id; m.contactName = cm.name; break; }
+                if (!m.contactId.equals(oldId)) m.callLogged = false;
+            }
             if (gps[0] != null && !local) { m.lat = gps[0].getLatitude(); m.lon = gps[0].getLongitude(); if (!"saved".equals(gps[0].getProvider())) m.gpsApprox = GpsHelper.isApprox(gps[0]); }
             prefs.edit().putString("student_name", name).putString("last_sys", selSys[0]).apply();
             dismiss.run();

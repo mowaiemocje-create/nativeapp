@@ -26,6 +26,8 @@ public class RecMeta {
     public String fixSys = "";      // poprawka MUSI byc w tym samym systemie mowy co oryginal
     public String special = "";     // zadanie specjalne (kategoria Special) — pelna nazwa z SpecialTasks
     public boolean gpsApprox = false; // pozycja przybliżona (z adresu internetowego — tablet bez GPS)
+    public String contactId = "", contactName = ""; // 📞 Phone do Kursanta: osoba z listy (id kursanta w NS)
+    public boolean callLogged = false;               // zapisane w workerze (trener widzi, do kogo dzwonił)
 
     public static final String[] EMOTION_LABELS = {"", "luz", "komfortowo", "neutralnie", "niekomfortowo", "stres"};
     public static final String[] SYS_LEVELS = {"Basic", "U1", "U1K", "FIX", "K1", "K2", "Full"};
@@ -55,6 +57,9 @@ public class RecMeta {
                 m.fixSys = o.optString("fixSys", "");
                 m.special = o.optString("special", "");
                 m.gpsApprox = o.optBoolean("gpsA", false);
+                m.contactId = o.optString("cId", "");
+                m.contactName = o.optString("cName", "");
+                m.callLogged = o.optBoolean("cLog", false);
             } catch (Exception e) { /* uszkodzony wpis — traktujemy jak brak opisu */ }
         }
         // Zgodnosc: nagrania wyslane przed wprowadzeniem opisow (lista "ns_sent_files")
@@ -81,6 +86,9 @@ public class RecMeta {
             o.put("fixSys", fixSys);
             o.put("special", special);
             if (gpsApprox) o.put("gpsA", true);
+            if (!contactId.isEmpty()) o.put("cId", contactId);
+            if (!contactName.isEmpty()) o.put("cName", contactName);
+            if (callLogged) o.put("cLog", true);
             sp(c).edit().putString(fileName, o.toString()).apply();
         } catch (Exception e) { /* ignorowane */ }
     }

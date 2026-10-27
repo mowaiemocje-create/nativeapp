@@ -1324,6 +1324,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok) {
                 markNs(file, "sent");
                 if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); }
+                ContactList.logCall(this, file.getName()); // 📞 do kogo dzwonił — trener widzi
                 LocalTempo.announce(this, file.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, file.getName()); // 📱 tekst z telefonu → baza tekstów
                 setStatus(isFix ? L.t("☁✓ Poprawka wysłana! Czeka na ocenę trenera.") : L.t("☁✓ NS: wysłano (") + L.cat(meta.cat) + ")");
@@ -1435,6 +1436,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok) {
                 markNs(f, "sent");
                 rememberNsId(f, r.body);
+                ContactList.logCall(this, f.getName()); // 📞 do kogo dzwonił — trener widzi
                 LocalTempo.announce(this, f.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, f.getName()); // 📱 tekst z telefonu → baza tekstów
                 sendNext(todo, idx + 1, okCount + 1);
@@ -3816,6 +3818,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         if (files == null) files = new File[0];
         java.util.Arrays.sort(files, (x, y) -> Long.compare(y.lastModified(), x.lastModified()));
         final File[] finalFiles = files;
+        // 📞 starsze wysłane rozmowy z listy, których worker jeszcze nie zna — dopisz (raz)
+        if (isLoggedIn()) for (File f : files) { RecMeta rm = RecMeta.load(this, f.getName()); if (ContactList.CATEGORY.equals(rm.cat) && !rm.callLogged && "sent".equals(rm.ns)) ContactList.logCallOnce(this, f.getName()); }
 
         // Naglowek: ← NAGRANIA + ☁ Wyslij wszystkie
         android.widget.LinearLayout head = Ui.row(this);

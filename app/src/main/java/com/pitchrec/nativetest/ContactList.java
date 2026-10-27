@@ -78,6 +78,14 @@ public final class ContactList {
     // Osoby z listy, z ktorymi jest juz nagranie "Phone do Kursanta" w tym okresie (notatka "📞 Imię …")
     public static java.util.Set<String> calledInPeriod(Context c) {
         java.util.Set<String> out = new java.util.HashSet<>();
+        // z serwera (rozmowy zapisane w workerze — także z innego telefonu)
+        JSONObject cl = cached(c);
+        JSONArray srv = cl != null ? cl.optJSONArray("called") : null;
+        if (srv != null && srv.length() > 0) {
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            for (int i = 0; i < srv.length(); i++) ids.add(srv.optString(i, ""));
+            for (Member mm : members(c)) if (ids.contains(mm.id)) out.add(mm.label);
+        }
         java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
         String from = periodFrom(c), to = periodTo(c);
         java.io.File[] files = c.getFilesDir().listFiles((dir, n) -> n.endsWith(".wav") || n.endsWith(".mp3"));
@@ -88,6 +96,7 @@ public final class ContactList {
             if (!to.isEmpty() && day.compareTo(to) > 0) continue;
             RecMeta m = RecMeta.load(c, file.getName());
             if (!CATEGORY.equals(m.cat) || m.note == null || !m.note.startsWith("📞 ")) continue;
+            if (!m.contactId.isEmpty()) { for (Member mm : members(c)) if (mm.id.equals(m.contactId)) { out.add(mm.label); break; } continue; }
             String rest = m.note.substring(3);
             int k = rest.indexOf(" — ");
             out.add((k >= 0 ? rest.substring(0, k) : rest).trim());
@@ -96,6 +105,54 @@ public final class ContactList {
     }
 
     public static boolean loaded(Context c) { return prefs(c).getLong("contact_list_at", 0L) > 0; }
+
+    // ── 📞 ZAPIS ROZMOWY W WORKERZE: do kogo kursant dzwonił (trener to widzi) ──
+    // Po wysłaniu nagrania do NS. Starsze nagrania (tylko notatka „📞 Imię”) — osoba dopasowana po etykiecie.
+    private static final java.util.Set<String> TRIED = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    // z listy nagrań (dopisywanie starszych) — najwyżej raz na uruchomienie aplikacji
+    public static void logCallOnce(Context c, String fileName) { if (TRIED.add(fileName)) logCall(c, fileName); }
+
+    public static void logCall(Context c, String fileName) {
+        try {
+            RecMeta m = RecMeta.load(c, fileName);
+            if (!CATEGORY.equals(m.cat) || m.callLogged || !"sent".equals(m.ns)) return;
+            String rid = !m.fixRecordId.isEmpty() ? m.fixRecordId : m.nsRecordId;
+            if (rid.isEmpty()) return;
+            String cid = m.contactId, cname = m.contactName;
+            if (cid.isEmpty() && m.note != null && m.note.startsWith("📞 ")) {
+                String rest = m.note.substring(3);
+                int k = rest.indexOf(" — ");
+                String lbl = (k >= 0 ? rest.substring(0, k) : rest).trim();
+                for (Member mm : members(c)) if (mm.label.equals(lbl)) { cid = mm.id; cname = mm.name; break; }
+                if (cid.isEmpty()) cname = lbl;
+            }
+            if (cid.isEmpty() && cname.isEmpty()) return;
+            SharedPreferences p = prefs(c);
+            String token = p.getString("ns_token", null);
+            if (token == null) return;
+            java.io.File f = new java.io.File(c.getFilesDir(), fileName);
+            JSONObject b = new JSONObject();
+            b.put("ns_token", token);
+            b.put("ns_email", p.getString("ns_email", ""));
+            b.put("ns_server", "new");
+            b.put("record_id", rid);
+            b.put("callee_id", cid);
+            b.put("callee_name", cname);
+            JSONObject l = cached(c);
+            if (l != null) b.put("list_id", l.optString("id", ""));
+            b.put("date", new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(new java.util.Date(f.exists() ? f.lastModified() : System.currentTimeMillis())));
+            final Context ac = c.getApplicationContext();
+            NsClient.backend("POST", "/contact-calls/log", b.toString(), r -> {
+                try {
+                    if (!r.ok || r.body == null || !new JSONObject(r.body).optBoolean("ok", false)) return;
+                    RecMeta mm = RecMeta.load(ac, fileName);
+                    mm.callLogged = true;
+                    mm.save(ac, fileName);
+                } catch (Exception e) { }
+            });
+        } catch (Exception e) { }
+    }
 
     private static JSONObject cached(Context c) {
         try {
