@@ -566,6 +566,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         in.removeExtra("open_page");
         String oRec = in.getStringExtra("open_rec");
         in.removeExtra("open_rec");
+        if ("lock".equals(pg)) { showPage("daw"); StudentLock.event(this, "nudge_opened"); refreshLock(); return; } // 🌱 zachęta z powiadomienia
         if ("callrec".equals(pg)) { handlePendingCallRec(); return; }
         if ("callrec_setup".equals(pg)) { CallRecUi.setup(this); return; }
         if ("rate".equals(pg)) { if (isLoggedIn() && oRec != null) openRating(oRec); else showPage("recs"); return; }
@@ -680,6 +681,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void refreshLock() {
         if (!isLoggedIn()) { StudentLock.locked = false; applyLock(); return; }
+        StudentLock.loadSaved(this); // od razu ostatnio znany stan (bez czekania na sieć)
+        applyLock();
         StudentLock.check(this, this::applyLock);
     }
 
@@ -692,6 +695,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         lockOverlay = buildLockView(false);
         pc.addView(lockOverlay, new android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
         lockOverlay.setVisibility(View.VISIBLE);
+        StudentLock.screenShown(this);
     }
 
     private void showLockDialog() {
@@ -713,9 +717,10 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         box.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
         int p = (int) (24 * d);
         box.setPadding(p, (int) ((inDialog ? 20 : 48) * d), p, p);
-        TextView ic = Ui.text(this, "🌱", 46f, R.color.pr_text);
-        ic.setGravity(android.view.Gravity.CENTER);
-        box.addView(ic);
+        android.widget.ImageView ic = new android.widget.ImageView(this);
+        ic.setImageResource(R.drawable.lock_nudge);
+        ic.setAdjustViewBounds(true);
+        box.addView(ic, new android.widget.LinearLayout.LayoutParams((int) ((inDialog ? 120 : 170) * d), (int) ((inDialog ? 120 : 170) * d)));
         TextView t = Ui.text(this, StudentLock.title.isEmpty() ? L.t("Przerwa w treningu") : StudentLock.title, 22f, R.color.pr_text);
         t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         t.setGravity(android.view.Gravity.CENTER);

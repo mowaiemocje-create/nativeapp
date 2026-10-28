@@ -236,6 +236,7 @@ public final class CallRecUi {
                 .setStyle(new android.app.Notification.BigTextStyle().bigText(text))
                 .setContentIntent(android.app.PendingIntent.getActivity(c, 4810, i, android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE))
                 .setAutoCancel(true).build();
+        if (StudentLock.muted(c)) return; // 🔒 przerwa w treningu — powiadomienia wyciszone
         try { nm.notify(4810, n); } catch (SecurityException e) { }
     }
 

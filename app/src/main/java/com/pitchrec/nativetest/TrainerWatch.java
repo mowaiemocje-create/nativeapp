@@ -58,6 +58,7 @@ public final class TrainerWatch {
         if (token == null || running || System.currentTimeMillis() - lastRun < 45000L) { if (done != null) done.run(); return; }
         running = true;
         lastRun = System.currentTimeMillis();
+        StudentLock.backgroundTick(ctx, null); // 🔒 stan przerwy w treningu + zachęta raz na 7 dni
         HarmoGoal.refresh(ctx, null); // czy harmonogram trwa (po jego koncu powiadomienia sa wstrzymane) — najwyzej co 30 min
         String email = prefs(ctx).getString("ns_email", "");
         NsClient.request("GET", "/records?page_size=30&sort_by=date&sort_order=desc", token, email, null, null, r -> {
@@ -227,6 +228,7 @@ public final class TrainerWatch {
                 .setAutoCancel(true)
                 .build();
         if (HarmoGoal.ended(c)) return; // harmonogram sie skonczyl — bez powiadomien
+        if (StudentLock.muted(c)) return; // 🔒 przerwa w treningu — powiadomienia wyciszone
         try { nm.notify(id, n); } catch (SecurityException e) { }
     }
 }

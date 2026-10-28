@@ -193,6 +193,7 @@ public final class AvailWatch {
             b.addAction(new Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(c, android.R.drawable.ic_menu_call), "☎ " + L.t("Zadzwoń"), dp).build());
         }
         // "Chcę porozmawiać" — ZAWSZE, niezaleznie od harmonogramu (inne powiadomienia milkna po jego koncu)
+        if (StudentLock.muted(c)) return; // 🔒 przerwa w treningu — powiadomienia wyciszone
         try { nm.notify(id, b.build()); } catch (SecurityException e) { }
     }
 }

@@ -164,6 +164,7 @@ public class ReminderReceiver extends BroadcastReceiver {
                 .setAutoCancel(true)
                 .build();
         if (HarmoGoal.ended(c)) return; // harmonogram sie skonczyl — bez powiadomien
+        if (StudentLock.muted(c)) return; // 🔒 przerwa w treningu — powiadomienia wyciszone
         try { nm.notify(2003, n); } catch (SecurityException e) { /* brak zgody na powiadomienia */ }
     }
 }
