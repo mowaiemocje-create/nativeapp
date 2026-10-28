@@ -672,6 +672,85 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         updateBadges();
         if ("set".equals(page)) renderSettingsPage();
         if ("daw".equals(page)) refreshGoal();
+        applyLock();
+    }
+
+    // ── 🔒 PRZERWA W TRENINGU (trener wstrzymał aplikację) — komunikat na ekranie nagrywania ──
+    private View lockOverlay;
+
+    private void refreshLock() {
+        if (!isLoggedIn()) { StudentLock.locked = false; applyLock(); return; }
+        StudentLock.check(this, this::applyLock);
+    }
+
+    private void applyLock() {
+        boolean show = StudentLock.locked && isLoggedIn() && "daw".equals(currentPage);
+        if (!show) { if (lockOverlay != null) lockOverlay.setVisibility(View.GONE); return; }
+        android.widget.FrameLayout pc = findViewById(R.id.pageContainer);
+        if (pc == null) return;
+        if (lockOverlay != null) pc.removeView(lockOverlay);
+        lockOverlay = buildLockView(false);
+        pc.addView(lockOverlay, new android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
+        lockOverlay.setVisibility(View.VISIBLE);
+    }
+
+    private void showLockDialog() {
+        android.app.AlertDialog[] dlg = {null};
+        View v = buildLockView(true);
+        dlg[0] = new AlertDialog.Builder(this).setView(v).setPositiveButton(L.t("Zamknij"), null).show();
+    }
+
+    private View buildLockView(boolean inDialog) {
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.setFillViewport(true);
+        if (!inDialog) {
+            sv.setBackgroundColor(getResources().getColor(R.color.pr_bg));
+            sv.setClickable(true); // nie przepuszczaj dotyku do wykresu i przycisków pod spodem
+        }
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        int p = (int) (24 * d);
+        box.setPadding(p, (int) ((inDialog ? 20 : 48) * d), p, p);
+        TextView ic = Ui.text(this, "🌱", 46f, R.color.pr_text);
+        ic.setGravity(android.view.Gravity.CENTER);
+        box.addView(ic);
+        TextView t = Ui.text(this, StudentLock.title.isEmpty() ? L.t("Przerwa w treningu") : StudentLock.title, 22f, R.color.pr_text);
+        t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        t.setGravity(android.view.Gravity.CENTER);
+        t.setPadding(0, (int) (12 * d), 0, (int) (12 * d));
+        box.addView(t);
+        TextView m = Ui.text(this, StudentLock.message, 16f, R.color.pr_text);
+        m.setGravity(android.view.Gravity.CENTER);
+        m.setLineSpacing(0, 1.2f);
+        box.addView(m);
+        box.addView(Ui.spacer(this, 20));
+        String phone = StudentLock.trainerPhone(this);
+        if (!phone.isEmpty()) {
+            Button call = Ui.button(this, "📞 " + L.t("Zadzwoń do trenera"), R.color.pr_accent, true);
+            call.setOnClickListener(v -> ContactList.dial(this, phone));
+            box.addView(call, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (54 * d)));
+            box.addView(Ui.spacer(this, 8));
+        }
+        Button again = Ui.button(this, "🔄 " + L.t("Sprawdź ponownie"), R.color.pr_purple, false);
+        again.setOnClickListener(v -> {
+            again.setEnabled(false);
+            again.setText("⏳ " + L.t("Sprawdzam…"));
+            StudentLock.check(this, () -> {
+                applyLock();
+                again.setEnabled(true);
+                again.setText("🔄 " + L.t("Sprawdź ponownie"));
+                if (!StudentLock.locked) Toast.makeText(this, "✅ " + L.t("Możesz znowu nagrywać!"), Toast.LENGTH_LONG).show();
+            });
+        });
+        box.addView(again, new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, (int) (50 * d)));
+        TextView note = Ui.text(this, L.t("Odsłuch nagrań i dziennik działają normalnie."), 12f, R.color.pr_muted);
+        note.setGravity(android.view.Gravity.CENTER);
+        note.setPadding(0, (int) (14 * d), 0, 0);
+        box.addView(note);
+        sv.addView(box);
+        return sv;
     }
 
     // ── KOMUNIKATY OD TRENERA: "📞 Zadzwoń do trenera" + "🎯 Dziś pilnuj" (worker newspeech-backend) ──
@@ -728,6 +807,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
 
     private void refreshCoach() {
         if (!isLoggedIn()) { renderCoach(); return; }
+        refreshLock(); // 🔒 także co kilka minut (odblokowanie przez trenera bez ponownego uruchamiania)
         CoachNotices.refresh(this, () -> {
             if (isFinishing()) return;
             // /student/home przyniósł też świeżą listę KOREKTA — od razu w pamięci (odznaka, karta)
@@ -1084,6 +1164,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 AvailWatch.schedule(this);
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
                 updateNavForLogin();
+                refreshLock();
                 refreshAccountSection();
                 refreshCoach();
                 Toast.makeText(this, L.t("✓ Zalogowano do NewSpeech"), Toast.LENGTH_SHORT).show();
@@ -1286,7 +1367,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         clip.setLevel(Math.round(all * 10000));
     }
 
+    // 🔒 przed wysłaniem: czy trener nie wstrzymał treningu (błąd sieci = wysyłamy normalnie)
     private void sendToNs(File file) {
+        if (!isLoggedIn()) { sendToNsNow(file); return; }
+        StudentLock.check(this, () -> { applyLock(); if (StudentLock.locked) showLockDialog(); else sendToNsNow(file); });
+    }
+
+    private void sendToNsNow(File file) {
         if (!isLoggedIn()) { promptLogin(L.t("Aby wysłać nagranie do NewSpeech, zaloguj się.")); return; }
         RecMeta meta = RecMeta.load(this, file.getName());
         if (meta.cat.isEmpty()) {
@@ -1364,6 +1451,11 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // "Wyslij wszystkie" — wszystkie OPISANE i jeszcze niewyslane nagrania, kazde w swojej
     // kategorii, po kolei. Zatrzymuje sie na pierwszym bledzie (np. limit dzienny).
     private void sendAllToNs(File[] files) {
+        if (!isLoggedIn()) { sendAllToNsNow(files); return; }
+        StudentLock.check(this, () -> { applyLock(); if (StudentLock.locked) showLockDialog(); else sendAllToNsNow(files); });
+    }
+
+    private void sendAllToNsNow(File[] files) {
         if (!isLoggedIn()) { promptLogin(L.t("Aby wysłać nagrania do NewSpeech, zaloguj się.")); return; }
         java.util.List<File> todo = new java.util.ArrayList<>();
         int undescribed = 0;
@@ -3155,6 +3247,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     }
 
     private void startRecordingFlow() {
+        if (StudentLock.locked && isLoggedIn()) { applyLock(); showLockDialog(); return; } // 🔒 przerwa w treningu
         hidePitchButton();
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -3916,6 +4009,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.loggedIn = isLoggedIn();
         LiveAudioData.full = Access.full(this);
         Translator.ensureRunning(this); // 📥 tryb tłumacza (konto trenera)
+        refreshLock(); // 🔒 przerwa w treningu (trener wstrzymał aplikację)
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);
