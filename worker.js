@@ -5867,6 +5867,30 @@ var worker_default = {
       if (url.pathname === "/special-tasks/mine" && request.method === "GET") {
         return await handleSpecialTasksMine(request, env, url);
       }
+      if (url.pathname === "/harm-credits" && request.method === "GET" || (url.pathname === "/harm-credits/add" || url.pathname === "/harm-credits/delete") && request.method === "POST") {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : Object.fromEntries(url.searchParams.entries());
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(src.student_id || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        await ensureHarmCredits(env);
+        if (url.pathname === "/harm-credits/add") {
+          if (!body.category_id) return json({ error: "Wybierz kategori\u0119" }, 400);
+          const day = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? String(body.date) : warsawYmd(/* @__PURE__ */ new Date());
+          await env.DB.prepare("INSERT INTO harm_credits (ns_student_id, category_id, category_name, day, n, source, note, special_code, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)").bind(sid, String(body.category_id), String(body.category_name || "").slice(0, 120), day, Math.min(50, Math.max(1, Number(body.n) || 1)), String(body.source || "").slice(0, 40), String(body.note || "").slice(0, 500), String(who.email || ""), Math.floor(Date.now() / 1e3)).run();
+        } else if (url.pathname === "/harm-credits/delete") {
+          await env.DB.prepare("DELETE FROM harm_credits WHERE id = ? AND ns_student_id = ?").bind(Number(body.id), sid).run();
+        }
+        return json({ ok: true, credits: await harmCreditsList(env, sid) });
+      }
       if ((url.pathname === "/special-tasks/credit" || url.pathname === "/special-tasks/uncredit") && request.method === "POST") {
         return await handleSpecialTasksCredit(request, env, url.pathname.endsWith("/uncredit"));
       }
@@ -6673,6 +6697,31 @@ var worker_default = {
         const me = await coachStudentFromRequest(request, env, null, body);
         if (!me || !me.id) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
         return json(await contactCallLog(env, me.id, body));
+      }
+      if (url.pathname === "/trainer-notes" && request.method === "GET" || url.pathname.startsWith("/trainer-notes/") && request.method === "POST") {
+        let body = {};
+        if (request.method === "POST") {
+          try {
+            body = await request.json();
+          } catch (e) {
+          }
+        }
+        const src = request.method === "POST" ? body : Object.fromEntries(url.searchParams.entries());
+        const who = await contactAuth(env, src.ns_token, src.ns_email, src.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        await ensureTrainerNotes(env);
+        const sid = String(src.student_id || ""), now = Math.floor(Date.now() / 1e3);
+        if (url.pathname === "/trainer-notes/save") {
+          const text = String(body.text || "").trim().slice(0, 4e3), d = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? String(body.date) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+          if (!sid || !text) return json({ error: "Wpisz tre\u015B\u0107 notatki" }, 400);
+          if (body.id) await env.DB.prepare("UPDATE trainer_notes SET note_date = ?, text = ?, author = ?, updated_at = ? WHERE id = ? AND ns_student_id = ?").bind(d, text, String(who.email || ""), now, Number(body.id), sid).run();
+          else await env.DB.prepare("INSERT INTO trainer_notes (ns_student_id, note_date, text, author, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(sid, d, text, String(who.email || ""), now, now).run();
+        } else if (url.pathname === "/trainer-notes/delete") {
+          await env.DB.prepare("DELETE FROM trainer_notes WHERE id = ? AND ns_student_id = ?").bind(Number(body.id), sid).run();
+        } else if (url.pathname !== "/trainer-notes") return json({ error: "Nieznana akcja" }, 404);
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        return json({ ok: true, notes: (await env.DB.prepare("SELECT id, note_date, text, author, created_at, updated_at FROM trainer_notes WHERE ns_student_id = ? ORDER BY note_date DESC, id DESC LIMIT 300").bind(sid).all()).results || [] });
       }
       if (url.pathname === "/student-lock/nudge.png" && request.method === "GET") {
         const bin = Uint8Array.from(atob(STUDENT_NUDGE_PNG), (c) => c.charCodeAt(0));
@@ -7577,6 +7626,22 @@ async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo)
   const pgClient = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pgClient.connect();
   try {
+    const warsawDayS = /* @__PURE__ */ __name((d) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(d instanceof Date ? d : new Date(d)), "warsawDayS");
+    const todayW = warsawDayS(/* @__PURE__ */ new Date());
+    let extendedTo = null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(dateTo)) && dateTo < todayW && dateTo > "2000-01-01") {
+      try {
+        const nx = /* @__PURE__ */ new Date(dateTo + "T12:00:00Z");
+        nx.setUTCDate(nx.getUTCDate() + 1);
+        const limit = nx.toISOString().slice(0, 10);
+        const vd = (await pgClient.query(`SELECT v.date FROM visit_dates v JOIN users u ON u.id = v.student_id WHERE LOWER(u.email) = LOWER($1)`, [nsEmail])).rows;
+        if (vd.length && !vd.some((r) => r.date && warsawDayS(r.date) > limit)) {
+          extendedTo = todayW;
+          dateTo = todayW;
+        }
+      } catch (e) {
+      }
+    }
     const overallResult = await pgClient.query(
       `SELECT
          COUNT(*) AS sent,
@@ -7614,6 +7679,23 @@ async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo)
       byNameTotals[name].reviewed += parseInt(row.reviewed, 10);
       byNameTotals[name].ids.push(row.category_id);
     }
+    let creditN = 0;
+    try {
+      const me = (await pgClient.query("SELECT id::text AS id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1", [nsEmail])).rows[0];
+      if (me) for (const cr of await harmCreditsList(env, me.id)) {
+        if (cr.day < String(dateFrom).slice(0, 10) || cr.day > String(dateTo).slice(0, 10)) continue;
+        const n = Math.max(1, Number(cr.n) || 1), name = cr.category_name || cr.category_id;
+        const key = Object.keys(byNameTotals).find((k) => k.trim().toLowerCase() === String(name).trim().toLowerCase()) || name;
+        if (!byNameTotals[key]) byNameTotals[key] = { sent: 0, correct: 0, reviewed: 0, ids: [] };
+        const t = byNameTotals[key];
+        t.sent += n;
+        t.correct += n;
+        t.reviewed += n;
+        if (t.ids.indexOf(cr.category_id) < 0) t.ids.push(cr.category_id);
+        creditN += n;
+      }
+    } catch (e) {
+    }
     const byCategory = {};
     for (const name of Object.keys(byNameTotals)) {
       const totals = byNameTotals[name];
@@ -7622,7 +7704,9 @@ async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo)
       }
     }
     return {
-      overall: { sent: parseInt(overall.sent, 10) || 0, reviewed: parseInt(overall.reviewed, 10) || 0, correct: parseInt(overall.correct, 10) || 0 },
+      extended_to: extendedTo,
+      credited: creditN,
+      overall: { sent: (parseInt(overall.sent, 10) || 0) + creditN, reviewed: (parseInt(overall.reviewed, 10) || 0) + creditN, correct: (parseInt(overall.correct, 10) || 0) + creditN },
       byCategory
     };
   } finally {
@@ -8300,7 +8384,17 @@ async function handleTrainerVisitDates(request, env, url) {
         return p;
       });
       const pOf = /* @__PURE__ */ __name((day) => periods.findIndex((p) => day >= p.from && day <= p.to), "pOf");
-      const cell = /* @__PURE__ */ __name((p, cat) => p.per[cat] || (p.per[cat] = { category_id: cat, category_name: catNames[cat] || "", required_records: 0, all_records: 0, correct_records: 0, late_records: 0 }), "cell");
+      const canon = /* @__PURE__ */ __name((p, cat) => {
+        if (p.per[cat]) return cat;
+        const nm = String(catNames[cat] || "").trim().toLowerCase();
+        if (!nm) return cat;
+        const k = Object.keys(p.per).find((x) => String(p.per[x].category_name || "").trim().toLowerCase() === nm);
+        return k || cat;
+      }, "canon");
+      const cell = /* @__PURE__ */ __name((p, cat) => {
+        cat = canon(p, cat);
+        return p.per[cat] || (p.per[cat] = { category_id: cat, category_name: catNames[cat] || "", required_records: 0, all_records: 0, correct_records: 0, late_records: 0 });
+      }, "cell");
       const owner = recDays.map((r) => r.day ? pOf(r.day) : -1);
       recDays.forEach((r, i) => {
         if (owner[i] < 0) return;
@@ -8308,17 +8402,31 @@ async function handleTrainerVisitDates(request, env, url) {
         c.all_records++;
         if (r.ok) c.correct_records++;
       });
+      try {
+        for (const cr of await harmCreditsList(env, studentId)) {
+          if (!catNames[cr.category_id] && cr.category_name) catNames[cr.category_id] = cr.category_name;
+          let pi = pOf(cr.day);
+          if (pi < 0 && periods.length && cr.day > periods[periods.length - 1].to) pi = periods.length - 1;
+          if (pi < 0) continue;
+          const c = cell(periods[pi], cr.category_id), n = Math.max(1, Number(cr.n) || 1);
+          c.all_records += n;
+          c.correct_records += n;
+          c.credited_records = (c.credited_records || 0) + n;
+        }
+      } catch (e) {
+      }
       const order = recDays.map((r, i) => i).filter((i) => recDays[i].day && recDays[i].ok).sort((a, b) => recDays[a].day.localeCompare(recDays[b].day));
       periods.forEach((p, pi) => {
-        if (!p.grace) return;
+        const last = !periods[pi + 1], limit = !p.grace ? 0 : last ? Infinity : p.grace;
+        if (!limit) return;
         const end = periods[pi + 1] ? periods[pi + 1].to : "9999-12-31";
         let taken = 0;
         for (const i of order) {
-          if (taken >= p.grace) break;
+          if (taken >= limit) break;
           const r = recDays[i];
           if (r.day <= p.to || r.day > end) continue;
           if (owner[i] !== -1 && owner[i] <= pi) continue;
-          const c = p.per[r.cat];
+          const c = p.per[canon(p, r.cat)];
           if (!c || !(c.required_records > 0) || c.correct_records >= c.required_records) continue;
           if (owner[i] >= 0) {
             const q = cell(periods[owner[i]], r.cat);
@@ -8712,15 +8820,48 @@ async function handleSpecialTasksCredit(request, env, undo) {
   await ensureSpecialTasksTable(env);
   if (undo) {
     await env.DB.prepare("DELETE FROM special_task_done WHERE ns_student_id = ? AND code = ?").bind(sid, code).run();
+    try {
+      await ensureHarmCredits(env);
+      await env.DB.prepare("DELETE FROM harm_credits WHERE ns_student_id = ? AND special_code = ?").bind(sid, code).run();
+    } catch (e) {
+    }
     return json({ ok: true });
   }
   const now = Math.floor(Date.now() / 1e3);
   await env.DB.prepare(`INSERT INTO special_task_done (ns_student_id, code, source, note, credited_by, done_at) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(ns_student_id, code) DO UPDATE SET source = excluded.source, note = excluded.note, credited_by = excluded.credited_by, done_at = excluded.done_at`).bind(sid, code, String(body.source || "").slice(0, 40), String(body.note || "").slice(0, 500), who.email, body.done_at ? Number(body.done_at) : now).run();
-  return json({ ok: true, code, done_at: body.done_at ? Number(body.done_at) : now });
+  let credit = null;
+  if (body.harm_category_id) {
+    await ensureHarmCredits(env);
+    await env.DB.prepare("DELETE FROM harm_credits WHERE ns_student_id = ? AND special_code = ?").bind(sid, code).run();
+    const day = warsawYmd(new Date((body.done_at ? Number(body.done_at) : now) * 1e3));
+    await env.DB.prepare("INSERT INTO harm_credits (ns_student_id, category_id, category_name, day, n, source, note, special_code, created_by, created_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)").bind(sid, String(body.harm_category_id), String(body.harm_category_name || "").slice(0, 120), day, String(body.source || "").slice(0, 40), String(body.note || "").slice(0, 500), code, who.email, now).run();
+    credit = { category_id: String(body.harm_category_id), day };
+  }
+  return json({ ok: true, code, done_at: body.done_at ? Number(body.done_at) : now, credit });
 }
 __name(handleSpecialTasksCredit, "handleSpecialTasksCredit");
 __name2(handleSpecialTasksCredit, "handleSpecialTasksCredit");
+var HARM_CREDITS_READY = false;
+async function ensureHarmCredits(env) {
+  if (HARM_CREDITS_READY) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS harm_credits (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT NOT NULL, category_id TEXT NOT NULL, category_name TEXT, day TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1, source TEXT, note TEXT, special_code TEXT, created_by TEXT, created_at INTEGER)").run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_harm_credits_sid ON harm_credits(ns_student_id, day)").run();
+  } catch (e) {
+  }
+  HARM_CREDITS_READY = true;
+}
+__name(ensureHarmCredits, "ensureHarmCredits");
+async function harmCreditsList(env, sid) {
+  await ensureHarmCredits(env);
+  return (await env.DB.prepare("SELECT * FROM harm_credits WHERE ns_student_id = ? ORDER BY day").bind(String(sid)).all()).results || [];
+}
+__name(harmCreditsList, "harmCreditsList");
+function warsawYmd(d) {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+}
+__name(warsawYmd, "warsawYmd");
 async function handleSpecialTasksMine(request, env, url) {
   const nsEmail = url.searchParams.get("ns_email");
   const valid = await validateNsToken(url.searchParams.get("ns_token"), nsEmail, url.searchParams.get("ns_server"));
@@ -10308,7 +10449,13 @@ async function txStudentReport(env, sid, days, extra) {
   const diaryCorpus = dList.filter((x) => x.txt.length || x.med != null || x.old != null).map((x) => "### " + x.d + (x.med != null ? " \xB7 relaksacja \xD7" + x.med : "") + (x.old != null ? x.old ? " \xB7 u\u017Cywa\u0142 starej mowy" : " \xB7 bez starej mowy" : "") + "\n" + x.txt.join("\n")).join("\n\n").slice(0, 14e3);
   const corpus = recs.slice().sort((a, b) => a.d.localeCompare(b.d)).map((r) => "### " + r.d + " \xB7 " + r.cat + (r.own ? "" : " \xB7 (nagranie z konta: " + r.owner + ")") + " \xB7 " + Math.round(r.dur) + " s\n" + r.dialog.slice(0, per)).join("\n\n");
   const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzetelny raport, kt\xF3ry trener przeka\u017Ce kursantowi (i rodzicowi) \u2014 ciep\u0142o i zrozumiale, ale konkretnie, jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Niep\u0142ynno\u015Bci nazywaj \u201Ebloki mowy\u201D (nigdy \u201Eblokady\u201D, \u201Estaropolskie\u201D); dawny spos\xF3b m\xF3wienia to \u201Estara mowa\u201D. Daty pisz s\u0142ownie: \u201E12 pa\u017Adziernika\u201D (nigdy \u201E12 10\u201D, \u201E12.10\u201D, \u201E2026-10-12\u201D). Nie podawaj imion sprzedawc\xF3w, przechodni\xF3w ani innych obcych rozm\xF3wc\xF3w \u2014 znamy tylko ich role (chyba \u017Ce imi\u0119 wyra\u017Anie pada w tek\u015Bcie). Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Z TEKST\xD3W NIE DA SI\u0118 OCENI\u0106 BLOK\xD3W MOWY: przerwania, urwane lub powt\xF3rzone s\u0142owa, \u201ECzy\u2026 czy\u2026\u201D, dziwne fragmenty to zwykle b\u0142\u0119dy rozpoznawania mowy albo nak\u0142adanie si\u0119 g\u0142os\xF3w \u2014 nigdy nie nazywaj ich blokami mowy, przerwaniami ani trudno\u015Bciami kursanta i nie wyci\u0105gaj z nich wniosk\xF3w. O blokach mowy i trudno\u015Bciach pisz tylko wtedy, gdy kursant lub trener m\xF3wi o nich wprost (w nagraniu, w dzienniku, w kontek\u015Bcie od trenera) albo gdy kursant zaznaczy\u0142 po nagraniu \u201Eniekomfortowo\u201D/\u201Estres\u201D; je\u015Bli nie ma takich danych, zostaw list\u0119 \u201Etrudnosci\u201D pust\u0105. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami, phone.inne = pozosta\u0142e telefony (rodzina, znajomi, urz\u0119dy, sklepy). Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"skrot":{"wstep":"3\u20134 zdania podsumowania okresu dla kursanta i rodzica (ciep\u0142o, konkretnie, z liczbami)","mocne":["3 najwi\u0119ksze post\u0119py \u2014 ka\u017Cdy max 1 zdanie z liczb\u0105 lub cytatem"],"praca":["2\u20133 rzeczy do dalszej pracy \u2014 max 1 zdanie ka\u017Cda"],"teren":"1\u20132 zdania o czasie w terenie (stats.field: sklepy, przechodnie, razem, telefony do miasta) i co z tego wynika","speciale":[{"zadanie":"\u2026","opis":"1\u20132 zdania: jak posz\u0142o i co to da\u0142o \u2014 wykorzystaj kontekst od trenera"}],"trener":"1\u20133 zdania z kontekstu trenera, wplecione naturalnie (je\u015Bli jest)","dalej":["3 konkretne kroki na najbli\u017Cszy okres"]},"rodzic":{"podsumowanie":"2\u20134 zdania: co wynika z cotygodniowych obserwacji rodzica (tylko je\u015Bli s\u0105 dane)","zmiany":["zmiany tydzie\u0144 po tygodniu (mowa, \u0107wiczenia, samopoczucie) z liczbami"],"wskazowki":["co rodzic mo\u017Ce robi\u0107 w domu, \u017Ceby wspiera\u0107 trening"]},"dziennik":{"podsumowanie":"2\u20134 zdania: co wynika z dziennika (regularno\u015B\u0107, samopoczucie, relaksacja, stara mowa, sen, motywacja)","najwazniejsze":["najwa\u017Cniejsze obserwacje z wpis\xF3w, z kr\xF3tkimi cytatami"],"wplyw":[{"tytul":"\u2026","opis":"jak to wp\u0142ywa na trening Nowej Mowy i co z tym zrobi\u0107"}],"sygnaly":["sygna\u0142y ostrzegawcze (spadek motywacji, powr\xF3t starej mowy, brak relaksacji, zm\u0119czenie) \u2014 tylko je\u015Bli s\u0105 w danych"]},"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
-  const trainerNote = String(extra && extra.trainer_note || "").trim();
+  let datedNotes = [];
+  try {
+    await ensureTrainerNotes(env);
+    datedNotes = (await env.DB.prepare("SELECT note_date, text FROM trainer_notes WHERE ns_student_id = ? AND note_date BETWEEN ? AND ? ORDER BY note_date").bind(String(sid), from, to).all()).results || [];
+  } catch (e) {
+  }
+  const trainerNote = [String(extra && extra.trainer_note || "").trim()].concat(datedNotes.map((n) => n.note_date + ": " + String(n.text || "").trim())).filter(Boolean).join("\n").slice(0, 8e3);
   stats.trainer_note = trainerNote;
   const statsBrief = JSON.stringify({ ...stats, otherRecs: void 0, tasks: tasks.map((x) => ({ zadanie: x.code + " " + x.title, opis: x.desc, notatka: x.note, wykonane: x.done, w_okresie: x.inPeriod })) });
   let ai = null;
@@ -15293,6 +15440,14 @@ async function studentLockMine(env, sid, lang, origin) {
   };
 }
 __name(studentLockMine, "studentLockMine");
+async function ensureTrainerNotes(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS trainer_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT NOT NULL, note_date TEXT NOT NULL, text TEXT NOT NULL, author TEXT, created_at INTEGER, updated_at INTEGER)").run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_trainer_notes_sid ON trainer_notes(ns_student_id, note_date)").run();
+  } catch (e) {
+  }
+}
+__name(ensureTrainerNotes, "ensureTrainerNotes");
 async function contactCallTrainerSet(env, b) {
   const rid = String(b.record_id || "");
   if (!rid) return { ok: false, error: "Brak record_id" };
