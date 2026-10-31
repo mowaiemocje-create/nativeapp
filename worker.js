@@ -6463,7 +6463,7 @@ var worker_default = {
           if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
           return json(await resLinkCreate(env, r, body, who, url));
         }
-        if (/^\/offers\/reminders\/(paid|reschedule|resign|reactivate|time|preview-mail|unreschedule)$/.test(url.pathname) && request.method === "POST") {
+        if (/^\/offers\/reminders\/(paid|reschedule|resign|reactivate|time|preview-mail|unreschedule|arm)$/.test(url.pathname) && request.method === "POST") {
           const act = url.pathname.split("/").pop(), id = Number(body.id) || 0, now = Math.floor(Date.now() / 1e3);
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(id).first();
           if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
@@ -6482,7 +6482,7 @@ var worker_default = {
           await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
           return json({ ok: true });
         }
-        const rs = await env.DB.prepare("SELECT id, to_email, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
+        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
         try {
           const ra = (await env.DB.prepare("SELECT id, remind_at FROM course_reminders WHERE remind_at IS NOT NULL").all()).results || [];
           const m = {};
@@ -11109,7 +11109,8 @@ async function ofTables(env) {
     "status_at INTEGER",
     "status_note TEXT",
     "orig_start TEXT",
-    "events TEXT"
+    "events TEXT",
+    "auto_armed INTEGER"
   ]) {
     try {
       await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
@@ -11914,7 +11915,7 @@ async function resLinkCreate(env, r, b, who, url) {
     pl.time = /^\d{1,2}:\d{2}$/.test(String(b.time || "")) ? String(b.time).padStart(5, "0") : r.start_time || null;
     pl.initiator = b.initiator === "school" ? "school" : "student";
     pl.why = ["illness", "accident", "other"].indexOf(b.why) >= 0 ? b.why : "other";
-    pl.mail = b.mail !== false;
+    pl.mail_ok = b.mail === true;
   }
   if (kind === "contract") {
     try {
@@ -11975,8 +11976,8 @@ async function resLinkPage(request, env, url, ctx) {
     if (ans === "yes" && l.kind === "reschedule") {
       try {
         const r2 = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(r.id).first();
-        const res = await ofLifecycle(env, r2, "reschedule", { new_start: pl.new_start, time: pl.time, initiator: pl.initiator, why: pl.why, note: "zaakceptowane przez kursanta linkiem", mail: pl.mail !== false }, { email: "kursant (link)" }, now);
-        applied = res.ok ? " \u2014 termin zmieniony w panelu" + (res.mailed ? ", kursant dosta\u0142 potwierdzenie mailem" : "") : " \u2014 \u26A0\uFE0F nie uda\u0142o si\u0119 zmieni\u0107 terminu: " + (res.error || "");
+        const res = await ofLifecycle(env, r2, "reschedule", { new_start: pl.new_start, time: pl.time, initiator: pl.initiator, why: pl.why, note: "zaakceptowane przez kursanta linkiem", mail: pl.mail_ok === true }, { email: "kursant (link)" }, now);
+        applied = res.ok ? " \u2014 termin zmieniony w panelu" + (res.mailed ? ", kursant dosta\u0142 potwierdzenie mailem" : " (bez maila do kursanta)") : " \u2014 \u26A0\uFE0F nie uda\u0142o si\u0119 zmieni\u0107 terminu: " + (res.error || "");
       } catch (e) {
         applied = " \u2014 \u26A0\uFE0F " + e.message;
       }
@@ -12037,6 +12038,13 @@ async function ofLifecycle(env, r, act, b, who, now) {
     const t = tmOk(b.time);
     upd.start_time = t;
     ev.push({ t: now, a: "time", v: t, by });
+  } else if (act === "arm") {
+    const on = b.on !== false;
+    upd = { auto_armed: on ? now : null };
+    if (on) {
+      upd.error = null;
+    }
+    ev.push({ t: now, a: on ? "arm" : "disarm", by });
   } else if (act === "paid" || act === "preview-mail" && b.kind === "paid") {
     if (b.on === false) {
       upd = { paid_at: null, paid_by: null, paid_amount: null, paid_method: null, paid_rest: null, paid_total: null };
@@ -12164,6 +12172,7 @@ async function ofReminderTick(env) {
     const rows = (await env.DB.prepare("SELECT * FROM course_reminders WHERE sent_at IS NULL AND COALESCE(cancelled, 0) = 0 AND start_date >= ? ORDER BY start_date LIMIT 20").bind(today).all()).results || [];
     for (const r of rows) {
       if (r.status === "resigned" || r.status === "cancelled_school") continue;
+      if (!r.auto_armed) continue;
       if (ofAddDays(r.start_date, -7) > today) continue;
       const res = await ofSendCourseInfo(env, r);
       if (!res.ok) break;
@@ -13535,6 +13544,7 @@ async function pwSend(env, sub, base) {
 __name(pwSend, "pwSend");
 __name2(pwSend, "pwSend");
 async function pwTick(env) {
+  if (true) return;
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Warsaw", weekday: "short", hour: "2-digit", hourCycle: "h23" }).formatToParts(/* @__PURE__ */ new Date());
   if ((p.find((x) => x.type === "weekday") || {}).value !== "Sun" || Number((p.find((x) => x.type === "hour") || {}).value) < 17) return;
   await pwTables(env);
