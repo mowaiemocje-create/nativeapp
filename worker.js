@@ -5683,7 +5683,7 @@ var worker_default = {
         }
       }
       if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
-      if (!/^\/(ankieta(\/submit|\/tr)?|tydzien|r|raty)$/.test(url.pathname)) return new Response("Nie znaleziono", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      if (!/^\/(ankieta(\/submit|\/tr)?|tydzien|r|raty|potwierdz(\/plik)?)$/.test(url.pathname)) return new Response("Nie znaleziono", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }
     try {
       if (url.pathname === "/student/home" && request.method === "GET") {
@@ -6343,6 +6343,7 @@ var worker_default = {
       if (url.pathname === "/tydzien" && request.method === "POST") return await pwSubmit(request, env);
       if (url.pathname === "/parent-weekly" || url.pathname === "/parent-weekly/sub") return await pwPanel(request, env, url);
       if (url.pathname === "/r" && (request.method === "GET" || request.method === "POST")) return await svReplyPage(request, env, url);
+      if (url.pathname === "/potwierdz" || url.pathname === "/potwierdz/plik") return await resLinkPage(request, env, url, ctx);
       if (url.pathname === "/offers/sent-file" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -6355,6 +6356,44 @@ var worker_default = {
         const o = await env.RECORDINGS.get(k);
         if (!o) return json({ error: "Plik nie istnieje" }, 404);
         return new Response(o.body, { headers: { "Content-Type": o.httpMetadata && o.httpMetadata.contentType || "application/octet-stream", "Access-Control-Allow-Origin": "*", "Cache-Control": "private, max-age=300" } });
+      }
+      if ((url.pathname === "/offers/attach" || url.pathname === "/offers/attach/delete") && request.method === "POST") {
+        let body = {};
+        try {
+          body = await request.json();
+        } catch (e) {
+        }
+        const who = await contactAuth(env, body.ns_token, body.ns_email, body.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        await sstTable(env);
+        if (url.pathname.endsWith("/delete")) {
+          const r = await env.DB.prepare("SELECT html_key, pdf_key FROM offer_meta WHERE id = ? AND uploaded = 1").bind(Number(body.id) || 0).first();
+          if (!r) return json({ error: "Mo\u017Cna usun\u0105\u0107 tylko dopisany r\u0119cznie plik" }, 400);
+          for (const k of [r.html_key, r.pdf_key]) if (k) {
+            try {
+              await env.RECORDINGS.delete(k);
+            } catch (e) {
+            }
+          }
+          await env.DB.prepare("DELETE FROM offer_meta WHERE id = ?").bind(Number(body.id)).run();
+          return json({ ok: true });
+        }
+        const to = String(body.to_email || "").trim().toLowerCase(), kind = body.kind === "contract" ? "contract" : "offer";
+        if (!/@/.test(to)) return json({ error: "Brak e-maila kursanta" }, 400);
+        const b64 = String(body.content_base64 || "").replace(/\s+/g, ""), ct = String(body.content_type || "application/pdf").slice(0, 80);
+        if (!b64) return json({ error: "Wybierz plik" }, 400);
+        if (b64.length > 2e7) return json({ error: "Plik jest za du\u017Cy (max ok. 15 MB)" }, 400);
+        if (!/^(application\/pdf|text\/html|image\/(jpeg|png|webp|heic))$/.test(ct)) return json({ error: "Dozwolone pliki: PDF, HTML, JPG, PNG" }, 400);
+        const ext = ct === "application/pdf" ? "pdf" : ct === "text/html" ? "html" : ct.split("/")[1];
+        const at = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? Math.floor((/* @__PURE__ */ new Date(body.date + "T12:00:00Z")).getTime() / 1e3) : Math.floor(Date.now() / 1e3);
+        const r0 = await env.DB.prepare("INSERT INTO offer_meta (to_email, kind, variant, variant_name, price, sent_by, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?)").bind(to, kind, String(body.variant || "").slice(0, 120) || null, Number(body.price) || null, who.email, at).run();
+        const id = r0.meta && r0.meta.last_row_id, key = "offers/" + id + "-up-" + crypto.randomUUID().slice(0, 8) + "." + ext;
+        const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        await env.RECORDINGS.put(key, bin, { httpMetadata: { contentType: ct === "text/html" ? "text/html; charset=utf-8" : ct } });
+        await env.DB.prepare("UPDATE offer_meta SET " + (ext === "html" ? "html_key" : "pdf_key") + " = ?, subject = ?, pdf_name = ?, uploaded = 1 WHERE id = ?").bind(key, String(body.filename || "").slice(0, 160), String(body.filename || "").slice(0, 120), id).run();
+        await auditLog(env, ctx, request, who, "\u{1F4CE} dopisana oferta/umowa", "e-mail:" + to, kind);
+        return json({ ok: true, id });
       }
       if (url.pathname.startsWith("/offers/reminders")) {
         let body = {};
@@ -6414,6 +6453,22 @@ var worker_default = {
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(id).first();
           return json({ ok: true, id, send_on: r ? ofAddDays(r.start_date, -7) : null, sent_at: r && r.sent_at });
         }
+        if (url.pathname === "/offers/reminders/link-cancel" && request.method === "POST") {
+          await resLinkTable(env);
+          await env.DB.prepare("UPDATE res_links SET answered_at = ?, answer = 'cancelled' WHERE token = ? AND answered_at IS NULL").bind(Math.floor(Date.now() / 1e3), String(body.token || "")).run();
+          return json({ ok: true });
+        }
+        if (url.pathname === "/offers/reminders/link" && request.method === "POST") {
+          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(Number(body.id) || 0).first();
+          if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
+          return json(await resLinkCreate(env, r, body, who, url));
+        }
+        if (/^\/offers\/reminders\/(paid|reschedule|resign|reactivate|time|preview-mail|unreschedule)$/.test(url.pathname) && request.method === "POST") {
+          const act = url.pathname.split("/").pop(), id = Number(body.id) || 0, now = Math.floor(Date.now() / 1e3);
+          const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(id).first();
+          if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
+          return json(await ofLifecycle(env, r, act, body, who, now));
+        }
         if (url.pathname === "/offers/reminders/send-now" && request.method === "POST") {
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(Number(body.id) || 0).first();
           if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
@@ -6427,7 +6482,7 @@ var worker_default = {
           await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
           return json({ ok: true });
         }
-        const rs = await env.DB.prepare("SELECT id, to_email, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 100").all();
+        const rs = await env.DB.prepare("SELECT id, to_email, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
         try {
           const ra = (await env.DB.prepare("SELECT id, remind_at FROM course_reminders WHERE remind_at IS NOT NULL").all()).results || [];
           const m = {};
@@ -6452,6 +6507,33 @@ var worker_default = {
                 await pg.end();
               } catch (e) {
               }
+            }
+          }
+        } catch (e) {
+        }
+        try {
+          await resLinkTable(env);
+          const ls = (await env.DB.prepare("SELECT token, reminder_id, kind, payload, created_at, answered_at, answer, answer_note FROM res_links ORDER BY created_at DESC LIMIT 400").all()).results || [];
+          for (const x of rs.results || []) x.links = ls.filter((l) => l.reminder_id === x.id && l.answer !== "cancelled").slice(0, 5).map((l) => {
+            let pl = {};
+            try {
+              pl = JSON.parse(l.payload || "{}");
+            } catch (e) {
+            }
+            return { kind: l.kind, at: l.created_at, answered_at: l.answered_at, answer: l.answer, note: l.answer_note, new_start: pl.new_start || null, token: l.token };
+          });
+        } catch (e) {
+        }
+        try {
+          await sstTable(env);
+          const ems = [...new Set((rs.results || []).map((x) => String(x.to_email || "").toLowerCase()).filter(Boolean))];
+          for (let i = 0; i < ems.length; i += 80) {
+            const ch = ems.slice(i, i + 80);
+            const docs = (await env.DB.prepare(`SELECT id, to_email, kind, variant_name, price, created_at, html_key, pdf_key, uploaded, pdf_name FROM offer_meta WHERE to_email IN (${ch.map(() => "?").join(",")}) ORDER BY created_at DESC`).bind(...ch).all()).results || [];
+            for (const x of rs.results || []) {
+              const e = String(x.to_email || "").toLowerCase();
+              if (ch.indexOf(e) < 0) continue;
+              x.docs = docs.filter((d) => d.to_email === e && (d.html_key || d.pdf_key)).slice(0, 8).map((d) => ({ id: d.id, kind: d.kind, variant: d.variant_name, price: d.price, at: d.created_at, pdf: !!d.pdf_key, html: !!d.html_key, up: !!d.uploaded, name: d.uploaded ? d.pdf_name : null }));
             }
           }
         } catch (e) {
@@ -11006,7 +11088,29 @@ function ofReminderTo(env) {
 __name(ofReminderTo, "ofReminderTo");
 async function ofTables(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS course_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, student_name TEXT, start_date TEXT NOT NULL, child INTEGER, created_by TEXT, created_at INTEGER, sent_at INTEGER, cancelled INTEGER DEFAULT 0, error TEXT, deposit_at INTEGER, deposit_by TEXT)").run();
-  for (const c of ["deposit_at INTEGER", "deposit_by TEXT", "remind_at INTEGER", "remind_by TEXT", "lang TEXT"]) {
+  for (const c of [
+    "deposit_at INTEGER",
+    "deposit_by TEXT",
+    "remind_at INTEGER",
+    "remind_by TEXT",
+    "lang TEXT",
+    // 💳 płatność za kurs, ⏰ godzina startu, 📅 zmiany terminu, ❌ rezygnacja/odwołanie, 🗒 historia zdarzeń (JSON)
+    "start_time TEXT",
+    "price INTEGER",
+    "deposit INTEGER",
+    "currency TEXT",
+    "paid_total INTEGER",
+    "paid_at INTEGER",
+    "paid_by TEXT",
+    "paid_amount TEXT",
+    "paid_method TEXT",
+    "paid_rest TEXT",
+    "status TEXT",
+    "status_at INTEGER",
+    "status_note TEXT",
+    "orig_start TEXT",
+    "events TEXT"
+  ]) {
     try {
       await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
     } catch (e) {
@@ -11366,6 +11470,11 @@ async function handleOfferSend(request, env) {
     await ofTables(env);
     await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE LOWER(to_email) = LOWER(?) AND start_date = ? AND sent_at IS NULL AND deposit_at IS NULL AND COALESCE(cancelled, 0) = 0").bind(to, rm.start).run();
     const r = await env.DB.prepare("INSERT INTO course_reminders (to_email, student_name, start_date, child, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(to, String(rm.name || "").slice(0, 120), rm.start, rm.child ? 1 : 0, who.email, Math.floor(Date.now() / 1e3)).run();
+    try {
+      const nid = r.meta && r.meta.last_row_id;
+      if (nid && (Number(rm.price) > 0 || Number(rm.deposit) > 0)) await env.DB.prepare("UPDATE course_reminders SET price = ?, deposit = ?, currency = ?, lang = COALESCE(lang, ?) WHERE id = ?").bind(Math.round(Number(rm.price) || 0) || null, Math.round(Number(rm.deposit) || 0) || null, rm.currency === "EUR" ? "EUR" : "PLN", /^(pl|sk|cs|en)$/.test(String(rm.lang || "")) ? rm.lang : null, nid).run();
+    } catch (e) {
+    }
     reminder = { id: r.meta && r.meta.last_row_id, start: rm.start, on: ofAddDays(rm.start, -7), to: ofReminderTo(env) };
   }
   return json({ ok: true, to, id: s.id, from: account, reminder });
@@ -11516,9 +11625,492 @@ function ofT(lang) {
   return OF_TXT[ofLang(lang)];
 }
 __name(ofT, "ofT");
-function ofCourseInfoHtml(start, lang) {
-  const L = "color:#1a4fd6;", T = ofT(lang);
-  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222"><p>' + T.infHi + "</p><p>" + T.inf1.replace("%d", ofDateL(start, lang)) + '</p><p style="margin-top:16px"><b>' + T.pay + '</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li>' + T.payT.replace("%p", ofDateL(ofAddDays(start, -3), lang)) + "</li><li>" + T.payC + "</li></ul><p><b>" + T.take + '</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li>' + T.note + "</li><li>" + T.shoes + "</li></ul><p>" + T.see + "</p><p><b>" + T.park + '</b><br><a href="https://www.google.com/maps/d/u/0/edit?mid=1H5gc1803KRf8s34QoN37T_PXqxMkoWA&usp=sharing" style="' + L + '">' + T.parkL + "</a></p><p>Szko\u0142a Nowej Mowy<br>Rynek 3/1A, Miko\u0142\xF3w</p></div>";
+var OF_X = {
+  pl: {
+    paidAmt: "Kwota wp\u0142aty: <b>%a</b>.",
+    resRule: "Zgodnie z umow\u0105 (punkt \u201EZmiana terminu / rezygnacja z kursu\u201D) przy zmianie terminu wp\u0142acony zadatek co do zasady nie podlega zwrotowi \u2014 wyj\u0105tkiem jest wypadek lub choroba uniemo\u017Cliwiaj\u0105ca udzia\u0142 w kursie.",
+    resExc: "Ze wzgl\u0119du na wyj\u0105tkowe okoliczno\u015Bci (%w) zgodzili\u015Bmy si\u0119 na zmian\u0119 terminu.",
+    why: { illness: "choroba", accident: "wypadek", other: "sytuacja losowa" },
+    inf1p: "Ju\u017C <b>%d</b> rozpoczynamy Kurs Nowej Mowy. Poni\u017Cej przesy\u0142amy najwa\u017Cniejsze informacje organizacyjne i o przygotowaniu do zaj\u0119\u0107.",
+    startAt: "Start kursu: godz. <b>%t</b> \u2014 Szko\u0142a Nowej Mowy, Rynek 3/1A, Miko\u0142\xF3w.",
+    infPaid: "Kurs jest <b>op\u0142acony w ca\u0142o\u015Bci</b> \u2014 dzi\u0119kujemy! Na miejscu nie trzeba ju\u017C niczego dop\u0142aca\u0107.",
+    paidT: "\u2705 Potwierdzenie p\u0142atno\u015Bci",
+    paidS: "Potwierdzenie p\u0142atno\u015Bci \u2014 Kurs Nowej Mowy od %d",
+    paid1: 'zaksi\u0119gowali\u015Bmy p\u0142atno\u015B\u0107 za <b>Kurs Nowej Mowy od <span style="color:#D9822B">%d</span></b>. Dzi\u0119kujemy!',
+    paid2: "Tym samym potwierdzamy %w w kursie.",
+    paidRest: "Pozosta\u0142a kwota do zap\u0142aty: <b>%r</b>.",
+    resT: "\u{1F4C5} Zmiana terminu kursu",
+    resS: "Zmiana terminu \u2014 Kurs Nowej Mowy od %d",
+    res1s: "zgodnie z naszymi ustaleniami zmieniamy termin kursu.",
+    res1x: "z przykro\u015Bci\u0105 informujemy, \u017Ce z przyczyn le\u017C\u0105cych po stronie szko\u0142y musimy zmieni\u0107 termin kursu. Przepraszamy za utrudnienia.",
+    resFrom: "Dotychczasowy termin: <s>%o</s>",
+    resTo: 'Nowy termin: <b style="color:#D9822B">%d</b>',
+    resMoney: "Wp\u0142acone \u015Brodki (%m) zostaj\u0105 <b>zaliczone na poczet nowego terminu</b>.",
+    mDep: "zadatek",
+    mAll: "ca\u0142a op\u0142ata za kurs",
+    mSome: "wp\u0142acona kwota",
+    resInfo: "Na 7 dni przed nowym terminem prze\u015Blemy wiadomo\u015B\u0107 z informacjami organizacyjnymi.",
+    canT: "Rezygnacja z kursu",
+    canS: "Rezygnacja \u2014 Kurs Nowej Mowy od %d",
+    can1: "potwierdzamy rezygnacj\u0119 z <b>Kursu Nowej Mowy od %d</b>.",
+    canForfeit: "Zgodnie z umow\u0105 wp\u0142acony zadatek nie podlega zwrotowi.",
+    canRefund: "Ze wzgl\u0119du na wyj\u0105tkowe okoliczno\u015Bci wp\u0142acone \u015Brodki zostan\u0105 zwr\xF3cone.",
+    canCredit: "Wp\u0142acone \u015Brodki zachowujemy \u2014 mo\u017Cna je wykorzysta\u0107 przy zapisie na kolejny termin kursu.",
+    schT: "Odwo\u0142anie kursu",
+    schS: "Odwo\u0142anie kursu \u2014 Kurs Nowej Mowy od %d",
+    sch1: "z przykro\u015Bci\u0105 informujemy, \u017Ce <b>Kurs Nowej Mowy od %d</b> nie odb\u0119dzie si\u0119 z przyczyn le\u017C\u0105cych po stronie szko\u0142y. Bardzo przepraszamy.",
+    sch2: "Skontaktujemy si\u0119, aby zaproponowa\u0107 nowy termin. Wp\u0142acone \u015Brodki zostan\u0105 zaliczone na nowy termin albo \u2014 je\u015Bli wolisz \u2014 zwr\xF3cone.",
+    note: "Uwagi:",
+    q: "W razie pyta\u0144 \u2014 wystarczy odpisa\u0107 na tego maila."
+  },
+  sk: {
+    paidAmt: "Suma platby: <b>%a</b>.",
+    resRule: "Pod\u013Ea zmluvy (bod \u201EZmena term\xEDnu / zru\u0161enie kurzu\u201C) sa pri zmene term\xEDnu uhraden\xE1 z\xE1loha spravidla nevracia \u2014 v\xFDnimkou je \xFAraz alebo choroba, ktor\xE1 znemo\u017E\u0148uje \xFA\u010Das\u0165 na kurze.",
+    resExc: "Vzh\u013Eadom na v\xFDnimo\u010Dn\xE9 okolnosti (%w) sme so zmenou term\xEDnu s\xFAhlasili.",
+    why: { illness: "choroba", accident: "\xFAraz", other: "nepredv\xEDdan\xE1 situ\xE1cia" },
+    inf1p: "U\u017E <b>%d</b> za\u010D\xEDname kurz Nowa Mowa. Ni\u017E\u0161ie posielame najd\xF4le\u017Eitej\u0161ie organiza\u010Dn\xE9 inform\xE1cie a ako sa pripravi\u0165 na tr\xE9ning.",
+    startAt: "Za\u010Diatok kurzu: o <b>%t</b> \u2014 Szko\u0142a Nowej Mowy, Rynek 3/1A, Miko\u0142\xF3w.",
+    infPaid: "Kurz je <b>zaplaten\xFD v plnej v\xFD\u0161ke</b> \u2014 \u010Fakujeme! Na mieste u\u017E netreba ni\u010D dopl\xE1ca\u0165.",
+    paidT: "\u2705 Potvrdenie platby",
+    paidS: "Potvrdenie platby \u2014 kurz Nowa Mowa od %d",
+    paid1: 'za\xFA\u010Dtovali sme platbu za <b>kurz Nowa Mowa od <span style="color:#D9822B">%d</span></b>. \u010Eakujeme!',
+    paid2: "T\xFDm potvrdzujeme %w v kurze.",
+    paidRest: "Zost\xE1vaj\xFAca suma na \xFAhradu: <b>%r</b>.",
+    resT: "\u{1F4C5} Zmena term\xEDnu kurzu",
+    resS: "Zmena term\xEDnu \u2014 kurz Nowa Mowa od %d",
+    res1s: "pod\u013Ea na\u0161ej dohody men\xEDme term\xEDn kurzu.",
+    res1x: "s \u013E\xFAtos\u0165ou V\xE1m oznamujeme, \u017Ee z d\xF4vodov na strane \u0161koly mus\xEDme zmeni\u0165 term\xEDn kurzu. Ospravedl\u0148ujeme sa za komplik\xE1cie.",
+    resFrom: "P\xF4vodn\xFD term\xEDn: <s>%o</s>",
+    resTo: 'Nov\xFD term\xEDn: <b style="color:#D9822B">%d</b>',
+    resMoney: "Uhraden\xE9 prostriedky (%m) sa <b>zapo\u010D\xEDtaj\xFA na nov\xFD term\xEDn</b>.",
+    mDep: "z\xE1loha",
+    mAll: "cel\xE1 platba za kurz",
+    mSome: "uhraden\xE1 suma",
+    resInfo: "7 dn\xED pred nov\xFDm term\xEDnom V\xE1m po\u0161leme spr\xE1vu s organiza\u010Dn\xFDmi inform\xE1ciami.",
+    canT: "Zru\u0161enie \xFA\u010Dasti na kurze",
+    canS: "Zru\u0161enie \xFA\u010Dasti \u2014 kurz Nowa Mowa od %d",
+    can1: "potvrdzujeme zru\u0161enie \xFA\u010Dasti na <b>kurze Nowa Mowa od %d</b>.",
+    canForfeit: "Pod\u013Ea zmluvy sa uhraden\xE1 z\xE1loha nevracia.",
+    canRefund: "Vzh\u013Eadom na v\xFDnimo\u010Dn\xE9 okolnosti V\xE1m uhraden\xE9 prostriedky vr\xE1time.",
+    canCredit: "Uhraden\xE9 prostriedky ponech\xE1vame \u2014 m\xF4\u017Eete ich vyu\u017Ei\u0165 pri prihl\xE1sen\xED na \u010Fal\u0161\xED term\xEDn kurzu.",
+    schT: "Zru\u0161enie kurzu",
+    schS: "Zru\u0161enie kurzu \u2014 kurz Nowa Mowa od %d",
+    sch1: "s \u013E\xFAtos\u0165ou V\xE1m oznamujeme, \u017Ee <b>kurz Nowa Mowa od %d</b> sa z d\xF4vodov na strane \u0161koly neuskuto\u010Dn\xED. Ve\u013Emi sa ospravedl\u0148ujeme.",
+    sch2: "Ozveme sa V\xE1m s n\xE1vrhom nov\xE9ho term\xEDnu. Uhraden\xE9 prostriedky sa zapo\u010D\xEDtaj\xFA na nov\xFD term\xEDn alebo V\xE1m ich \u2014 ak chcete \u2014 vr\xE1time.",
+    note: "Pozn\xE1mky:",
+    q: "Ak m\xE1te ot\xE1zky, sta\u010D\xED odpoveda\u0165 na tento e-mail."
+  },
+  cs: {
+    paidAmt: "\u010C\xE1stka platby: <b>%a</b>.",
+    resRule: "Podle smlouvy (bod \u201EZm\u011Bna term\xEDnu / zru\u0161en\xED kurzu\u201C) se p\u0159i zm\u011Bn\u011B term\xEDnu uhrazen\xE1 z\xE1loha zpravidla nevrac\xED \u2014 v\xFDjimkou je \xFAraz nebo nemoc, kter\xE1 znemo\u017E\u0148uje \xFA\u010Dast na kurzu.",
+    resExc: "Vzhledem k v\xFDjime\u010Dn\xFDm okolnostem (%w) jsme se zm\u011Bnou term\xEDnu souhlasili.",
+    why: { illness: "nemoc", accident: "\xFAraz", other: "nep\u0159edv\xEDdan\xE1 situace" },
+    inf1p: "U\u017E <b>%d</b> za\u010D\xEDn\xE1me kurz Nowa Mowa. N\xED\u017Ee pos\xEDl\xE1me nejd\u016Fle\u017Eit\u011Bj\u0161\xED organiza\u010Dn\xED informace a jak se p\u0159ipravit na tr\xE9nink.",
+    startAt: "Za\u010D\xE1tek kurzu: v <b>%t</b> \u2014 Szko\u0142a Nowej Mowy, Rynek 3/1A, Miko\u0142\xF3w.",
+    infPaid: "Kurz je <b>zaplacen v pln\xE9 v\xFD\u0161i</b> \u2014 d\u011Bkujeme! Na m\xEDst\u011B u\u017E nen\xED pot\u0159eba nic dopl\xE1cet.",
+    paidT: "\u2705 Potvrzen\xED platby",
+    paidS: "Potvrzen\xED platby \u2014 kurz Nowa Mowa od %d",
+    paid1: 'za\xFA\u010Dtovali jsme platbu za <b>kurz Nowa Mowa od <span style="color:#D9822B">%d</span></b>. D\u011Bkujeme!',
+    paid2: "T\xEDm potvrzujeme %w v kurzu.",
+    paidRest: "Zb\xFDvaj\xEDc\xED \u010D\xE1stka k \xFAhrad\u011B: <b>%r</b>.",
+    resT: "\u{1F4C5} Zm\u011Bna term\xEDnu kurzu",
+    resS: "Zm\u011Bna term\xEDnu \u2014 kurz Nowa Mowa od %d",
+    res1s: "podle na\u0161\xED domluvy m\u011Bn\xEDme term\xEDn kurzu.",
+    res1x: "s l\xEDtost\xED V\xE1m oznamujeme, \u017Ee z d\u016Fvod\u016F na stran\u011B \u0161koly mus\xEDme zm\u011Bnit term\xEDn kurzu. Omlouv\xE1me se za komplikace.",
+    resFrom: "P\u016Fvodn\xED term\xEDn: <s>%o</s>",
+    resTo: 'Nov\xFD term\xEDn: <b style="color:#D9822B">%d</b>',
+    resMoney: "Uhrazen\xE9 prost\u0159edky (%m) se <b>zapo\u010D\xEDtaj\xED na nov\xFD term\xEDn</b>.",
+    mDep: "z\xE1loha",
+    mAll: "cel\xE1 platba za kurz",
+    mSome: "uhrazen\xE1 \u010D\xE1stka",
+    resInfo: "7 dn\xED p\u0159ed nov\xFDm term\xEDnem V\xE1m po\u0161leme zpr\xE1vu s organiza\u010Dn\xEDmi informacemi.",
+    canT: "Zru\u0161en\xED \xFA\u010Dasti na kurzu",
+    canS: "Zru\u0161en\xED \xFA\u010Dasti \u2014 kurz Nowa Mowa od %d",
+    can1: "potvrzujeme zru\u0161en\xED \xFA\u010Dasti na <b>kurzu Nowa Mowa od %d</b>.",
+    canForfeit: "Podle smlouvy se uhrazen\xE1 z\xE1loha nevrac\xED.",
+    canRefund: "Vzhledem k v\xFDjime\u010Dn\xFDm okolnostem V\xE1m uhrazen\xE9 prost\u0159edky vr\xE1t\xEDme.",
+    canCredit: "Uhrazen\xE9 prost\u0159edky ponech\xE1v\xE1me \u2014 m\u016F\u017Eete je vyu\u017E\xEDt p\u0159i p\u0159ihl\xE1\u0161en\xED na dal\u0161\xED term\xEDn kurzu.",
+    schT: "Zru\u0161en\xED kurzu",
+    schS: "Zru\u0161en\xED kurzu \u2014 kurz Nowa Mowa od %d",
+    sch1: "s l\xEDtost\xED V\xE1m oznamujeme, \u017Ee <b>kurz Nowa Mowa od %d</b> se z d\u016Fvod\u016F na stran\u011B \u0161koly neuskute\u010Dn\xED. Velmi se omlouv\xE1me.",
+    sch2: "Ozveme se V\xE1m s n\xE1vrhem nov\xE9ho term\xEDnu. Uhrazen\xE9 prost\u0159edky se zapo\u010D\xEDtaj\xED na nov\xFD term\xEDn, nebo V\xE1m je \u2014 pokud chcete \u2014 vr\xE1t\xEDme.",
+    note: "Pozn\xE1mky:",
+    q: "Pokud m\xE1te dotazy, sta\u010D\xED odpov\u011Bd\u011Bt na tento e-mail."
+  },
+  en: {
+    paidAmt: "Amount paid: <b>%a</b>.",
+    resRule: "Under the agreement (section \u201CChange of date / cancellation\u201D), the deposit is generally non-refundable when the date is changed \u2014 the exception is an accident or illness preventing participation in the course.",
+    resExc: "Due to the exceptional circumstances (%w), we have agreed to change the date.",
+    why: { illness: "illness", accident: "accident", other: "unforeseen situation" },
+    inf1p: "On <b>%d</b> we start the Nowa Mowa course. Below you will find the most important organisational information and how to prepare for the sessions.",
+    startAt: "Course start: <b>%t</b> \u2014 Szko\u0142a Nowej Mowy, Rynek 3/1A, Miko\u0142\xF3w.",
+    infPaid: "The course is <b>paid in full</b> \u2014 thank you! Nothing more needs to be paid on site.",
+    paidT: "\u2705 Payment confirmation",
+    paidS: "Payment confirmation \u2014 Nowa Mowa course from %d",
+    paid1: 'we have received your payment for the <b>Nowa Mowa course starting <span style="color:#D9822B">%d</span></b>. Thank you!',
+    paid2: "We hereby confirm %w on the course.",
+    paidRest: "Remaining amount to pay: <b>%r</b>.",
+    resT: "\u{1F4C5} Course date change",
+    resS: "Date change \u2014 Nowa Mowa course from %d",
+    res1s: "as agreed, we are changing the date of your course.",
+    res1x: "we regret to inform you that, for reasons on the school's side, we have to change the date of the course. We apologise for the inconvenience.",
+    resFrom: "Previous date: <s>%o</s>",
+    resTo: 'New date: <b style="color:#D9822B">%d</b>',
+    resMoney: "The amount already paid (%m) is <b>credited towards the new date</b>.",
+    mDep: "deposit",
+    mAll: "full course fee",
+    mSome: "amount paid",
+    resInfo: "7 days before the new date we will send you a message with organisational information.",
+    canT: "Course cancellation",
+    canS: "Cancellation \u2014 Nowa Mowa course from %d",
+    can1: "we confirm your cancellation of the <b>Nowa Mowa course starting %d</b>.",
+    canForfeit: "In accordance with the agreement, the deposit paid is non-refundable.",
+    canRefund: "Due to the exceptional circumstances, the amount paid will be refunded.",
+    canCredit: "We keep the amount paid \u2014 it can be used when you sign up for a future course date.",
+    schT: "Course cancelled",
+    schS: "Course cancelled \u2014 Nowa Mowa course from %d",
+    sch1: "we regret to inform you that the <b>Nowa Mowa course starting %d</b> will not take place for reasons on the school's side. We sincerely apologise.",
+    sch2: "We will contact you to propose a new date. The amount paid will be credited towards the new date or \u2014 if you prefer \u2014 refunded.",
+    note: "Notes:",
+    q: "If you have any questions, simply reply to this email."
+  }
+};
+function ofX(lang) {
+  return OF_X[ofLang(lang)];
+}
+__name(ofX, "ofX");
+function ofMailWrap(title, inner) {
+  return '<div style="background:#f4f1ed;padding:16px 8px;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden"><tr><td style="background:#1E1E1E;padding:16px 24px;border-top:6px solid #F5A623"><span style="color:#F5A623;font-size:12px;letter-spacing:2px;font-weight:bold">SZKO\u0141A NOWEJ MOWY</span><div style="color:#fff;font-size:20px;font-weight:bold;margin-top:2px">' + title + '</div></td></tr><tr><td style="padding:22px 24px;font-size:15px;line-height:1.6;color:#2b2b2b">' + inner + '<p style="margin:16px 0 0"><b>Szko\u0142a Nowej Mowy</b><br><span style="color:#8C7A5C">Rynek 3/1A, Miko\u0142\xF3w</span></p></td></tr></table></div>';
+}
+__name(ofMailWrap, "ofMailWrap");
+function ofHiWho(r) {
+  const T = ofT(r.lang), first = String(r.student_name || "").trim().split(/\s+/)[0] || "";
+  const hi = r.child ? T.hiC : first ? T.hiA.replace("%n", first) : T.hi0;
+  const who = r.child ? first && ofLang(r.lang) === "pl" ? T.whoC.replace("%g", pwGen(first)) : T.whoC0 : T.whoA;
+  return { hi, who };
+}
+__name(ofHiWho, "ofHiWho");
+function ofLifeMail(r, kind, o) {
+  const X = ofX(r.lang), T = ofT(r.lang), L = r.lang, P = /* @__PURE__ */ __name((t) => '<p style="margin:0 0 12px">' + t + "</p>", "P"), hw = ofHiWho(r);
+  const d = ofEsc(ofDateL(r.start_date, L, true)), tm = r.start_time ? P("\u23F0 " + X.startAt.replace("%t", ofEsc(r.start_time))) : "";
+  const note = o.note_mail ? P("<b>" + X.note + "</b> " + ofEsc(o.note_mail)) : "";
+  if (kind === "paid") return { subject: X.paidS.replace("%d", ofDateL(r.start_date, L, true)), html: ofMailWrap(X.paidT, P(ofEsc(hw.hi)) + P(X.paid1.replace("%d", d) + (r.paid_amount ? " " + X.paidAmt.replace("%a", ofEsc(r.paid_amount)) : "")) + P(X.paid2.replace("%w", ofEsc(hw.who))) + tm + (String(r.paid_rest || "").trim() ? P(X.paidRest.replace("%r", ofEsc(r.paid_rest))) : "") + note + P(T.q) + '<p style="margin:16px 0 0">' + T.bye + "</p>") };
+  if (kind === "reschedule") {
+    const m = r.paid_at && !String(r.paid_rest || "").trim() ? X.mAll : r.paid_at ? X.mSome : r.deposit_at ? X.mDep : "";
+    return { subject: X.resS.replace("%d", ofDateL(r.start_date, L, true)), html: ofMailWrap(X.resT, P(ofEsc(hw.hi)) + P(o.school ? X.res1x : X.res1s) + P(X.resFrom.replace("%o", ofEsc(ofDateL(o.old_start, L, true))) + "<br>" + X.resTo.replace("%d", d)) + tm + (!o.school ? P(X.resRule + " " + X.resExc.replace("%w", X.why[o.why] || X.why.other)) : "") + (m ? P(X.resMoney.replace("%m", m)) : "") + P(X.resInfo) + note + P(T.q) + '<p style="margin:16px 0 0">' + T.bye + "</p>") };
+  }
+  if (kind === "resign") {
+    if (o.kind === "school") return { subject: X.schS.replace("%d", ofDateL(r.start_date, L, true)), html: ofMailWrap(X.schT, P(ofEsc(hw.hi)) + P(X.sch1.replace("%d", d)) + P(X.sch2) + note + P(T.q)) };
+    const money = o.kind === "refund" ? X.canRefund : o.kind === "credit" ? X.canCredit : r.deposit_at || r.paid_at ? X.canForfeit : "";
+    return { subject: X.canS.replace("%d", ofDateL(r.start_date, L, true)), html: ofMailWrap(X.canT, P(ofEsc(hw.hi)) + P(X.can1.replace("%d", d)) + (money ? P(money) : "") + note + P(T.q)) };
+  }
+  return null;
+}
+__name(ofLifeMail, "ofLifeMail");
+var RES_LINK_READY = false;
+async function resLinkTable(env) {
+  if (RES_LINK_READY) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS res_links (token TEXT PRIMARY KEY, reminder_id INTEGER, kind TEXT, payload TEXT, created_by TEXT, created_at INTEGER, answered_at INTEGER, answer TEXT, answer_note TEXT)").run();
+  RES_LINK_READY = true;
+}
+__name(resLinkTable, "resLinkTable");
+var RL_TXT = {
+  pl: {
+    t: { contract: "Akceptacja umowy", reschedule: "Zmiana terminu kursu", attend: "Potwierdzenie udzia\u0142u w kursie" },
+    hi: "Dzie\u0144 dobry",
+    course: "Kurs Nowej Mowy",
+    contract: "Prosimy o zapoznanie si\u0119 z umow\u0105 i regulaminem kursu od <b>%d</b> i potwierdzenie jednym klikni\u0119ciem.",
+    view: "\u{1F4C4} Zobacz umow\u0119 (PDF)",
+    yesC: "\u2705 Przeczyta\u0142em/am, akceptuj\u0119",
+    reschedule: "Proponujemy zmian\u0119 terminu kursu:",
+    from: "Dotychczasowy termin",
+    to: "Nowy termin",
+    yesR: "\u2705 Akceptuj\u0119 nowy termin",
+    money: "Wp\u0142acone \u015Brodki zostan\u0105 zaliczone na poczet nowego terminu.",
+    attend: "Potwierd\u017A, prosz\u0119, udzia\u0142 w kursie od <b>%d</b>.",
+    yesA: "\u2705 Potwierdzam udzia\u0142",
+    no: "\u2716 Nie pasuje \u2014 napisz\u0119 do trenera",
+    note: "Wiadomo\u015B\u0107 dla trenera (opcjonalnie)",
+    thanksY: "Dzi\u0119kujemy! Potwierdzenie dotar\u0142o do trenera. \u{1F642}",
+    thanksN: "Dzi\u0119kujemy \u2014 przekazali\u015Bmy informacj\u0119 trenerowi, odezwie si\u0119 wkr\xF3tce.",
+    done: "Ten link zosta\u0142 ju\u017C u\u017Cyty",
+    gone: "Link wygas\u0142 lub jest nieprawid\u0142owy",
+    at: "o godz."
+  },
+  sk: {
+    t: { contract: "Prijatie zmluvy", reschedule: "Zmena term\xEDnu kurzu", attend: "Potvrdenie \xFA\u010Dasti na kurze" },
+    hi: "Dobr\xFD de\u0148",
+    course: "kurz Nowa Mowa",
+    contract: "Pros\xEDme, pre\u010D\xEDtajte si zmluvu a pravidl\xE1 kurzu od <b>%d</b> a potvr\u010Fte ich jedn\xFDm kliknut\xEDm.",
+    view: "\u{1F4C4} Zobrazi\u0165 zmluvu (PDF)",
+    yesC: "\u2705 Pre\u010D\xEDtal/a som, s\xFAhlas\xEDm",
+    reschedule: "Navrhujeme zmenu term\xEDnu kurzu:",
+    from: "P\xF4vodn\xFD term\xEDn",
+    to: "Nov\xFD term\xEDn",
+    yesR: "\u2705 S\xFAhlas\xEDm s nov\xFDm term\xEDnom",
+    money: "Uhraden\xE9 prostriedky sa zapo\u010D\xEDtaj\xFA na nov\xFD term\xEDn.",
+    attend: "Potvr\u010Fte, pros\xEDm, \xFA\u010Das\u0165 na kurze od <b>%d</b>.",
+    yesA: "\u2705 Potvrdzujem \xFA\u010Das\u0165",
+    no: "\u2716 Nevyhovuje \u2014 nap\xED\u0161em tr\xE9nerovi",
+    note: "Spr\xE1va pre tr\xE9nera (nepovinn\xE9)",
+    thanksY: "\u010Eakujeme! Potvrdenie dostal tr\xE9ner. \u{1F642}",
+    thanksN: "\u010Eakujeme \u2014 tr\xE9ner sa V\xE1m \u010Doskoro ozve.",
+    done: "Tento odkaz u\u017E bol pou\u017Eit\xFD",
+    gone: "Odkaz vypr\u0161al alebo je neplatn\xFD",
+    at: "o"
+  },
+  cs: {
+    t: { contract: "P\u0159ijet\xED smlouvy", reschedule: "Zm\u011Bna term\xEDnu kurzu", attend: "Potvrzen\xED \xFA\u010Dasti na kurzu" },
+    hi: "Dobr\xFD den",
+    course: "kurz Nowa Mowa",
+    contract: "Pros\xEDme, p\u0159e\u010Dt\u011Bte si smlouvu a pravidla kurzu od <b>%d</b> a potvr\u010Fte je jedn\xEDm kliknut\xEDm.",
+    view: "\u{1F4C4} Zobrazit smlouvu (PDF)",
+    yesC: "\u2705 P\u0159e\u010Detl/a jsem, souhlas\xEDm",
+    reschedule: "Navrhujeme zm\u011Bnu term\xEDnu kurzu:",
+    from: "P\u016Fvodn\xED term\xEDn",
+    to: "Nov\xFD term\xEDn",
+    yesR: "\u2705 Souhlas\xEDm s nov\xFDm term\xEDnem",
+    money: "Uhrazen\xE9 prost\u0159edky se zapo\u010D\xEDtaj\xED na nov\xFD term\xEDn.",
+    attend: "Potvr\u010Fte pros\xEDm \xFA\u010Dast na kurzu od <b>%d</b>.",
+    yesA: "\u2705 Potvrzuji \xFA\u010Dast",
+    no: "\u2716 Nevyhovuje \u2014 nap\xED\u0161u tren\xE9rovi",
+    note: "Zpr\xE1va pro tren\xE9ra (nepovinn\xE9)",
+    thanksY: "D\u011Bkujeme! Potvrzen\xED dostal tren\xE9r. \u{1F642}",
+    thanksN: "D\u011Bkujeme \u2014 tren\xE9r se V\xE1m brzy ozve.",
+    done: "Tento odkaz u\u017E byl pou\u017Eit",
+    gone: "Odkaz vypr\u0161el nebo je neplatn\xFD",
+    at: "v"
+  },
+  en: {
+    t: { contract: "Agreement acceptance", reschedule: "Course date change", attend: "Course attendance confirmation" },
+    hi: "Hello",
+    course: "Nowa Mowa course",
+    contract: "Please read the agreement and course rules for the course starting <b>%d</b> and confirm with one click.",
+    view: "\u{1F4C4} View the agreement (PDF)",
+    yesC: "\u2705 I have read and accept it",
+    reschedule: "We propose a new date for your course:",
+    from: "Previous date",
+    to: "New date",
+    yesR: "\u2705 I accept the new date",
+    money: "The amount already paid will be credited towards the new date.",
+    attend: "Please confirm your attendance on the course starting <b>%d</b>.",
+    yesA: "\u2705 I confirm",
+    no: "\u2716 Doesn't suit me \u2014 I'll message the trainer",
+    note: "Message for the trainer (optional)",
+    thanksY: "Thank you! The trainer has received your confirmation. \u{1F642}",
+    thanksN: "Thank you \u2014 the trainer will get back to you soon.",
+    done: "This link has already been used",
+    gone: "The link has expired or is invalid",
+    at: "at"
+  }
+};
+async function resLinkCreate(env, r, b, who, url) {
+  await resLinkTable(env);
+  const kind = ["contract", "reschedule", "attend"].indexOf(b.kind) >= 0 ? b.kind : "attend", pl = {};
+  if (kind === "reschedule") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.new_start || "")) || b.new_start === r.start_date) return { ok: false, error: "Wybierz nowy termin (inny ni\u017C obecny)" };
+    pl.new_start = b.new_start;
+    pl.old_start = r.start_date;
+    pl.time = /^\d{1,2}:\d{2}$/.test(String(b.time || "")) ? String(b.time).padStart(5, "0") : r.start_time || null;
+    pl.initiator = b.initiator === "school" ? "school" : "student";
+    pl.why = ["illness", "accident", "other"].indexOf(b.why) >= 0 ? b.why : "other";
+    pl.mail = b.mail !== false;
+  }
+  if (kind === "contract") {
+    try {
+      await sstTable(env);
+      const d = await env.DB.prepare("SELECT id FROM offer_meta WHERE to_email = ? AND kind = 'contract' AND pdf_key IS NOT NULL ORDER BY created_at DESC LIMIT 1").bind(String(r.to_email || "").toLowerCase()).first();
+      if (d) pl.doc = d.id;
+    } catch (e) {
+    }
+  }
+  const token = crypto.randomUUID().replace(/-/g, "").slice(0, 22), now = Math.floor(Date.now() / 1e3);
+  await env.DB.prepare("INSERT INTO res_links (token, reminder_id, kind, payload, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(token, r.id, kind, JSON.stringify(pl), String(who && who.email || ""), now).run();
+  const base = String((await svfCfg(env)).public_base || url.origin).replace(/\/+$/, "");
+  return { ok: true, url: base + "/potwierdz?t=" + token, token, doc: !!pl.doc };
+}
+__name(resLinkCreate, "resLinkCreate");
+async function resLinkPage(request, env, url, ctx) {
+  await resLinkTable(env);
+  await ofTables(env);
+  let body = {};
+  if (request.method === "POST") {
+    try {
+      body = Object.fromEntries((await request.formData()).entries());
+    } catch (e) {
+    }
+  }
+  const token = String(url.searchParams.get("t") || body.t || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
+  const l = token ? await env.DB.prepare("SELECT * FROM res_links WHERE token = ?").bind(token).first() : null;
+  const r = l ? await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(l.reminder_id).first() : null;
+  const L = RL_TXT[ofLang(r && r.lang)], esc = ofEsc;
+  let pl = {};
+  try {
+    pl = JSON.parse(l && l.payload || "{}");
+  } catch (e) {
+  }
+  if (url.pathname === "/potwierdz/plik") {
+    if (!l || !pl.doc) return new Response("Brak pliku", { status: 404 });
+    await sstTable(env);
+    const d = await env.DB.prepare("SELECT pdf_key FROM offer_meta WHERE id = ?").bind(pl.doc).first();
+    const o = d && d.pdf_key ? await env.RECORDINGS.get(d.pdf_key) : null;
+    if (!o) return new Response("Brak pliku", { status: 404 });
+    return new Response(o.body, { headers: { "Content-Type": "application/pdf", "Cache-Control": "private, max-age=300" } });
+  }
+  const page = /* @__PURE__ */ __name((inner2) => new Response('<!doctype html><html lang="' + ofLang(r && r.lang) + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nowa Mowa</title><style>body{margin:0;background:#f4f1ed;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#2b2b2b}.w{max-width:520px;margin:0 auto;padding:16px}.c{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}.h{background:#1E1E1E;color:#fff;padding:16px 20px;border-top:6px solid #F5A623}.h small{color:#F5A623;letter-spacing:2px;font-weight:700;font-size:11px}.h div{font-size:20px;font-weight:700;margin-top:2px}.b{padding:20px;font-size:16px;line-height:1.55}.d{background:#FFF6E8;border-radius:10px;padding:12px 14px;margin:10px 0}.btn{display:block;width:100%;box-sizing:border-box;border:0;border-radius:10px;padding:14px;font-size:17px;font-weight:700;cursor:pointer;margin-top:10px;text-align:center;text-decoration:none}.y{background:#2E7D4F;color:#fff}.n{background:#fff;color:#8C7A5C;border:1px solid #D9CBB4;font-weight:400;font-size:15px}.v{background:#1E1E1E;color:#F5A623}textarea{width:100%;box-sizing:border-box;border:1px solid #D9CBB4;border-radius:8px;padding:10px;font:inherit;font-size:15px;margin-top:6px}</style></head><body><div class="w"><div class="c">' + inner2 + '</div><p style="text-align:center;color:#8C7A5C;font-size:12px">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w</p></div></body></html>', { headers: { "Content-Type": "text/html; charset=utf-8" } }), "page");
+  if (!l || !r) return page('<div class="h"><small>SZKO\u0141A NOWEJ MOWY</small><div>Nowa Mowa</div></div><div class="b">' + RL_TXT.pl.gone + "</div>");
+  const head = '<div class="h"><small>SZKO\u0141A NOWEJ MOWY</small><div>' + esc(L.t[l.kind] || "") + "</div></div>";
+  const dl = /* @__PURE__ */ __name((ymd, t) => esc(ofDateL(ymd, r.lang, true)) + (t ? " " + L.at + " " + esc(t) : ""), "dl");
+  if (request.method === "POST" && !l.answered_at) {
+    const ans = body.a === "yes" ? "yes" : "no", note = String(body.note || "").trim().slice(0, 1e3), now = Math.floor(Date.now() / 1e3);
+    await env.DB.prepare("UPDATE res_links SET answered_at = ?, answer = ?, answer_note = ? WHERE token = ? AND answered_at IS NULL").bind(now, ans, note, token).run();
+    let ev = [];
+    try {
+      ev = JSON.parse(r.events || "[]") || [];
+    } catch (e) {
+    }
+    ev.push({ t: now, a: "link_" + l.kind + "_" + ans, v: l.kind === "reschedule" ? pl.old_start + " \u2192 " + pl.new_start : "", n: note, by: "kursant (link)" });
+    await env.DB.prepare("UPDATE course_reminders SET events = ? WHERE id = ?").bind(JSON.stringify(ev.slice(-60)), r.id).run();
+    let applied = "";
+    if (ans === "yes" && l.kind === "reschedule") {
+      try {
+        const r2 = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(r.id).first();
+        const res = await ofLifecycle(env, r2, "reschedule", { new_start: pl.new_start, time: pl.time, initiator: pl.initiator, why: pl.why, note: "zaakceptowane przez kursanta linkiem", mail: pl.mail !== false }, { email: "kursant (link)" }, now);
+        applied = res.ok ? " \u2014 termin zmieniony w panelu" + (res.mailed ? ", kursant dosta\u0142 potwierdzenie mailem" : "") : " \u2014 \u26A0\uFE0F nie uda\u0142o si\u0119 zmieni\u0107 terminu: " + (res.error || "");
+      } catch (e) {
+        applied = " \u2014 \u26A0\uFE0F " + e.message;
+      }
+    }
+    try {
+      await ensureGoogleTables(env);
+      const account = await appSettingGet(env, "google_account") || "";
+      const nm = r.student_name || r.to_email, what = { contract: "umow\u0119", reschedule: "zmian\u0119 terminu (" + ofDateL(pl.new_start || r.start_date, "pl", true) + ")", attend: "udzia\u0142 w kursie" }[l.kind];
+      const subj = ans === "yes" ? "\u2705 " + nm + " akceptuje " + what : "\u2716 " + nm + " \u2014 nie akceptuje: " + what;
+      const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55"><p><b>' + esc(subj) + "</b>" + esc(applied) + "</p><p>Kurs od: " + esc(ofDateL(r.start_date, "pl", true)) + " \xB7 " + esc(r.to_email) + "</p>" + (note ? "<p>Wiadomo\u015B\u0107: \u201E" + esc(note) + "\u201D</p>" : "") + "<p>Rezerwacje: panel trenera \u2192 Oferty i umowy \u2192 \u{1F4CB} Rezerwacje.</p></div>";
+      ctx.waitUntil(ofGmailSend(env, ofMime({ from: account, fromName: "Panel Nowej Mowy", to: ofReminderTo(env), replyTo: r.to_email, subject: subj, html })).catch(() => {
+      }));
+    } catch (e) {
+    }
+    return page(head + '<div class="b"><p style="font-size:18px">' + (ans === "yes" ? L.thanksY : L.thanksN) + "</p></div>");
+  }
+  if (l.answered_at) return page(head + '<div class="b"><p>' + (l.answer === "cancelled" ? L.gone : L.done + (l.answer === "yes" ? " \u2705" : "")) + ".</p></div>");
+  const first = String(r.student_name || "").trim().split(/\s+/)[0] || "";
+  let inner = "<p>" + L.hi + (first && !r.child ? " " + esc(first) : "") + ",</p>", yes = L.yesA;
+  if (l.kind === "contract") {
+    inner += "<p>" + L.contract.replace("%d", dl(r.start_date)) + "</p>" + (pl.doc ? '<a class="btn v" href="/potwierdz/plik?t=' + token + '" target="_blank">' + L.view + "</a>" : "");
+    yes = L.yesC;
+  } else if (l.kind === "reschedule") {
+    inner += "<p>" + L.reschedule + '</p><div class="d">' + L.from + ": <s>" + dl(pl.old_start) + "</s><br>" + L.to + ': <b style="color:#D9822B">' + dl(pl.new_start, pl.time) + "</b></div>" + (r.deposit_at || r.paid_at ? "<p>" + L.money + "</p>" : "");
+    yes = L.yesR;
+  } else inner += "<p>" + L.attend.replace("%d", dl(r.start_date, r.start_time)) + "</p>";
+  inner += '<form method="post"><input type="hidden" name="t" value="' + token + '"><button class="btn y" name="a" value="yes">' + yes + '</button><label style="display:block;margin-top:16px;font-size:13px;color:#8C7A5C">' + L.note + '</label><textarea name="note" rows="2"></textarea><button class="btn n" name="a" value="no">' + L.no + "</button></form>";
+  return page(head + '<div class="b">' + inner + "</div>");
+}
+__name(resLinkPage, "resLinkPage");
+async function ofSendLife(env, r, mail, who) {
+  await ensureGoogleTables(env);
+  const account = await appSettingGet(env, "google_account") || "";
+  const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: mail.subject, html: mail.html }));
+  if (s.ok) {
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+      await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", r.to_email, mail.subject, String(who && who.email || ""), s.id || "", Math.floor(Date.now() / 1e3)).run();
+    } catch (e) {
+    }
+  }
+  return s;
+}
+__name(ofSendLife, "ofSendLife");
+async function ofLifecycle(env, r, act, b, who, now) {
+  let ev = [];
+  try {
+    ev = JSON.parse(r.events || "[]") || [];
+  } catch (e) {
+    ev = [];
+  }
+  const by = String(who && who.email || ""), tmOk = /* @__PURE__ */ __name((t) => /^\d{1,2}:\d{2}$/.test(String(t || "").trim()) ? String(t).trim().padStart(5, "0") : null, "tmOk");
+  const ymdOk = /* @__PURE__ */ __name((d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || "")) ? String(d) : null, "ymdOk");
+  const note = String(b.note || "").trim().slice(0, 500), noteMail = b.note_in_mail ? note : "";
+  const x = Object.assign({}, r);
+  let kind = null, opt = { note_mail: noteMail }, upd = {};
+  if (act === "time") {
+    const t = tmOk(b.time);
+    upd.start_time = t;
+    ev.push({ t: now, a: "time", v: t, by });
+  } else if (act === "paid" || act === "preview-mail" && b.kind === "paid") {
+    if (b.on === false) {
+      upd = { paid_at: null, paid_by: null, paid_amount: null, paid_method: null, paid_rest: null, paid_total: null };
+      ev.push({ t: now, a: "unpaid", by });
+    } else {
+      const pd = ymdOk(b.date), num = /* @__PURE__ */ __name((v) => {
+        const n = Math.round(Number(String(v == null ? "" : v).replace(/[^\d,.-]/g, "").replace(",", ".")));
+        return isFinite(n) && n > 0 ? n : 0;
+      }, "num");
+      const price = num(b.price) || Number(r.price) || 0, dep = b.deposit != null && String(b.deposit) !== "" ? num(b.deposit) : Number(r.deposit) || 0, cur = b.currency === "EUR" || r.currency === "EUR" ? "EUR" : "PLN";
+      const before = Number(r.paid_total) || 0, amt = num(b.amount) || (price ? Math.max(0, price - dep - before) : 0), total = before + amt;
+      const rest = price ? Math.max(0, price - dep - total) : num(b.rest), fm = /* @__PURE__ */ __name((n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (cur === "EUR" ? " \u20AC" : " z\u0142"), "fm");
+      upd = {
+        paid_at: pd ? Math.floor((/* @__PURE__ */ new Date(pd + "T12:00:00Z")).getTime() / 1e3) : now,
+        paid_by: by,
+        paid_amount: amt ? fm(amt) : String(b.amount || "").slice(0, 40) || null,
+        paid_method: String(b.method || "").slice(0, 40) || null,
+        paid_rest: rest ? fm(rest) : null,
+        paid_total: total || null,
+        price: price || null,
+        deposit: dep || null,
+        currency: cur
+      };
+      if (tmOk(b.time)) upd.start_time = tmOk(b.time);
+      ev.push({ t: now, a: "paid", v: [upd.paid_amount, upd.paid_method, upd.paid_rest ? "zosta\u0142o " + upd.paid_rest : ""].filter(Boolean).join(" \xB7 "), n: note, by });
+      kind = "paid";
+    }
+  } else if (act === "reschedule" || act === "preview-mail" && b.kind === "reschedule") {
+    const ns = ymdOk(b.new_start);
+    if (!ns) return { ok: false, error: "Podaj now\u0105 dat\u0119 startu" };
+    if (ns === r.start_date) return { ok: false, error: "Wybierz nowy termin \u2014 jest taki sam jak obecny (sam\u0105 godzin\u0119 zmienisz przyciskiem \u23F0)" };
+    opt.old_start = r.start_date;
+    opt.school = b.initiator === "school";
+    opt.why = ["illness", "accident", "other"].indexOf(b.why) >= 0 ? b.why : "other";
+    upd = { start_date: ns, orig_start: r.orig_start || r.start_date, sent_at: null, error: null, status: null, status_note: null };
+    if (tmOk(b.time)) upd.start_time = tmOk(b.time);
+    ev.push({ t: now, a: "reschedule", v: r.start_date + " \u2192 " + ns + (opt.school ? " (szko\u0142a)" : " (kursant)"), n: note, by });
+    kind = "reschedule";
+  } else if (act === "resign" || act === "preview-mail" && b.kind === "resign") {
+    const k = ["forfeit", "refund", "credit", "school"].indexOf(b.kind2 || b.resign_kind) >= 0 ? b.kind2 || b.resign_kind : "forfeit";
+    opt.kind = k;
+    upd = { status: k === "school" ? "cancelled_school" : "resigned", status_at: now, status_note: (k + (note ? ": " + note : "")).slice(0, 500) };
+    ev.push({ t: now, a: k === "school" ? "cancelled_school" : "resigned", v: k, n: note, by });
+    kind = "resign";
+  } else if (act === "unreschedule") {
+    const last = ev.slice().reverse().find((e) => e.a === "reschedule" && /→/.test(String(e.v || "")));
+    const prev = last ? String(last.v).split("\u2192")[0].trim().slice(0, 10) : r.orig_start || null;
+    if (!ymdOk(prev) || prev === r.start_date) return { ok: false, error: "Nie ma zmiany terminu do cofni\u0119cia" };
+    upd = { start_date: prev, sent_at: null, error: null, orig_start: prev === r.orig_start ? null : r.orig_start };
+    ev.push({ t: now, a: "unreschedule", v: r.start_date + " \u2192 " + prev, n: note, by });
+  } else if (act === "reactivate") {
+    upd = { status: null, status_at: null, status_note: null };
+    ev.push({ t: now, a: "reactivate", by });
+  } else return { ok: false, error: "Nieznana akcja" };
+  Object.assign(x, upd);
+  const mail = kind ? ofLifeMail(x, kind, opt) : null;
+  if (act === "preview-mail") return { ok: true, subject: mail && mail.subject, html: mail && mail.html };
+  const keys = Object.keys(upd);
+  upd.events = JSON.stringify(ev.slice(-60));
+  keys.push("events");
+  await env.DB.prepare("UPDATE course_reminders SET " + keys.map((k) => k + " = ?").join(", ") + " WHERE id = ?").bind(...keys.map((k) => upd[k]), r.id).run();
+  let mailed = false, mail_error = null;
+  if (mail && b.mail !== false) {
+    const s = await ofSendLife(env, x, mail, who);
+    mailed = !!s.ok;
+    if (!s.ok) mail_error = s.error || "nie wys\u0142ano";
+  }
+  return { ok: true, id: r.id, mailed, mail_error, start_date: x.start_date, send_on: ofAddDays(x.start_date, -7) };
+}
+__name(ofLifecycle, "ofLifecycle");
+function ofCourseInfoHtml(start, lang, r) {
+  const L = "color:#1a4fd6;", T = ofT(lang), X = ofX(lang), tm = r && r.start_time ? String(r.start_time) : "";
+  const paid = r && r.paid_at && !String(r.paid_rest || "").trim();
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222"><p>' + T.infHi + "</p><p>" + (paid ? X.inf1p : T.inf1).replace("%d", ofDateL(start, lang)) + "</p>" + (tm ? "<p>\u23F0 " + X.startAt.replace("%t", ofEsc(tm)) + "</p>" : "") + '<p style="margin-top:16px"><b>' + T.pay + '</b></p><ul style="margin:4px 0 12px 18px;padding:0">' + (paid ? "<li>" + X.infPaid + "</li></ul>" : "<li>" + T.payT.replace("%p", ofDateL(ofAddDays(start, -3), lang)) + "</li><li>" + T.payC + "</li></ul>") + "<p><b>" + T.take + '</b></p><ul style="margin:4px 0 12px 18px;padding:0"><li>' + T.note + "</li><li>" + T.shoes + "</li></ul><p>" + T.see + "</p><p><b>" + T.park + '</b><br><a href="https://www.google.com/maps/d/u/0/edit?mid=1H5gc1803KRf8s34QoN37T_PXqxMkoWA&usp=sharing" style="' + L + '">' + T.parkL + "</a></p><p>Szko\u0142a Nowej Mowy<br>Rynek 3/1A, Miko\u0142\xF3w</p></div>";
 }
 __name(ofCourseInfoHtml, "ofCourseInfoHtml");
 __name2(ofCourseInfoHtml, "ofCourseInfoHtml");
@@ -11549,7 +12141,7 @@ __name2(ofSendDepositConfirm, "ofSendDepositConfirm");
 async function ofSendCourseInfo(env, r) {
   const account = await appSettingGet(env, "google_account") || "";
   const subj = ofT(r.lang).infS.replace("%d", ofDateL(r.start_date, r.lang));
-  const mime = ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: subj, html: ofCourseInfoHtml(r.start_date, r.lang) });
+  const mime = ofMime({ from: account, fromName: "Nowa Mowa", to: r.to_email, cc: ofReminderTo(env), replyTo: account || null, subject: subj, html: ofCourseInfoHtml(r.start_date, r.lang, r) });
   const s = await ofGmailSend(env, mime);
   if (s.ok) await env.DB.prepare("UPDATE course_reminders SET sent_at = ?, error = NULL WHERE id = ?").bind(Math.floor(Date.now() / 1e3), r.id).run();
   else await env.DB.prepare("UPDATE course_reminders SET error = ? WHERE id = ?").bind(String(s.error).slice(0, 300), r.id).run();
@@ -11571,7 +12163,7 @@ async function ofReminderTick(env) {
     await ofTables(env);
     const rows = (await env.DB.prepare("SELECT * FROM course_reminders WHERE sent_at IS NULL AND COALESCE(cancelled, 0) = 0 AND start_date >= ? ORDER BY start_date LIMIT 20").bind(today).all()).results || [];
     for (const r of rows) {
-      if (!r.deposit_at && !r.remind_at) continue;
+      if (r.status === "resigned" || r.status === "cancelled_school") continue;
       if (ofAddDays(r.start_date, -7) > today) continue;
       const res = await ofSendCourseInfo(env, r);
       if (!res.ok) break;
@@ -12834,6 +13426,7 @@ __name2(pwIns, "pwIns");
 function pwGen(n) {
   if (!n) return "dziecka";
   const l = n.toLowerCase();
+  if (/[iy]$/.test(l)) return n + "ego";
   if (/a$/.test(l)) {
     if (/[csznd]ia$/.test(l)) return n.slice(0, -1);
     if (/ia$/.test(l)) return n.slice(0, -1) + "i";
@@ -13029,7 +13622,7 @@ async function sstTable(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_merge (row_key TEXT PRIMARY KEY, into_key TEXT, merged_by TEXT, merged_at INTEGER)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_hidden (row_key TEXT PRIMARY KEY, hidden_by TEXT, hidden_at INTEGER)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS offer_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, kind TEXT, variant INTEGER, variant_name TEXT, price INTEGER, sent_by TEXT, created_at INTEGER)").run();
-  for (const c of ["html_key TEXT", "pdf_key TEXT", "subject TEXT", "pdf_name TEXT"]) {
+  for (const c of ["html_key TEXT", "pdf_key TEXT", "subject TEXT", "pdf_name TEXT", "uploaded INTEGER"]) {
     try {
       await env.DB.prepare("ALTER TABLE offer_meta ADD COLUMN " + c).run();
     } catch (e) {
