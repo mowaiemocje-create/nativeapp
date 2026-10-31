@@ -5683,7 +5683,7 @@ var worker_default = {
         }
       }
       if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
-      if (!/^\/(ankieta(\/submit|\/tr)?|tydzien|r|raty|potwierdz(\/plik)?)$/.test(url.pathname)) return new Response("Nie znaleziono", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      if (!/^\/(ankieta(\/submit|\/tr)?|tydzien|r|raty|oferta|potwierdz(\/plik)?)$/.test(url.pathname)) return new Response("Nie znaleziono", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }
     try {
       if (url.pathname === "/student/home" && request.method === "GET") {
@@ -6344,6 +6344,29 @@ var worker_default = {
       if (url.pathname === "/parent-weekly" || url.pathname === "/parent-weekly/sub") return await pwPanel(request, env, url);
       if (url.pathname === "/r" && (request.method === "GET" || request.method === "POST")) return await svReplyPage(request, env, url);
       if (url.pathname === "/potwierdz" || url.pathname === "/potwierdz/plik") return await resLinkPage(request, env, url, ctx);
+      if (url.pathname === "/oferta") return await ofbPage(request, env, url, ctx);
+      if (url.pathname === "/offers/feedback" || url.pathname === "/offers/feedback/done" || url.pathname === "/offers/feedback/reply") {
+        let fbb = {};
+        if (request.method === "POST") {
+          try {
+            fbb = await request.json();
+          } catch (e) {
+          }
+        }
+        const who = await contactAuth(env, fbb.ns_token || url.searchParams.get("ns_token"), fbb.ns_email || url.searchParams.get("ns_email"), fbb.ns_server || url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/offers/feedback" && request.method === "GET") return json(await ofbList(env, url, who));
+        if (url.pathname === "/offers/feedback/reply" && request.method === "POST") {
+          const rr = await ofbReply(env, fbb, who);
+          return json(rr, rr.ok ? 200 : 400);
+        }
+        if (url.pathname === "/offers/feedback/done" && request.method === "POST") {
+          await ofbTables(env);
+          await env.DB.prepare("UPDATE offer_fb_ans SET done_at = ?, done_by = ? WHERE id = ?").bind(fbb.on === false ? null : Math.floor(Date.now() / 1e3), fbb.on === false ? null : who.email, Number(fbb.id) || 0).run();
+          return json({ ok: true });
+        }
+      }
       if (url.pathname === "/offers/sent-file" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -11427,6 +11450,12 @@ async function handleOfferSend(request, env) {
   await ensureGoogleTables(env);
   const account = await appSettingGet(env, "google_account") || "";
   const subject = String(b.subject || "Nowa Mowa").slice(0, 200);
+  let ofb = null;
+  try {
+    ofb = await ofbCreate(env, b, to, who);
+  } catch (e) {
+  }
+  b.html = String(b.html || "").split("{{OFB_URL}}").join(ofb ? ofb.url : "mailto:nowamowa@gmail.com?subject=Oferta").replace(/&amp;a=/g, "&a=");
   const mime = ofMime({
     from: account,
     fromName: "Nowa Mowa",
@@ -11460,6 +11489,12 @@ async function handleOfferSend(request, env) {
           pk = base + ".pdf";
           await env.RECORDINGS.put(pk, bin, { httpMetadata: { contentType: "application/pdf" } });
         }
+        if (ofb) {
+          try {
+            await env.DB.prepare("UPDATE offer_fb SET offer_meta_id = ? WHERE token = ?").bind(id, ofb.token).run();
+          } catch (e) {
+          }
+        }
         await env.DB.prepare("UPDATE offer_meta SET html_key = ?, pdf_key = ?, subject = ?, pdf_name = ? WHERE id = ?").bind(base + ".html", pk, subject, pk ? String(b.filename || "umowa.pdf").slice(0, 120) : null, id).run();
       }
     }
@@ -11478,10 +11513,241 @@ async function handleOfferSend(request, env) {
     }
     reminder = { id: r.meta && r.meta.last_row_id, start: rm.start, on: ofAddDays(rm.start, -7), to: ofReminderTo(env) };
   }
-  return json({ ok: true, to, id: s.id, from: account, reminder });
+  return json({ ok: true, to, id: s.id, from: account, reminder, feedback: !!ofb });
 }
 __name(handleOfferSend, "handleOfferSend");
 __name2(handleOfferSend, "handleOfferSend");
+async function ofbTables(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS offer_fb (token TEXT PRIMARY KEY, offer_meta_id INTEGER, to_email TEXT, name TEXT, lang TEXT, payload TEXT, created_by TEXT, created_at INTEGER, opened_at INTEGER, opens INTEGER DEFAULT 0)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS offer_fb_ans (id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT, at INTEGER, act TEXT, variant INTEGER, variant_name TEXT, term TEXT, term_other TEXT, raty INTEGER, call INTEGER, phone TEXT, later_until TEXT, note TEXT, done_at INTEGER, done_by TEXT)").run();
+  try {
+    await env.DB.prepare("ALTER TABLE offer_fb_ans ADD COLUMN replies TEXT").run();
+  } catch (e) {
+  }
+}
+__name(ofbTables, "ofbTables");
+__name2(ofbTables, "ofbTables");
+var OFB_TXT = {
+  pl: { t: "Twoja odpowied\u017A na ofert\u0119", hi: "Oferta przygotowana dla %n", var: "Wybrany wariant", none: "jeszcze nie wiem", term: "Termin kursu", other: "\u017Baden nie pasuje \u2014 prosz\u0119 o inny termin", otherQ: "Jakie terminy by\u0142yby dobre?", raty: "Prosz\u0119 o link do p\u0142atno\u015Bci ratalnej", call: "Prosz\u0119 o telefon \u2014 mam pytania", phone: "Numer telefonu i dogodna pora", later: "Potrzebuj\u0119 czasu do namys\u0142u", until: "Odezw\u0119 si\u0119 do (opcjonalnie)", no: "Rezygnuj\u0119 z kursu", note: "Wiadomo\u015B\u0107 do trenera (opcjonalnie)", send: "Wy\u015Blij odpowied\u017A", ok: "Dzi\u0119kujemy! Odpowied\u017A trafi\u0142a do trenera \u2014 odezwie si\u0119, \u017Ceby potwierdzi\u0107 szczeg\xF3\u0142y.", again: "Mo\u017Cesz wys\u0142a\u0107 kolejn\u0105 odpowied\u017A, je\u015Bli co\u015B si\u0119 zmieni.", gone: "Ten link jest nieaktualny. Prosimy o kontakt: nowamowa@gmail.com", what: "Co dalej?", pick: "Wybieram" },
+  sk: { t: "Va\u0161a odpove\u010F na ponuku", hi: "Ponuka pripraven\xE1 pre %n", var: "Zvolen\xFD variant", none: "e\u0161te neviem", term: "Term\xEDn kurzu", other: "\u017Diadny nevyhovuje \u2014 pros\xEDm o in\xFD term\xEDn", otherQ: "Ak\xE9 term\xEDny by boli vhodn\xE9?", raty: "Pros\xEDm o odkaz na spl\xE1tkov\xFA platbu", call: "Pros\xEDm o telefon\xE1t \u2014 m\xE1m ot\xE1zky", phone: "Telef\xF3nne \u010D\xEDslo a vhodn\xFD \u010Das", later: "Potrebujem \u010Das na rozmyslenie", until: "Ozvem sa do (nepovinn\xE9)", no: "Vzd\xE1vam sa kurzu", note: "Spr\xE1va pre tr\xE9nera (nepovinn\xE9)", send: "Odosla\u0165 odpove\u010F", ok: "\u010Eakujeme! Odpove\u010F dostal tr\xE9ner \u2014 ozve sa, aby potvrdil podrobnosti.", again: "Ak sa nie\u010Do zmen\xED, m\xF4\u017Eete posla\u0165 \u010Fal\u0161iu odpove\u010F.", gone: "Tento odkaz u\u017E nie je platn\xFD. Kontakt: nowamowa@gmail.com", what: "\u010Co \u010Falej?", pick: "Vyber\xE1m" },
+  cs: { t: "Va\u0161e odpov\u011B\u010F na nab\xEDdku", hi: "Nab\xEDdka p\u0159ipraven\xE1 pro %n", var: "Zvolen\xE1 varianta", none: "je\u0161t\u011B nev\xEDm", term: "Term\xEDn kurzu", other: "\u017D\xE1dn\xFD nevyhovuje \u2014 pros\xEDm o jin\xFD term\xEDn", otherQ: "Jak\xE9 term\xEDny by byly vhodn\xE9?", raty: "Pros\xEDm o odkaz na spl\xE1tkovou platbu", call: "Pros\xEDm o telefon\xE1t \u2014 m\xE1m ot\xE1zky", phone: "Telefonn\xED \u010D\xEDslo a vhodn\xE1 doba", later: "Pot\u0159ebuji \u010Das na rozmy\u0161lenou", until: "Ozvu se do (nepovinn\xE9)", no: "Vzd\xE1v\xE1m se kurzu", note: "Zpr\xE1va pro tren\xE9ra (nepovinn\xE9)", send: "Odeslat odpov\u011B\u010F", ok: "D\u011Bkujeme! Odpov\u011B\u010F dostal tren\xE9r \u2014 ozve se, aby potvrdil podrobnosti.", again: "Pokud se n\u011Bco zm\u011Bn\xED, m\u016F\u017Eete poslat dal\u0161\xED odpov\u011B\u010F.", gone: "Tento odkaz ji\u017E neplat\xED. Kontakt: nowamowa@gmail.com", what: "Co d\xE1l?", pick: "Vyb\xEDr\xE1m" },
+  en: { t: "Your reply to the offer", hi: "Offer prepared for %n", var: "Chosen option", none: "not sure yet", term: "Course date", other: "None of these \u2014 please suggest another date", otherQ: "Which dates would suit you?", raty: "Please send me the instalment payment link", call: "Please call me \u2014 I have questions", phone: "Phone number and a good time to call", later: "I need time to think", until: "I'll get back by (optional)", no: "I'm not taking the course", note: "Message to the trainer (optional)", send: "Send reply", ok: "Thank you! Your reply went to the trainer \u2014 they will get in touch to confirm the details.", again: "You can send another reply if anything changes.", gone: "This link is no longer valid. Contact: nowamowa@gmail.com", what: "What next?", pick: "I choose" }
+};
+async function ofbCreate(env, b, to, who) {
+  const fb = b.meta && b.meta.fb;
+  if (!fb || String(b.html || "").indexOf("{{OFB_URL}}") < 0) return null;
+  await ofbTables(env);
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(12))).map((x) => x.toString(16).padStart(2, "0")).join("");
+  const variants = (Array.isArray(fb.variants) ? fb.variants : []).slice(0, 12).map((v) => ({ n: Number(v.n) || 0, name: String(v.name || "").slice(0, 120), price: Number(v.price) || null })).filter((v) => v.n);
+  const terms = (Array.isArray(fb.terms) ? fb.terms : []).slice(0, 12).map((t) => ({ ymd: /^\d{4}-\d{2}-\d{2}$/.test(String(t.ymd || "")) ? t.ymd : null, label: String(t.label || "").slice(0, 80) })).filter((t) => t.label);
+  const pl = { variants, terms, cur: fb.cur === "EUR" ? "EUR" : "PLN", rec: Number(fb.rec) || null, hg: String(fb.hg || "").slice(0, 120) };
+  await env.DB.prepare("INSERT INTO offer_fb (token, to_email, name, lang, payload, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(token, to.toLowerCase(), String(fb.name || "").slice(0, 120), ofLang(fb.lang), JSON.stringify(pl), String(who && who.email || ""), Math.floor(Date.now() / 1e3)).run();
+  const base = (await svfCfg(env)).public_base || "https://ask.nowamowa.com";
+  return { token, url: base + "/oferta?t=" + token };
+}
+__name(ofbCreate, "ofbCreate");
+__name2(ofbCreate, "ofbCreate");
+async function ofbPage(request, env, url, ctx) {
+  await ofbTables(env);
+  let body = {};
+  if (request.method === "POST") {
+    try {
+      body = Object.fromEntries((await request.formData()).entries());
+    } catch (e) {
+    }
+  }
+  const token = String(url.searchParams.get("t") || body.t || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
+  const f = token ? await env.DB.prepare("SELECT * FROM offer_fb WHERE token = ?").bind(token).first() : null;
+  const lg = ofLang(f && f.lang), L = OFB_TXT[lg] || OFB_TXT.pl, esc = ofEsc;
+  let pl = {};
+  try {
+    pl = JSON.parse(f && f.payload || "{}") || {};
+  } catch (e) {
+  }
+  const V = pl.variants || [], T = pl.terms || [], money = /* @__PURE__ */ __name((n) => n ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (pl.cur === "EUR" ? " \u20AC" : " z\u0142") : "", "money");
+  const page = /* @__PURE__ */ __name((inner) => new Response(
+    '<!doctype html><html lang="' + lg + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Nowa Mowa</title><style>body{margin:0;background:#f4f1ed;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#2b2b2b}.w{max-width:560px;margin:0 auto;padding:16px}.c{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}.h{background:#1E1E1E;color:#fff;padding:16px 20px;border-top:6px solid #F5A623}.h small{color:#F5A623;letter-spacing:2px;font-weight:700;font-size:11px}.h div{font-size:20px;font-weight:700;margin-top:2px}.b{padding:18px 20px;font-size:16px;line-height:1.5}h3{font-size:15px;margin:18px 0 6px;color:#D9822B}label.o{display:flex;gap:10px;align-items:flex-start;border:1px solid #E6D9C3;border-radius:10px;padding:11px 12px;margin:6px 0;cursor:pointer}label.o:has(input:checked){border-color:#E8A317;background:#FFF6E0}label.o input{margin-top:3px;width:18px;height:18px;flex:none}input[type=text],input[type=date],textarea{width:100%;box-sizing:border-box;border:1px solid #D9CBB4;border-radius:8px;padding:10px;font:inherit;font-size:15px;margin-top:6px}.sub{color:#8C7A5C;font-size:13px}.btn{display:block;width:100%;border:0;border-radius:10px;padding:15px;font-size:17px;font-weight:700;cursor:pointer;margin-top:16px;background:#2E7D4F;color:#fff}.hid{display:none}</style></head><body><div class="w"><div class="c"><div class="h"><small>SZKO\u0141A NOWEJ MOWY</small><div>' + esc(L.t) + '</div></div><div class="b">' + inner + '</div></div><p style="text-align:center;color:#8C7A5C;font-size:12px">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w</p></div></body></html>',
+    { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+  ), "page");
+  if (!f) return page("<p>" + esc(OFB_TXT.pl.gone) + "</p>");
+  const now = Math.floor(Date.now() / 1e3);
+  if (request.method === "POST") {
+    const act = ["pick", "term", "raty", "call", "later"].indexOf(body.act) >= 0 ? body.act : "pick";
+    const vn = Number(body.v) || null, vv = V.find((x) => x.n === vn) || null;
+    const ti = body.d === "other" ? null : T.find((t) => (t.ymd || t.label) === String(body.d || "")) || null;
+    const row = {
+      act: body.d === "other" && act === "pick" ? "term" : act,
+      variant: vv ? vv.n : null,
+      variant_name: vv ? vv.name : null,
+      term: ti ? ti.ymd || ti.label : null,
+      term_other: body.d === "other" ? String(body.other || "").trim().slice(0, 300) : null,
+      raty: body.raty ? 1 : 0,
+      call: body.call ? 1 : 0,
+      phone: String(body.phone || "").trim().slice(0, 120) || null,
+      later_until: /^\d{4}-\d{2}-\d{2}$/.test(String(body.until || "")) ? body.until : null,
+      note: String(body.note || "").trim().slice(0, 1500) || null
+    };
+    if (row.act === "no") {
+      row.variant = null;
+      row.variant_name = null;
+      row.term = null;
+    }
+    await env.DB.prepare("INSERT INTO offer_fb_ans (token, at, act, variant, variant_name, term, term_other, raty, call, phone, later_until, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(token, now, row.act, row.variant, row.variant_name, row.term, row.term_other, row.raty, row.call, row.phone, row.later_until, row.note).run();
+    try {
+      await ensureGoogleTables(env);
+      const account = await appSettingGet(env, "google_account") || "";
+      const nm = f.name || f.to_email, tl = ti ? ti.label : "";
+      const sum = ofbSummary(row, tl);
+      const html2 = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55"><p><b>\u{1F4AC} ' + esc(nm) + "</b> (" + esc(f.to_email) + ') odpowiedzia\u0142(a) na ofert\u0119:</p><p style="font-size:17px"><b>' + esc(sum) + "</b></p>" + (row.term_other ? "<p>\u{1F4C5} Proponowane terminy: " + esc(row.term_other) + "</p>" : "") + (row.phone ? "<p>\u{1F4DE} " + esc(row.phone) + "</p>" : "") + (row.later_until ? "<p>\u{1F914} Odezwie si\u0119 do: " + esc(row.later_until) + "</p>" : "") + (row.note ? "<p>Wiadomo\u015B\u0107: \u201E" + esc(row.note) + "\u201D</p>" : "") + '<p style="color:#8C7A5C">Szczeg\xF3\u0142y i dalsze kroki: panel trenera \u2192 \u{1F4D1} Oferty i umowy \u2192 \u{1F4AC} Odpowiedzi.</p></div>';
+      ctx.waitUntil(ofGmailSend(env, ofMime({ from: account, fromName: "Panel Nowej Mowy", to: ofReminderTo(env), replyTo: f.to_email, subject: "\u{1F4AC} " + nm + ": " + sum, html: html2 })).catch(() => {
+      }));
+    } catch (e) {
+    }
+    return page("<p>\u2705 " + esc(L.ok) + '</p><p class="sub">' + esc(L.again) + '</p><p><a href="/oferta?t=' + token + '" style="color:#D9822B">\u2190 ' + esc(L.t) + "</a></p>");
+  }
+  try {
+    await env.DB.prepare("UPDATE offer_fb SET opened_at = COALESCE(opened_at, ?), opens = COALESCE(opens, 0) + 1 WHERE token = ?").bind(now, token).run();
+  } catch (e) {
+  }
+  const a = String(url.searchParams.get("a") || "pick"), pv = Number(url.searchParams.get("v")) || pl.rec || null, pd = String(url.searchParams.get("d") || "");
+  const ck = /* @__PURE__ */ __name((on) => on ? " checked" : "", "ck");
+  const vOpts = V.map((x) => '<label class="o"><input type="radio" name="v" value="' + x.n + '"' + ck(x.n === pv && a !== "no") + "><span><b>Wariant " + x.n + " \u2013 " + esc(x.name) + "</b>" + (x.price ? '<br><span class="sub">' + esc(money(x.price)) + "</span>" : "") + "</span></label>").join("") + '<label class="o"><input type="radio" name="v" value=""' + ck(!pv || a === "no") + '><span class="sub">' + esc(L.none) + "</span></label>";
+  const tOpts = T.map((t) => '<label class="o"><input type="radio" name="d" value="' + esc(t.ymd || t.label) + '"' + ck(pd && pd === (t.ymd || t.label)) + "><span><b>" + esc(t.label) + "</b></span></label>").join("") + '<label class="o"><input type="radio" name="d" value="other" id="dOther"' + ck(a === "term") + "><span>" + esc(L.other) + '</span></label><div id="oBox" class="' + (a === "term" ? "" : "hid") + '"><input type="text" name="other" placeholder="' + esc(L.otherQ) + '"></div>';
+  const html = "<p>" + esc(L.hi.replace("%n", pl.hg || f.name || "")) + "</p>" + (a === "later" ? "" : '<form method="POST" action="/oferta" id="fMain"><input type="hidden" name="t" value="' + token + '"><input type="hidden" name="act" value="pick">' + (V.length ? "<h3>" + esc(L.var) + "</h3>" + vOpts : "") + "<h3>" + esc(L.term) + "</h3>" + tOpts + '<label class="o" style="margin-top:14px"><input type="checkbox" name="raty" value="1"' + ck(a === "raty") + "><span>\u{1F4B3} " + esc(L.raty) + '</span></label><label class="o"><input type="checkbox" name="call" value="1" id="cCall"' + ck(a === "call") + "><span>\u{1F4DE} " + esc(L.call) + '</span></label><div id="phBox" class="' + (a === "call" ? "" : "hid") + '"><input type="text" name="phone" placeholder="' + esc(L.phone) + '"></div><h3>\u270D\uFE0F ' + esc(L.note) + '</h3><textarea name="note" rows="3"></textarea><button class="btn" type="submit">' + esc(L.send) + "</button></form><script>(function(){var F=document.getElementById('fMain'),sh=function(id,on){document.getElementById(id).className=on?'':'hid';};F.addEventListener('change',function(){sh('oBox',(F.querySelector('[name=d]:checked')||{}).value==='other');sh('phBox',document.getElementById('cCall').checked);});})();<\/script>") + // 🤔 „potrzebuję czasu” — tylko z przycisku na końcu oferty (a=later, u=dni → data podpowiedziana)
+  (a === "later" ? '<form method="POST" action="/oferta" id="fLater"><input type="hidden" name="t" value="' + token + '"><input type="hidden" name="act" value="later"><h3>\u{1F914} ' + esc(L.later) + '</h3><label class="sub" style="display:block;margin-top:6px">' + esc(L.until) + '</label><input type="date" name="until" value="' + (Number(url.searchParams.get("u")) > 0 ? new Date(Date.now() + Math.min(120, Number(url.searchParams.get("u"))) * 864e5).toISOString().slice(0, 10) : "") + '"><h3>\u270D\uFE0F ' + esc(L.note) + '</h3><textarea name="note" rows="3"></textarea><button class="btn" type="submit">' + esc(L.send) + '</button></form><p class="sub" style="margin-top:14px"><a href="/oferta?t=' + token + '" style="color:#D9822B">\u2190 ' + esc(L.var) + " / " + esc(L.term).toLowerCase() + "</a></p>" : "");
+  return page(html);
+}
+__name(ofbPage, "ofbPage");
+__name2(ofbPage, "ofbPage");
+function ofbSummary(r, termLabel) {
+  if (r.act === "no") return "\u2716 rezygnuje";
+  const p = [];
+  if (r.act === "later") p.push("\u{1F914} potrzebuje czasu" + (r.later_until ? " (do " + r.later_until + ")" : ""));
+  if (r.variant) p.push("\u2705 Wariant " + r.variant + (r.variant_name ? " \u2013 " + r.variant_name : ""));
+  if (r.term) p.push("\u{1F4C5} " + (termLabel || r.term));
+  if (r.term_other != null) p.push("\u{1F501} prosi o inny termin");
+  if (r.raty) p.push("\u{1F4B3} prosi o link do rat");
+  if (r.call) p.push("\u{1F4DE} prosi o telefon");
+  if (!p.length) p.push("\u{1F4AC} wiadomo\u015B\u0107");
+  return p.join(" \xB7 ");
+}
+__name(ofbSummary, "ofbSummary");
+__name2(ofbSummary, "ofbSummary");
+async function ofbList(env, url, who) {
+  await ofbTables(env);
+  const em = String(url.searchParams.get("email") || "").toLowerCase().trim();
+  const q = "SELECT a.*, f.to_email, f.name, f.lang, f.payload, f.offer_meta_id, f.created_at AS offer_at, f.opened_at, f.opens FROM offer_fb_ans a JOIN offer_fb f ON f.token = a.token" + (em ? " WHERE f.to_email = ?" : "") + " ORDER BY a.at DESC LIMIT 300";
+  const rows = ((em ? await env.DB.prepare(q).bind(em).all() : await env.DB.prepare(q).all()).results || []).map((r) => {
+    let pl = {};
+    try {
+      pl = JSON.parse(r.payload || "{}") || {};
+    } catch (e) {
+    }
+    const t = (pl.terms || []).find((x) => (x.ymd || x.label) === r.term), v = (pl.variants || []).find((x) => x.n === r.variant);
+    return {
+      id: r.id,
+      at: r.at,
+      act: r.act,
+      to_email: r.to_email,
+      name: r.name,
+      lang: r.lang,
+      variant: r.variant,
+      variant_name: r.variant_name,
+      price: v ? v.price : null,
+      cur: pl.cur,
+      term: r.term,
+      term_ymd: t ? t.ymd : null,
+      term_label: t ? t.label : r.term,
+      term_other: r.term_other,
+      raty: r.raty,
+      call: r.call,
+      phone: r.phone,
+      later_until: r.later_until,
+      note: r.note,
+      done_at: r.done_at,
+      done_by: r.done_by,
+      replies: (() => {
+        try {
+          return JSON.parse(r.replies || "[]");
+        } catch (e) {
+          return [];
+        }
+      })(),
+      offer_at: r.offer_at,
+      offer_meta_id: r.offer_meta_id,
+      summary: ofbSummary(r, t ? t.label : "")
+    };
+  });
+  const sent = (await env.DB.prepare("SELECT f.token, f.to_email, f.name, f.created_at, f.opened_at, f.opens, f.offer_meta_id, (SELECT COUNT(*) FROM offer_fb_ans a WHERE a.token = f.token) AS answers FROM offer_fb f" + (em ? " WHERE f.to_email = ?" : "") + " ORDER BY f.created_at DESC LIMIT 200").bind(...em ? [em] : []).all()).results || [];
+  return { ok: true, answers: rows, offers: sent, open: rows.filter((r) => !r.done_at).length };
+}
+__name(ofbList, "ofbList");
+__name2(ofbList, "ofbList");
+var OFB_REP = {
+  pl: { hi: "Dzie\u0144 dobry,", termsS: "Nowe terminy kursu \u2014 Nowa Mowa", terms: "dzi\u0119kujemy za odpowied\u017A na ofert\u0119. Poni\u017Cej proponujemy inne terminy kursu \u2014 wystarczy klikn\u0105\u0107 ten, kt\xF3ry pasuje:", pick: "\u{1F4C5} Pasuje mi", none: "\u017Baden nie pasuje \u2014 prosz\u0119 o inny termin", nontS: "Terminy kursu \u2014 Nowa Mowa", nont: "dzi\u0119kujemy za odpowied\u017A na ofert\u0119. Na razie nie mamy innych wolnych termin\xF3w \u2014 odezwiemy si\u0119, gdy tylko pojawi si\u0119 nowy termin.", ratyS: "Link do p\u0142atno\u015Bci ratalnej \u2014 Nowa Mowa", raty: "dzi\u0119kujemy za zainteresowanie p\u0142atno\u015Bci\u0105 rataln\u0105. Poni\u017Cej link \u2014 wniosek wype\u0142nia si\u0119 online, a ostateczne warunki i decyzj\u0119 przedstawia operator p\u0142atno\u015Bci.", ratyB: "\u{1F4B3} Przejd\u017A do p\u0142atno\u015Bci ratalnej", bye: "Pozdrawiamy serdecznie," },
+  sk: { hi: "Dobr\xFD de\u0148,", termsS: "Nov\xE9 term\xEDny kurzu \u2014 Nowa Mowa", terms: "\u010Fakujeme za odpove\u010F na ponuku. Ni\u017E\u0161ie navrhujeme in\xE9 term\xEDny kurzu \u2014 sta\u010D\xED klikn\xFA\u0165 na ten, ktor\xFD vyhovuje:", pick: "\u{1F4C5} Vyhovuje mi", none: "\u017Diadny nevyhovuje \u2014 pros\xEDm o in\xFD term\xEDn", nontS: "Term\xEDny kurzu \u2014 Nowa Mowa", nont: "\u010Fakujeme za odpove\u010F na ponuku. Moment\xE1lne nem\xE1me in\xE9 vo\u013En\xE9 term\xEDny \u2014 ozveme sa, hne\u010F ako sa objav\xED nov\xFD term\xEDn.", ratyS: "Odkaz na spl\xE1tkov\xFA platbu \u2014 Nowa Mowa", raty: "\u010Fakujeme za z\xE1ujem o spl\xE1tkov\xFA platbu. Ni\u017E\u0161ie je odkaz \u2014 \u017Eiados\u0165 sa vyp\u013A\u0148a online, kone\u010Dn\xE9 podmienky a rozhodnutie predklad\xE1 poskytovate\u013E platby.", ratyB: "\u{1F4B3} Prejs\u0165 na spl\xE1tkov\xFA platbu", bye: "S pozdravom," },
+  cs: { hi: "Dobr\xFD den,", termsS: "Nov\xE9 term\xEDny kurzu \u2014 Nowa Mowa", terms: "d\u011Bkujeme za odpov\u011B\u010F na nab\xEDdku. N\xED\u017Ee navrhujeme jin\xE9 term\xEDny kurzu \u2014 sta\u010D\xED kliknout na ten, kter\xFD vyhovuje:", pick: "\u{1F4C5} Vyhovuje mi", none: "\u017D\xE1dn\xFD nevyhovuje \u2014 pros\xEDm o jin\xFD term\xEDn", nontS: "Term\xEDny kurzu \u2014 Nowa Mowa", nont: "d\u011Bkujeme za odpov\u011B\u010F na nab\xEDdku. Moment\xE1ln\u011B nem\xE1me jin\xE9 voln\xE9 term\xEDny \u2014 ozveme se, jakmile se objev\xED nov\xFD term\xEDn.", ratyS: "Odkaz na spl\xE1tkovou platbu \u2014 Nowa Mowa", raty: "d\u011Bkujeme za z\xE1jem o spl\xE1tkovou platbu. N\xED\u017Ee je odkaz \u2014 \u017E\xE1dost se vypl\u0148uje online, kone\u010Dn\xE9 podm\xEDnky a rozhodnut\xED p\u0159edkl\xE1d\xE1 poskytovatel platby.", ratyB: "\u{1F4B3} P\u0159ej\xEDt na spl\xE1tkovou platbu", bye: "S pozdravem," },
+  en: { hi: "Hello,", termsS: "New course dates \u2014 Nowa Mowa", terms: "thank you for your reply to the offer. Below are other course dates \u2014 just click the one that suits you:", pick: "\u{1F4C5} This date suits me", none: "None of these \u2014 please suggest another date", nontS: "Course dates \u2014 Nowa Mowa", nont: "thank you for your reply to the offer. We have no other free dates at the moment \u2014 we will get in touch as soon as a new date becomes available.", ratyS: "Instalment payment link \u2014 Nowa Mowa", raty: "thank you for your interest in paying in instalments. The link is below \u2014 the application is completed online and the payment provider presents the final terms and decision.", ratyB: "\u{1F4B3} Go to instalment payment", bye: "Kind regards," }
+};
+async function ofbReply(env, b, who) {
+  await ofbTables(env);
+  const a = await env.DB.prepare("SELECT * FROM offer_fb_ans WHERE id = ?").bind(Number(b.id) || 0).first();
+  const f = a ? await env.DB.prepare("SELECT * FROM offer_fb WHERE token = ?").bind(a.token).first() : null;
+  if (!a || !f) return { ok: false, error: "Nie ma takiej odpowiedzi" };
+  const kind = ["terms", "noterms", "raty"].indexOf(b.kind) >= 0 ? b.kind : null;
+  if (!kind) return { ok: false, error: "Nieznany rodzaj odpowiedzi" };
+  const lg = ofLang(f.lang), R = OFB_REP[lg] || OFB_REP.pl, esc = ofEsc;
+  let pl = {};
+  try {
+    pl = JSON.parse(f.payload || "{}") || {};
+  } catch (e) {
+  }
+  const base = (await svfCfg(env)).public_base || "https://ask.nowamowa.com", link0 = base + "/oferta?t=" + f.token;
+  const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), note = String(b.note || "").trim().slice(0, 2e3);
+  const btn = /* @__PURE__ */ __name((href, t, bg, fg) => '<a href="' + esc(href) + '" style="display:inline-block;background:' + bg + ";color:" + fg + ";padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;margin:0 8px 10px 0" + (bg === "#ffffff" ? ";border:1px solid #D9CBB4" : "") + '">' + t + "</a>", "btn");
+  let subject = "", body = "", terms = [], link = "";
+  if (kind === "terms") {
+    terms = (Array.isArray(b.terms) ? b.terms : []).map(String).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x) && x >= today).filter((x, i, arr) => arr.indexOf(x) === i).slice(0, 8).sort();
+    if (!terms.length) return { ok: false, error: "Dodaj przynajmniej jeden przysz\u0142y termin" };
+    subject = R.termsS;
+    body = "<p>" + esc(R.terms) + "</p><p>" + terms.map((t) => btn(link0 + "&a=pick&d=" + t + (a.variant ? "&v=" + a.variant : ""), R.pick + ": " + esc(ofDateL(t, lg, true)), "#1E1E1E", "#F5A623")).join("") + "</p><p>" + btn(link0 + "&a=term", "\u{1F501} " + esc(R.none), "#ffffff", "#2b2b2b") + "</p>";
+  } else if (kind === "noterms") {
+    subject = R.nontS;
+    body = "<p>" + esc(R.nont) + "</p>";
+  } else {
+    link = String(b.link || "").trim();
+    if (!/^https:\/\/[^\s"'<>]+$/i.test(link)) return { ok: false, error: "Wklej poprawny link do p\u0142atno\u015Bci ratalnej (zaczyna si\u0119 od https://)" };
+    subject = R.ratyS;
+    body = "<p>" + esc(R.raty) + "</p><p>" + btn(link, esc(R.ratyB), "#D9822B", "#ffffff") + '</p><p style="font-size:12px;color:#8C7A5C;word-break:break-all">' + esc(link) + "</p>";
+  }
+  const html = '<div style="background:#f4f1ed;padding:16px 8px;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-collapse:collapse"><tr><td style="background:#1E1E1E;padding:16px 24px;border-top:6px solid #F5A623"><span style="color:#F5A623;font-size:12px;letter-spacing:2px;font-weight:bold">SZKO\u0141A NOWEJ MOWY</span><div style="color:#fff;font-size:19px;font-weight:bold;margin-top:4px">' + esc(subject.replace(/ — Nowa Mowa$/, "")) + '</div></td></tr><tr><td style="padding:22px 24px;font-size:15px;line-height:1.6;color:#2b2b2b"><p style="margin:0 0 12px">' + esc(R.hi) + "</p>" + body + (note ? "<p>" + esc(note).replace(/\n/g, "<br>") + "</p>" : "") + '<p style="margin:18px 0 0">' + esc(R.bye) + '<br>Szko\u0142a Nowej Mowy</p><p style="margin:16px 0 0;color:#8C7A5C;font-size:13px">Rynek 3/1A, Miko\u0142\xF3w \xB7 nowamowa@gmail.com</p></td></tr></table></div>';
+  if (b.preview) return { ok: true, subject, html, to: f.to_email };
+  await ensureGoogleTables(env);
+  const account = await appSettingGet(env, "google_account") || "";
+  const sres = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: f.to_email, cc: ofReminderTo(env), replyTo: account || who.email, subject, html }));
+  if (!sres.ok) return { ok: false, error: sres.error || "Nie wys\u0142ano" };
+  const now = Math.floor(Date.now() / 1e3);
+  if (kind === "terms") {
+    const have = (pl.terms || []).map((t) => t.ymd);
+    pl.terms = (pl.terms || []).concat(terms.filter((t) => have.indexOf(t) < 0).map((t) => ({ ymd: t, label: ofDateL(t, lg, true) })));
+    await env.DB.prepare("UPDATE offer_fb SET payload = ? WHERE token = ?").bind(JSON.stringify(pl), f.token).run();
+  }
+  let rep = [];
+  try {
+    rep = JSON.parse(a.replies || "[]") || [];
+  } catch (e) {
+  }
+  rep.push({ t: now, kind, terms: terms.length ? terms : void 0, link: link || void 0, note: note || void 0, by: who.email });
+  await env.DB.prepare("UPDATE offer_fb_ans SET replies = ?, done_at = CASE WHEN ? THEN ? ELSE done_at END, done_by = CASE WHEN ? THEN ? ELSE done_by END WHERE id = ?").bind(JSON.stringify(rep.slice(-20)), b.done === false ? 0 : 1, now, b.done === false ? 0 : 1, who.email, a.id).run();
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+    await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", f.to_email, subject, who.email, sres.id || "", now).run();
+  } catch (e) {
+  }
+  return { ok: true, sent: true, to: f.to_email };
+}
+__name(ofbReply, "ofbReply");
+__name2(ofbReply, "ofbReply");
 function ofAddDays(ymd, n) {
   const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
@@ -11817,12 +12083,12 @@ async function resLinkTable(env) {
 __name(resLinkTable, "resLinkTable");
 var RL_TXT = {
   pl: {
-    t: { contract: "Akceptacja umowy", reschedule: "Zmiana terminu kursu", attend: "Potwierdzenie udzia\u0142u w kursie" },
+    t: { contract: "Rezerwacja kursu", reschedule: "Zmiana terminu kursu", attend: "Potwierdzenie udzia\u0142u w kursie" },
     hi: "Dzie\u0144 dobry",
     course: "Kurs Nowej Mowy",
-    contract: "Prosimy o zapoznanie si\u0119 z umow\u0105 i regulaminem kursu od <b>%d</b> i potwierdzenie jednym klikni\u0119ciem.",
-    view: "\u{1F4C4} Zobacz umow\u0119 (PDF)",
-    yesC: "\u2705 Przeczyta\u0142em/am, akceptuj\u0119",
+    contract: "Na podany adres e-mail wys\u0142ali\u015Bmy rezerwacj\u0119 kursu od <b>%d</b> wraz z numerem konta do wp\u0142aty zadatku. Mo\u017Cna j\u0105 podejrze\u0107 poni\u017Cej. Prosimy o potwierdzenie otrzymania jednym klikni\u0119ciem.",
+    view: "\u{1F4C4} Zobacz rezerwacj\u0119 (PDF)",
+    yesC: "\u2705 Potwierdzam otrzymanie",
     reschedule: "Proponujemy zmian\u0119 terminu kursu:",
     from: "Dotychczasowy termin",
     to: "Nowy termin",
@@ -11839,12 +12105,12 @@ var RL_TXT = {
     at: "o godz."
   },
   sk: {
-    t: { contract: "Prijatie zmluvy", reschedule: "Zmena term\xEDnu kurzu", attend: "Potvrdenie \xFA\u010Dasti na kurze" },
+    t: { contract: "Rezerv\xE1cia kurzu", reschedule: "Zmena term\xEDnu kurzu", attend: "Potvrdenie \xFA\u010Dasti na kurze" },
     hi: "Dobr\xFD de\u0148",
     course: "kurz Nowa Mowa",
-    contract: "Pros\xEDme, pre\u010D\xEDtajte si zmluvu a pravidl\xE1 kurzu od <b>%d</b> a potvr\u010Fte ich jedn\xFDm kliknut\xEDm.",
-    view: "\u{1F4C4} Zobrazi\u0165 zmluvu (PDF)",
-    yesC: "\u2705 Pre\u010D\xEDtal/a som, s\xFAhlas\xEDm",
+    contract: "Na uveden\xFD e-mail sme poslali rezerv\xE1ciu kurzu od <b>%d</b> spolu s \u010D\xEDslom \xFA\u010Dtu na \xFAhradu z\xE1lohy. M\xF4\u017Eete si ju pozrie\u0165 ni\u017E\u0161ie. Pros\xEDme o potvrdenie prijatia jedn\xFDm kliknut\xEDm.",
+    view: "\u{1F4C4} Zobrazi\u0165 rezerv\xE1ciu (PDF)",
+    yesC: "\u2705 Potvrdzujem prijatie",
     reschedule: "Navrhujeme zmenu term\xEDnu kurzu:",
     from: "P\xF4vodn\xFD term\xEDn",
     to: "Nov\xFD term\xEDn",
@@ -11861,12 +12127,12 @@ var RL_TXT = {
     at: "o"
   },
   cs: {
-    t: { contract: "P\u0159ijet\xED smlouvy", reschedule: "Zm\u011Bna term\xEDnu kurzu", attend: "Potvrzen\xED \xFA\u010Dasti na kurzu" },
+    t: { contract: "Rezervace kurzu", reschedule: "Zm\u011Bna term\xEDnu kurzu", attend: "Potvrzen\xED \xFA\u010Dasti na kurzu" },
     hi: "Dobr\xFD den",
     course: "kurz Nowa Mowa",
-    contract: "Pros\xEDme, p\u0159e\u010Dt\u011Bte si smlouvu a pravidla kurzu od <b>%d</b> a potvr\u010Fte je jedn\xEDm kliknut\xEDm.",
-    view: "\u{1F4C4} Zobrazit smlouvu (PDF)",
-    yesC: "\u2705 P\u0159e\u010Detl/a jsem, souhlas\xEDm",
+    contract: "Na uveden\xFD e-mail jsme poslali rezervaci kurzu od <b>%d</b> spolu s \u010D\xEDslem \xFA\u010Dtu pro \xFAhradu z\xE1lohy. M\u016F\u017Eete si ji prohl\xE9dnout n\xED\u017Ee. Pros\xEDme o potvrzen\xED p\u0159ijet\xED jedn\xEDm kliknut\xEDm.",
+    view: "\u{1F4C4} Zobrazit rezervaci (PDF)",
+    yesC: "\u2705 Potvrzuji p\u0159ijet\xED",
     reschedule: "Navrhujeme zm\u011Bnu term\xEDnu kurzu:",
     from: "P\u016Fvodn\xED term\xEDn",
     to: "Nov\xFD term\xEDn",
@@ -11883,12 +12149,12 @@ var RL_TXT = {
     at: "v"
   },
   en: {
-    t: { contract: "Agreement acceptance", reschedule: "Course date change", attend: "Course attendance confirmation" },
+    t: { contract: "Course reservation", reschedule: "Course date change", attend: "Course attendance confirmation" },
     hi: "Hello",
     course: "Nowa Mowa course",
-    contract: "Please read the agreement and course rules for the course starting <b>%d</b> and confirm with one click.",
-    view: "\u{1F4C4} View the agreement (PDF)",
-    yesC: "\u2705 I have read and accept it",
+    contract: "We have emailed the reservation for the course starting <b>%d</b>, including the bank account number for the deposit. You can view it below. Please confirm receipt with one click.",
+    view: "\u{1F4C4} View reservation (PDF)",
+    yesC: "\u2705 I confirm receipt",
     reschedule: "We propose a new date for your course:",
     from: "Previous date",
     to: "New date",
@@ -11985,8 +12251,8 @@ async function resLinkPage(request, env, url, ctx) {
     try {
       await ensureGoogleTables(env);
       const account = await appSettingGet(env, "google_account") || "";
-      const nm = r.student_name || r.to_email, what = { contract: "umow\u0119", reschedule: "zmian\u0119 terminu (" + ofDateL(pl.new_start || r.start_date, "pl", true) + ")", attend: "udzia\u0142 w kursie" }[l.kind];
-      const subj = ans === "yes" ? "\u2705 " + nm + " akceptuje " + what : "\u2716 " + nm + " \u2014 nie akceptuje: " + what;
+      const nm = r.student_name || r.to_email, what = { contract: "otrzymanie rezerwacji (umowy)", reschedule: "zmian\u0119 terminu (" + ofDateL(pl.new_start || r.start_date, "pl", true) + ")", attend: "udzia\u0142 w kursie" }[l.kind];
+      const subj = ans === "yes" ? "\u2705 " + nm + (l.kind === "contract" ? " potwierdza " : " akceptuje ") + what : "\u2716 " + nm + " \u2014 nie akceptuje: " + what;
       const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.55"><p><b>' + esc(subj) + "</b>" + esc(applied) + "</p><p>Kurs od: " + esc(ofDateL(r.start_date, "pl", true)) + " \xB7 " + esc(r.to_email) + "</p>" + (note ? "<p>Wiadomo\u015B\u0107: \u201E" + esc(note) + "\u201D</p>" : "") + "<p>Rezerwacje: panel trenera \u2192 Oferty i umowy \u2192 \u{1F4CB} Rezerwacje.</p></div>";
       ctx.waitUntil(ofGmailSend(env, ofMime({ from: account, fromName: "Panel Nowej Mowy", to: ofReminderTo(env), replyTo: r.to_email, subject: subj, html })).catch(() => {
       }));
@@ -12712,6 +12978,9 @@ var SVF_UI = [
   "Wpisz\u2026",
   "Masz mniej ni\u017C 15 lat \u2014 popro\u015B rodzica, \u017Ceby wype\u0142ni\u0142 ankiet\u0119 razem z Tob\u0105.",
   "%1 lat",
+  "Data urodzenia wskazuje, \u017Ce ankieta dotyczy dziecka (wiek: %1). Je\u015Bli wype\u0142niasz j\u0105 za dziecko, wr\xF3\u0107 do pytania \u201EKto wype\u0142nia ankiet\u0119?\u201D i wybierz \u201ERodzic lub opiekun\u201D.",
+  "Wed\u0142ug daty urodzenia to osoba doros\u0142a (wiek: %1). Je\u015Bli ankieta dotyczy doros\u0142ego, wybierz w pytaniu \u201EKto wype\u0142nia ankiet\u0119?\u201D swoj\u0105 sytuacj\u0119 (ucze\u0144/student, osoba pracuj\u0105ca, inna).",
+  "Sprawd\u017A dat\u0119 urodzenia \u2014 nie pasuje do wybranej osoby.",
   "Uzupe\u0142nij zaznaczone pola.",
   "\u23F3 Wysy\u0142am\u2026",
   "Dzi\u0119kujemy!",
@@ -13048,6 +13317,10 @@ function isP(){return S.role==='rodzic';}
 function isKid(){return (S.role==='uczen'&&S.school!=='Studia')||(S.role==='rodzic'&&S.stage&&S.stage!=='dorosle');}
 function O(q){return isKid()&&q.optsKid?q.optsKid:q.opts;}
 function R(q){return isKid()&&q.rowsKid?q.rowsKid:q.rows;}
+function ageMis(k){var self=['uczen','student','praca','inna'].indexOf(S.role)>=0;
+  if(k==='birth'&&self&&S.birth){var a=age(S.birth);if(a!=null&&a<(S.role==='uczen'?11:15))return {a:a,t:'Data urodzenia wskazuje, że ankieta dotyczy dziecka (wiek: %1). Jeśli wypełniasz ją za dziecko, wróć do pytania „Kto wypełnia ankietę?” i wybierz „Rodzic lub opiekun”.'};}
+  if(k==='cbirth'&&S.role==='rodzic'&&S.cbirth){var c=age(S.cbirth);if(c!=null&&c>=18)return {a:c,t:'Według daty urodzenia to osoba dorosła (wiek: %1). Jeśli ankieta dotyczy dorosłego, wybierz w pytaniu „Kto wypełnia ankietę?” swoją sytuację (uczeń/student, osoba pracująca, inna).'};}
+  return null;}
 function age(d){if(!d)return null;var b=new Date(d+'T12:00:00'),n=new Date(),a=n.getFullYear()-b.getFullYear();if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))a--;return a;}
 function tr(s){return D.tr&&D.tr[s]!=null&&D.tr[s]!==''?D.tr[s]:s;}
 function T(x){return tr(typeof x==='string'?x:(isP()?(x.p||x.a):x.a));}
@@ -13067,7 +13340,8 @@ function countrySel(k){var v=S[k]||'',top=D.ctop,oth=v&&top.indexOf(v)<0,open=ot
     (open?'<input type="text" list="ctl" class="oth" data-ctry="'+k+'" placeholder="'+esc(tr('Wyszukaj kraj…'))+'" value="'+esc(oth?tr(v):'')+'"><datalist id="ctl">'+names.map(function(n){return '<option value="'+esc(tr(n))+'">';}).join('')+'</datalist>':'')+
     '<div style="margin-top:10px"><button type="button" class="geo" data-geo="1">'+esc(tr('📍 Użyj mojej lokalizacji'))+'</button> <span class="hint" id="geoMsg" style="margin:0"></span></div>';}
 function qHtml(q){if(!cond(q.show))return '';var r=q.req?' <span class="req">*</span>':'',h=q.hint?'<div class="hint">'+esc(T(q.hint))+'</div>':'',b='',mi=D.map?(isP()&&D.mapP&&D.mapP[q.k]!=null?D.mapP[q.k]:D.map[q.k]):null;
-  if(q.k==='birth'&&S.role==='uczen'&&age(S.birth)!=null&&age(S.birth)<15)h+='<div class="hint" style="color:#B26A00;font-weight:600">'+esc(tr('Masz mniej niż 15 lat — poproś rodzica, żeby wypełnił ankietę razem z Tobą.'))+'</div>';
+  var mm=ageMis(q.k);if(mm)h+='<div class="hint" style="color:#B4232A;font-weight:600">'+esc(tr(mm.t).replace('%1',mm.a))+'</div>';
+  else if(q.k==='birth'&&S.role==='uczen'&&age(S.birth)!=null&&age(S.birth)<15)h+='<div class="hint" style="color:#B26A00;font-weight:600">'+esc(tr('Masz mniej niż 15 lat — poproś rodzica, żeby wypełnił ankietę razem z Tobą.'))+'</div>';
   if(q.type==='cards')return '<div class="card" data-q="'+q.k+'"><div class="q">'+esc(T(q.q))+r+'</div><div class="cards">'+q.opts.map(function(o){return '<div class="cd'+(S[q.k]===o[0]?' on':'')+'" data-k="'+q.k+'" data-v="'+o[0]+'" role="button" tabindex="0"><b>'+esc(tr(o[1]))+'</b>'+(o[2]?'<span>'+esc(tr(o[2]))+'</span>':'')+'</div>';}).join('')+'</div>'+mapTxt(mi)+'</div>';
   if(q.type==='check')return '<div class="card" data-q="'+q.k+'"><label class="ck"><input type="checkbox" data-k="'+q.k+'"'+(S[q.k]==='Tak'?' checked':'')+'><span>'+esc(T(q.q))+r+'</span></label>'+mapTxt(mi)+'</div>';
   if(q.type==='chips')b=chips(q.k,O(q),false,q.other);
@@ -13104,12 +13378,12 @@ F.addEventListener('change',function(e){var t=e.target;
   if(t.dataset&&t.dataset.ctry){var val=t.value.trim(),hit=Object.keys(D.countries).map(function(c){return D.countries[c];}).find(function(n){return tr(n).toLowerCase()===val.toLowerCase()||n.toLowerCase()===val.toLowerCase();});S[t.dataset.ctry]=hit||val;save();var y2=window.scrollY;render();window.scrollTo(0,y2);return;}
   if(e.target.type==='checkbox'){S[e.target.dataset.k]=e.target.checked?'Tak':'';save();}if(e.target.type==='date'){S[e.target.dataset.k]=e.target.value;save();var y=window.scrollY;render();window.scrollTo(0,y);}});
 document.getElementById('bk').onclick=function(){cur--;save();render();window.scrollTo(0,0);};
-function check(){var L=steps(),s=L[cur],bad=[],rows=[];
+function check(){var L=steps(),s=L[cur],bad=[],rows=[],ageMsg='';
   if(s.grids)D.grids.forEach(function(g,gi){var miss=g.rows.filter(function(rw){return !S['c'+rw.i];});if(miss.length){bad.push('g'+gi);miss.forEach(function(rw){rows.push('c'+rw.i);});}});
   if(s.q)s.q.forEach(function(q){if(!cond(q.show))return;if(q.type==='grid'){if(q.req){var mr=R(q).map(function(x,j){return q.k+'_'+j;}).filter(function(kk){return !S[kk];});if(mr.length){bad.push(q.k);rows=rows.concat(mr);}}return;}var v=S[q.k];var empty=Array.isArray(v)?!v.length:!String(v||'').trim();
-  if(q.req&&empty)bad.push(q.k);if(q.type==='email'&&!empty&&!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v))bad.push(q.k);if(q.type==='year'&&!empty&&!(+v>=1930&&+v<=new Date().getFullYear()))bad.push(q.k);if(q.type==='date'&&!empty&&!(age(v)>=0&&age(v)<=96))bad.push(q.k);if(q.type==='zip'&&!empty&&S.country==='Polska'&&!/^\d{2}-\d{3}$/.test(v))bad.push(q.k);});
+  if(q.req&&empty)bad.push(q.k);if(q.type==='email'&&!empty&&!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v))bad.push(q.k);if(q.type==='year'&&!empty&&!(+v>=1930&&+v<=new Date().getFullYear()))bad.push(q.k);if(q.type==='date'&&!empty&&!(age(v)>=0&&age(v)<=96))bad.push(q.k);if(q.type==='date'&&!empty&&ageMis(q.k)){bad.push(q.k);var am=ageMis(q.k);ageMsg=tr(am.t).replace('%1',am.a);}if(q.type==='zip'&&!empty&&S.country==='Polska'&&!/^\d{2}-\d{3}$/.test(v))bad.push(q.k);});
   F.querySelectorAll('.err,.rerr').forEach(function(x){x.classList.remove('err');x.classList.remove('rerr');});bad.forEach(function(k){var b=F.querySelector('[data-q="'+k+'"]');if(b)b.classList.add('err');});rows.forEach(function(k){var r=F.querySelector('[data-row="'+k+'"]');if(r)r.classList.add('rerr');});
-  if(bad.length){var f=F.querySelector(rows.length?'[data-row="'+rows[0]+'"]':'[data-q="'+bad[0]+'"]')||F.querySelector('[data-q="'+bad[0]+'"]');if(f)f.scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('msg').textContent=rows.length?tr('Zaznacz odpowiedź w każdym wierszu.'):tr('Uzupełnij zaznaczone pola.');return false;}return true;}
+  if(bad.length){var f=F.querySelector(rows.length?'[data-row="'+rows[0]+'"]':'[data-q="'+bad[0]+'"]')||F.querySelector('[data-q="'+bad[0]+'"]');if(f)f.scrollIntoView({behavior:'smooth',block:'center'});document.getElementById('msg').textContent=ageMsg||(rows.length?tr('Zaznacz odpowiedź w każdym wierszu.'):tr('Uzupełnij zaznaczone pola.'));return false;}return true;}
 F.onsubmit=async function(ev){ev.preventDefault();if(!check())return;var L=steps();if(cur<L.length-1){cur++;save();render();window.scrollTo(0,0);return;}
   var b=document.getElementById('nx');b.disabled=true;document.getElementById('msg').textContent='';b.textContent=tr('⏳ Wysyłam…');
   var sp=document.getElementById('sp');if(!sp){sp=document.createElement('div');sp.id='sp';sp.className='sendp';sp.innerHTML='<div class="sendl"><span>'+esc(tr('⏳ Wysyłam…'))+'</span><b id="spn">0%</b></div><div class="bar"><div id="spb"></div></div>';document.querySelector('.nav').after(sp);}sp.style.display='block';
