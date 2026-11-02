@@ -10130,7 +10130,7 @@ async function txStudentReport(env, sid, days, extra) {
   if (!recs.length) return { ok: false, error: "Brak przepisanych nagra\u0144 kursanta w tym okresie" };
   const fieldDiag = { own: own.length, skipped: 0, noTime: 0, time: 0, gps: 0, used: 0, usedGps: 0, cats: {}, samples: [] };
   const field = (() => {
-    const ev = [];
+    const ev = [], homeT = {};
     for (const r of own) {
       if (isNotCountedReview(r.review_details)) {
         fieldDiag.skipped++;
@@ -10153,31 +10153,62 @@ async function txStudentReport(env, sid, days, extra) {
         fieldDiag.used++;
         if (g) fieldDiag.usedGps++;
       }
-      if (kind) ev.push({ d: ymd(r.d), t0, t1: t0 + dur, dur, kind, km: ter2 ? Number(ter2[1]) : null, lat: g ? Number(g[1]) : null, lon: g ? Number(g[2]) : null });
+      if (kind) ev.push({ d: ymd(r.d), t0, t1: t0 + dur, dur, kind, cat, est: !(tt && Number(tt.dur) > 0), km: ter2 ? Number(ter2[1]) : null, lat: g ? Number(g[1]) : null, lon: g ? Number(g[2]) : null });
     }
+    const kmBetween = /* @__PURE__ */ __name((a, b) => {
+      if (a.lat == null || b.lat == null) return 0;
+      const R = 6371, dl = (b.lat - a.lat) * Math.PI / 180, dn = (b.lon - a.lon) * Math.PI / 180, q = Math.sin(dl / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dn / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(q));
+    }, "kmBetween");
+    const homeBetween = /* @__PURE__ */ __name((d, t0, t1) => (homeT[d] || []).some((t) => t > t0 && t < t1), "homeBetween");
     const sess = /* @__PURE__ */ __name((list, gap) => {
       const out = [];
+      let prev = null;
       list.slice().sort((a, b) => a.t0 - b.t0).forEach((e) => {
         const s = out[out.length - 1];
-        if (s && e.t0 - s.t1 <= gap) {
+        if (s && e.t0 - s.t1 <= gap && !homeBetween(e.d, s.t1 - 1, e.t0) && !(prev && kmBetween(prev, e) > 3)) {
+          e.alloc = Math.max(0, e.t1 - s.t1);
           s.t1 = Math.max(s.t1, e.t1);
           s.n++;
           s.talk += e.dur;
           if (e.km != null) s.km = Math.max(s.km || 0, e.km);
-        } else out.push({ t0: e.t0, t1: e.t1, n: 1, talk: e.dur, km: e.km, last: e.t0, lat: null, lon: null, shop: 0, pass: 0 });
+        } else {
+          e.alloc = e.t1 - e.t0;
+          out.push({ t0: e.t0, t1: e.t1, n: 1, talk: e.dur, km: e.km, last: e.t0, lat: null, lon: null, shop: 0, pass: 0, recs: [] });
+        }
         const z = out[out.length - 1];
         z.last = Math.max(z.last, e.t0);
+        if (z.recs) z.recs.push(e);
         if (z.lat == null && e.lat != null) {
           z.lat = e.lat;
           z.lon = e.lon;
         }
         if (e.kind === "shop") z.shop++;
         if (e.kind === "pass") z.pass++;
+        if (e.kind === "city") z.city = (z.city || 0) + 1;
+        if (e.lat != null) prev = e;
       });
       return out;
     }, "sess");
+    const rmin = /* @__PURE__ */ __name((sec, n) => {
+      const m = Math.round(sec / 60);
+      return n && !m ? 1 : m;
+    }, "rmin");
+    const catSum = /* @__PURE__ */ __name((L, kind) => {
+      const E = L.filter((e) => e.kind === kind);
+      const ss = new Set(E.map((e) => e.sid));
+      return {
+        min: rmin(E.reduce((a, e) => a + (e.alloc || 0), 0), E.length),
+        talkMin: Math.round(E.reduce((a, e) => a + e.dur, 0) / 60),
+        n: E.length,
+        outings: ss.size,
+        km: E.reduce((a, e) => Math.max(a, e.km || 0), 0) || null,
+        from: E.length ? Math.min(...E.map((e) => e.t0)) : null,
+        to: E.length ? Math.max(...E.map((e) => e.t1)) : null
+      };
+    }, "catSum");
     const sum = /* @__PURE__ */ __name((ss) => ({
-      min: Math.round(ss.reduce((a, s) => a + (s.t1 - s.t0), 0) / 60),
+      min: ss.reduce((a, s) => a + rmin(s.t1 - s.t0, s.n), 0),
       talkMin: Math.round(ss.reduce((a, s) => a + s.talk, 0) / 60),
       n: ss.reduce((a, s) => a + s.n, 0),
       outings: ss.length,
@@ -10186,18 +10217,29 @@ async function txStudentReport(env, sid, days, extra) {
       to: ss.length ? Math.max(...ss.map((s) => s.t1)) : null
     }), "sum");
     const hm = /* @__PURE__ */ __name((x) => x == null ? "" : String(Math.floor(x / 3600)).padStart(2, "0") + ":" + String(Math.floor(x % 3600 / 60)).padStart(2, "0"), "hm");
+    const FIELD_GAP = 1200;
     const byDay = {};
     ev.forEach((e) => (byDay[e.d] = byDay[e.d] || []).push(e));
+    const dayCats = {};
+    for (const r of own) {
+      if (isNotCountedReview(r.review_details)) continue;
+      const d = ymd(r.d), c = String(r.category || "?");
+      (dayCats[d] = dayCats[d] || {})[c] = (dayCats[d][c] || 0) + 1;
+    }
     const dayRows2 = Object.keys(byDay).sort().map((d) => {
       const L = byDay[d];
-      const shop = sum(sess(L.filter((e) => e.kind === "shop"), 2700)), pass = sum(sess(L.filter((e) => e.kind === "pass"), 2700)), bothS = sess(L.filter((e) => e.kind !== "cphone"), 2700), both = sum(bothS), cph = sum(sess(L.filter((e) => e.kind === "cphone"), 1200));
-      return { d, shop, pass, both: Object.assign(both, {
+      const LT = L.filter((e) => e.kind !== "cphone"), bothS = sess(LT, FIELD_GAP), both = sum(bothS), cph = sum(sess(L.filter((e) => e.kind === "cphone"), 1200));
+      bothS.forEach((o, k) => (o.recs || []).forEach((e) => {
+        e.sid = k;
+      }));
+      const shop = catSum(LT, "shop"), pass = catSum(LT, "pass"), city = catSum(LT, "city");
+      return { d, shop, pass, city, all: dayCats[d] || null, both: Object.assign(both, {
         span: both.from != null ? hm(both.from) + "\u2013" + hm(both.to) : "",
-        outs: bothS.map((o) => ({ from: hm(o.t0), to: hm(o.t1), last: hm(o.last), min: Math.round((o.t1 - o.t0) / 60), talkMin: Math.round(o.talk / 60), n: o.n, shop: o.shop, pass: o.pass, km: o.km || null, lat: o.lat, lon: o.lon, place: null }))
+        outs: bothS.map((o) => ({ from: hm(o.t0), to: hm(o.t1), last: hm(o.last), min: rmin(o.t1 - o.t0, o.n), talkMin: Math.round(o.talk / 60), n: o.n, shop: o.shop, pass: o.pass, city: o.city || 0, recs: (o.recs || []).slice(0, 40).map((e) => ({ t: hm(e.t0) + ":" + String(e.t0 % 60).padStart(2, "0"), end: hm(e.t1), cat: e.cat, dur: Math.round(e.dur), est: e.est ? 1 : 0 })), km: o.km || null, lat: o.lat, lon: o.lon, place: null }))
       }), cphone: Object.assign(cph, { span: cph.from != null ? hm(cph.from) + "\u2013" + hm(cph.to) : "" }) };
     }).filter((r) => r.both.n || r.cphone.n);
     const tot = /* @__PURE__ */ __name((k) => ({ min: dayRows2.reduce((a, r) => a + r[k].min, 0), talkMin: dayRows2.reduce((a, r) => a + r[k].talkMin, 0), n: dayRows2.reduce((a, r) => a + r[k].n, 0), days: dayRows2.filter((r) => r[k].n).length }), "tot");
-    return { days: dayRows2, total: { shop: tot("shop"), pass: tot("pass"), both: tot("both"), cphone: tot("cphone") }, rule: "wyj\u015Bcie = nagrania z przerwami do 45 min (telefony: do 20 min); czas od startu pierwszego do ko\u0144ca ostatniego nagrania" };
+    return { days: dayRows2, total: { shop: tot("shop"), pass: tot("pass"), city: tot("city"), both: tot("both"), cphone: tot("cphone") }, rule: "wyj\u015Bcie = nagrania w terenie z przerwami do 20 min, bez przejazdu > 3 km (GPS) pomi\u0119dzy; czas od startu pierwszego do ko\u0144ca ostatniego nagrania" };
   })();
   try {
     await txFieldPlaces(env, field);
@@ -10301,6 +10343,10 @@ async function txStudentReport(env, sid, days, extra) {
   }, "half");
   const dA = Math.round((new Date(mid) - new Date(from)) / 864e5) + 1, dB = days - dA;
   const growth = { mid, a: half(recs.filter((r) => r.d <= mid), dA), b: half(recs.filter((r) => r.d > mid), dB) };
+  growth.a.from = from;
+  growth.a.to = mid;
+  growth.b.from = new Date((/* @__PURE__ */ new Date(mid + "T12:00:00Z")).getTime() + 864e5).toISOString().slice(0, 10);
+  growth.b.to = to;
   const convCats = {};
   for (const r of recs.filter(isConv)) {
     const c = convCats[r.cat] = convCats[r.cat] || { cat: r.cat, n: 0, dur: 0, ex: [], byDay: {} };
@@ -10553,7 +10599,7 @@ async function txStudentReport(env, sid, days, extra) {
   }
   const diaryCorpus = dList.filter((x) => x.txt.length || x.med != null || x.old != null).map((x) => "### " + x.d + (x.med != null ? " \xB7 relaksacja \xD7" + x.med : "") + (x.old != null ? x.old ? " \xB7 u\u017Cywa\u0142 starej mowy" : " \xB7 bez starej mowy" : "") + "\n" + x.txt.join("\n")).join("\n\n").slice(0, 14e3);
   const corpus = recs.slice().sort((a, b) => a.d.localeCompare(b.d)).map((r) => "### " + r.d + " \xB7 " + r.cat + (r.own ? "" : " \xB7 (nagranie z konta: " + r.owner + ")") + " \xB7 " + Math.round(r.dur) + " s\n" + r.dialog.slice(0, per)).join("\n\n");
-  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzetelny raport, kt\xF3ry trener przeka\u017Ce kursantowi (i rodzicowi) \u2014 ciep\u0142o i zrozumiale, ale konkretnie, jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Niep\u0142ynno\u015Bci nazywaj \u201Ebloki mowy\u201D (nigdy \u201Eblokady\u201D, \u201Estaropolskie\u201D); dawny spos\xF3b m\xF3wienia to \u201Estara mowa\u201D. Daty pisz s\u0142ownie: \u201E12 pa\u017Adziernika\u201D (nigdy \u201E12 10\u201D, \u201E12.10\u201D, \u201E2026-10-12\u201D). Nie podawaj imion sprzedawc\xF3w, przechodni\xF3w ani innych obcych rozm\xF3wc\xF3w \u2014 znamy tylko ich role (chyba \u017Ce imi\u0119 wyra\u017Anie pada w tek\u015Bcie). Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Z TEKST\xD3W NIE DA SI\u0118 OCENI\u0106 BLOK\xD3W MOWY: przerwania, urwane lub powt\xF3rzone s\u0142owa, \u201ECzy\u2026 czy\u2026\u201D, dziwne fragmenty to zwykle b\u0142\u0119dy rozpoznawania mowy albo nak\u0142adanie si\u0119 g\u0142os\xF3w \u2014 nigdy nie nazywaj ich blokami mowy, przerwaniami ani trudno\u015Bciami kursanta i nie wyci\u0105gaj z nich wniosk\xF3w. O blokach mowy i trudno\u015Bciach pisz tylko wtedy, gdy kursant lub trener m\xF3wi o nich wprost (w nagraniu, w dzienniku, w kontek\u015Bcie od trenera) albo gdy kursant zaznaczy\u0142 po nagraniu \u201Eniekomfortowo\u201D/\u201Estres\u201D; je\u015Bli nie ma takich danych, zostaw list\u0119 \u201Etrudnosci\u201D pust\u0105. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami, phone.inne = pozosta\u0142e telefony (rodzina, znajomi, urz\u0119dy, sklepy). Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"skrot":{"wstep":"3\u20134 zdania podsumowania okresu dla kursanta i rodzica (ciep\u0142o, konkretnie, z liczbami)","mocne":["3 najwi\u0119ksze post\u0119py \u2014 ka\u017Cdy max 1 zdanie z liczb\u0105 lub cytatem"],"praca":["2\u20133 rzeczy do dalszej pracy \u2014 max 1 zdanie ka\u017Cda"],"teren":"1\u20132 zdania o czasie w terenie (stats.field: sklepy, przechodnie, razem, telefony do miasta) i co z tego wynika","speciale":[{"zadanie":"\u2026","opis":"1\u20132 zdania: jak posz\u0142o i co to da\u0142o \u2014 wykorzystaj kontekst od trenera"}],"trener":"1\u20133 zdania z kontekstu trenera, wplecione naturalnie (je\u015Bli jest)","dalej":["3 konkretne kroki na najbli\u017Cszy okres"]},"rodzic":{"podsumowanie":"2\u20134 zdania: co wynika z cotygodniowych obserwacji rodzica (tylko je\u015Bli s\u0105 dane)","zmiany":["zmiany tydzie\u0144 po tygodniu (mowa, \u0107wiczenia, samopoczucie) z liczbami"],"wskazowki":["co rodzic mo\u017Ce robi\u0107 w domu, \u017Ceby wspiera\u0107 trening"]},"dziennik":{"podsumowanie":"2\u20134 zdania: co wynika z dziennika (regularno\u015B\u0107, samopoczucie, relaksacja, stara mowa, sen, motywacja)","najwazniejsze":["najwa\u017Cniejsze obserwacje z wpis\xF3w, z kr\xF3tkimi cytatami"],"wplyw":[{"tytul":"\u2026","opis":"jak to wp\u0142ywa na trening Nowej Mowy i co z tym zrobi\u0107"}],"sygnaly":["sygna\u0142y ostrzegawcze (spadek motywacji, powr\xF3t starej mowy, brak relaksacji, zm\u0119czenie) \u2014 tylko je\u015Bli s\u0105 w danych"]},"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
+  const sys = 'Jeste\u015B asystentem trenera w programie Nowa Mowa (nauka p\u0142ynnego m\xF3wienia dla os\xF3b, kt\xF3re si\u0119 j\u0105kaj\u0105; kursanci \u0107wicz\u0105 \u201Esystemy mowy\u201D \u2014 np. zer\xF3wka, \u0142\u0105cznik, jedynka \u2014 i rozmowy w codziennych sytuacjach; harmonogram nagra\u0144; trener np. Dawid; spotkania w Miko\u0142owie). Dostajesz teksty nagra\u0144 kursanta z rozpoznawania mowy (mog\u0105 by\u0107 b\u0142\u0119dy) \u2014 wypowiedzi kursanta oznaczone \u201EKURSANT\u201D. Napisz rzetelny raport, kt\xF3ry trener przeka\u017Ce kursantowi (i rodzicowi) \u2014 ciep\u0142o i zrozumiale, ale konkretnie, jak do\u015Bwiadczony trener, konkretnie, z przyk\u0142adami i cytatami z tekst\xF3w. Nie wymy\u015Blaj fakt\xF3w spoza tekst\xF3w. Nigdy nie u\u017Cywaj s\u0142\xF3w \u201Eterapia\u201D, \u201Eterapeutyczny\u201D, \u201Eterapeuta\u201D \u2014 m\xF3w \u201Etrening\u201D, \u201Ekurs\u201D, \u201Eprogram\u201D. Niep\u0142ynno\u015Bci nazywaj \u201Ebloki mowy\u201D (nigdy \u201Eblokady\u201D, \u201Estaropolskie\u201D); dawny spos\xF3b m\xF3wienia to \u201Estara mowa\u201D. Daty pisz s\u0142ownie: \u201E12 pa\u017Adziernika\u201D (nigdy \u201E12 10\u201D, \u201E12.10\u201D, \u201E2026-10-12\u201D). Nie podawaj imion sprzedawc\xF3w, przechodni\xF3w ani innych obcych rozm\xF3wc\xF3w \u2014 znamy tylko ich role (chyba \u017Ce imi\u0119 wyra\u017Anie pada w tek\u015Bcie). Raport ma przede wszystkim POKAZYWA\u0106 ROZW\xD3J kursanta: por\xF3wnuj pierwsz\u0105 i drug\u0105 po\u0142ow\u0119 okresu (growth.a \u2192 growth.b) i tygodnie (weeks) \u2014 czas nagra\u0144, czas i liczb\u0119 rozm\xF3w, kategorie, samopoczucie, kontakt z innymi kursantami; podawaj konkretne liczby (np. \u201E20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144\u201D z conv[].bestDay). Nie analizuj pauz. Z TEKST\xD3W NIE DA SI\u0118 OCENI\u0106 BLOK\xD3W MOWY: przerwania, urwane lub powt\xF3rzone s\u0142owa, \u201ECzy\u2026 czy\u2026\u201D, dziwne fragmenty to zwykle b\u0142\u0119dy rozpoznawania mowy albo nak\u0142adanie si\u0119 g\u0142os\xF3w \u2014 nigdy nie nazywaj ich blokami mowy, przerwaniami ani trudno\u015Bciami kursanta i nie wyci\u0105gaj z nich wniosk\xF3w. O blokach mowy i trudno\u015Bciach pisz tylko wtedy, gdy kursant lub trener m\xF3wi o nich wprost (w nagraniu, w dzienniku, w kontek\u015Bcie od trenera) albo gdy kursant zaznaczy\u0142 po nagraniu \u201Eniekomfortowo\u201D/\u201Estres\u201D; je\u015Bli nie ma takich danych, zostaw list\u0119 \u201Etrudnosci\u201D pust\u0105. Samopoczucie (mood) to samoocena kursanta w PitchRec po nagraniu: 1 luz, 2 komfortowo, 3 neutralnie, 4 niekomfortowo, 5 stres \u2014 po\u0142\u0105cz je z tym, co s\u0142ycha\u0107 w tekstach. Telefony: phone.trener = rozmowy z trenerem, phone.kursanci = z innymi kursantami, phone.inne = pozosta\u0142e telefony (rodzina, znajomi, urz\u0119dy, sklepy). Zadania specjalne (tasks) to wyzwania programu \u2014 opisz, jak wykonane zadania wp\u0142ywaj\u0105 na trening. Sekcja \u201Etrening\u201D odpowiada na pytanie \u201EJak te nagrania wp\u0142ywaj\u0105 na trening Nowej Mowy?\u201D \u2014 w stylu tego wzoru (dopasuj tre\u015B\u0107 do tego kursanta, cytuj przed\u0142u\u017Cenia z tekst\xF3w, podawaj liczby):\n1. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja) \u2014 w zapisie wida\u0107 stosowanie elementarnych zasad Nowej Mowy: przed\u0142u\u017Ce\u0144 / mi\u0119kkiego nastawienia g\u0142osu (np. \u201Etuuuuutaj\u201D, \u201EDzieeeeeekuuuj\u0119\u201D); u\u017Cywanie techniki w realnych sytuacjach (sklep, ulica, szko\u0142a) przenosi kontrol\u0119 z zaj\u0119\u0107 do codziennego \u017Cycia.\n2. Desensybilizacja i wygaszanie l\u0119ku spo\u0142ecznego \u2014 powtarzalne, kr\xF3tkie rozmowy z obcymi (np. 20 nagra\u0144 jednego dnia w kategorii Przechodzie\u0144) buduj\u0105 odporno\u015B\u0107 na reakcj\u0119 stresow\u0105; wielokrotna ekspozycja sprawia, \u017Ce kontakt z nieznajomym przestaje by\u0107 sytuacj\u0105 zagro\u017Cenia.\n3. Generalizacja mowy na wy\u017Cszych stopniach trudno\u015Bci \u2014 przej\u015Bcie od sytuacji bezpiecznych (rodzina, czytanie) do trudniejszych (telefon do kursanta, wyst\u0105pienia publiczne); przygotowanie do przej\u015Bcia na wy\u017Csze systemy/poziomy (szybsze tempo przy zachowaniu p\u0142ynno\u015Bci i spokoju), je\u015Bli kursant o tym m\xF3wi.\nDyskretnie traktuj sprawy zdrowotne i prywatne (bez szczeg\xF3\u0142\xF3w medycznych). Odpowiedz WY\u0141\u0104CZNIE JSON-em:\nTABELA rozwoj.punkty: \u201Ebylo\u201D = PIERWSZA PO\u0141OWA tego okresu (growth.a, daty growth.a.from\u2013growth.a.to), \u201Ejest\u201D = DRUGA PO\u0141OWA (growth.b). U\u017Cywaj tylko liczb z growth.a i growth.b (activeDays nie mo\u017Ce przekroczy\u0107 days tej po\u0142owy), nie dodawaj innych okres\xF3w ani sum z ca\u0142ego okresu; ka\u017Cda kom\xF3rka max 1 kr\xF3tkie zdanie z liczb\u0105. Czasu w terenie nie dziel na sklepy i przechodni\xF3w \u2014 podawaj tylko razem w mie\u015Bcie (stats.field.total.both) i telefony do miasta.\n{"rozwoj":{"wstep":"2\u20133 zdania: jak kursant si\u0119 rozwin\u0105\u0142 w tym okresie","punkty":[{"obszar":"\u2026","bylo":"\u2026","jest":"\u2026"}]},"wnioski_czas":["3 kr\xF3tkie wnioski o strukturze \u0107wicze\u0144 (na podstawie liczb)"],"tresci":[{"kategoria":"\u2026","cel":"\u2026","tematy":[{"nazwa":"\u2026","opis":"\u2026"}],"charakterystyka":"\u2026"}],"trening":{"wstep":"\u2026","wplyw":[{"tytul":"np. Praktyczne wdra\u017Canie techniki w terenie (Automatyzacja)","punkty":["\u2026","\u2026"]}],"najwazniejsze":[{"tytul":"\u2026","opis":"\u2026"}]},"emocje":{"ocena":"ocena samopoczucia i emocji z nagra\u0144 (samoocena + tekst)","zmiana":"jak si\u0119 zmienia\u0142o w czasie","wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}]},"zadania":[{"zadanie":"nazwa zadania specjalnego","wplyw":"jak wp\u0142ywa na trening tego kursanta"}],"kontakty":{"opis":"kontakt z innymi kursantami i z trenerem \u2014 znaczenie dla treningu","punkty":["\u2026"]},"rozmowy":["wnioski o czasie i liczbie rozm\xF3w (d\u0142u\u017Csze rozmowy, wi\u0119cej wymian, trudniejsze sytuacje)"],"slownictwo":{"wg_sytuacji":[{"kategoria":"\u2026","opis":"\u2026"}],"technika":["przejawy techniki mowy w zapisie (przed\u0142u\u017Cenia, mi\u0119kki start, kotwice) z przyk\u0142adami"],"matryce":["typowe pytania i formu\u0142y z przyk\u0142adami"],"kregi":[{"nazwa":"\u2026","slowa":"\u2026"}],"skladnia":["\u2026"]},"pewnosc":{"osiagniecia":[{"tytul":"\u2026","osiagniecie":"\u2026","wymiar":"\u2026"}],"trudnosci":[{"rodzaj":"\u2026","bariera":"\u2026","sposob":"\u2026"}],"ewolucja":[{"tytul":"\u2026","opis":"\u2026"}],"podsumowanie":"\u2026"},"skrot":{"wstep":"3\u20134 zdania podsumowania okresu dla kursanta i rodzica (ciep\u0142o, konkretnie, z liczbami)","mocne":["3 najwi\u0119ksze post\u0119py \u2014 ka\u017Cdy max 1 zdanie z liczb\u0105 lub cytatem"],"praca":["2\u20133 rzeczy do dalszej pracy \u2014 max 1 zdanie ka\u017Cda"],"teren":"1\u20132 zdania o czasie w terenie (stats.field.total.both = razem w mie\u015Bcie, cphone = telefony do miasta; bez osobnego czasu sklep\xF3w i przechodni\xF3w) i co z tego wynika","speciale":[{"zadanie":"\u2026","opis":"1\u20132 zdania: jak posz\u0142o i co to da\u0142o \u2014 wykorzystaj kontekst od trenera"}],"trener":"1\u20133 zdania z kontekstu trenera, wplecione naturalnie (je\u015Bli jest)","dalej":["3 konkretne kroki na najbli\u017Cszy okres"]},"rodzic":{"podsumowanie":"2\u20134 zdania: co wynika z cotygodniowych obserwacji rodzica (tylko je\u015Bli s\u0105 dane)","zmiany":["zmiany tydzie\u0144 po tygodniu (mowa, \u0107wiczenia, samopoczucie) z liczbami"],"wskazowki":["co rodzic mo\u017Ce robi\u0107 w domu, \u017Ceby wspiera\u0107 trening"]},"dziennik":{"podsumowanie":"2\u20134 zdania: co wynika z dziennika (regularno\u015B\u0107, samopoczucie, relaksacja, stara mowa, sen, motywacja)","najwazniejsze":["najwa\u017Cniejsze obserwacje z wpis\xF3w, z kr\xF3tkimi cytatami"],"wplyw":[{"tytul":"\u2026","opis":"jak to wp\u0142ywa na trening Nowej Mowy i co z tym zrobi\u0107"}],"sygnaly":["sygna\u0142y ostrzegawcze (spadek motywacji, powr\xF3t starej mowy, brak relaksacji, zm\u0119czenie) \u2014 tylko je\u015Bli s\u0105 w danych"]},"etapy":[{"okres":"\u2026","opis":"\u2026"}],"dalej":["co trener mo\u017Ce zrobi\u0107 dalej z tym kursantem \u2014 konkretnie"]}';
   let datedNotes = [];
   try {
     await ensureTrainerNotes(env);
