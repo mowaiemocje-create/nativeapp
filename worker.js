@@ -8451,10 +8451,22 @@ async function handleTrainerVisitDates(request, env, url) {
       }, "prevDay");
       const stu = (await pg.query(`SELECT created_at FROM users WHERE id = $1` + nocache, [studentId])).rows[0];
       const recs = (await pg.query(
-        `SELECT r.record_category_id AS cat, r.date, r.is_correct, now() AS _fresh
+        `SELECT r.id::text AS id, r.record_category_id AS cat, r.date, r.is_correct, r.record_file, now() AS _fresh
            FROM records r WHERE r.user_id = $1 AND r.deleted_at IS NULL` + nocache,
         [studentId]
       )).rows;
+      let sysOv = {};
+      try {
+        const ids2 = recs.map((r) => r.id);
+        for (let i = 0; i < ids2.length; i += 90) {
+          const ch = ids2.slice(i, i + 90);
+          const rs = await env.DB.prepare(`SELECT ns_record_id, system FROM record_system_override WHERE ns_record_id IN (${ch.map(() => "?").join(",")})`).bind(...ch).all();
+          (rs.results || []).forEach((x) => {
+            sysOv[x.ns_record_id] = x.system;
+          });
+        }
+      } catch (e) {
+      }
       const catNames = {};
       const catIds = [...new Set(recs.map((r) => r.cat))];
       if (catIds.length) {
@@ -8466,7 +8478,18 @@ async function handleTrainerVisitDates(request, env, url) {
           catNames[c.id] = c.pl;
         });
       }
-      const recDays = recs.map((r) => ({ cat: r.cat, day: warsawDay(r.date), ok: r.is_correct === true }));
+      const sysNorm = /* @__PURE__ */ __name((x) => String(x || "").trim().toLowerCase(), "sysNorm");
+      const recDays = recs.map((r) => {
+        let sy = sysOv[r.id] || null;
+        if (!sy) {
+          try {
+            const sm = txFileSysMood(r.record_file);
+            sy = sm && sm.system;
+          } catch (e) {
+          }
+        }
+        return { id: r.id, cat: r.cat, day: warsawDay(r.date), ok: r.is_correct === true, sys: sysNorm(sy) };
+      });
       let diaryDays = [];
       try {
         diaryDays = (await pg.query(`SELECT date, is_correct, now() AS _fresh FROM diaries WHERE user_id = $1 AND deleted_at IS NULL` + nocache, [studentId])).rows.map((d) => ({ day: warsawDay(d.date), ok: d.is_correct === true }));
@@ -8481,7 +8504,8 @@ async function handleTrainerVisitDates(request, env, url) {
       const periods = v.rows.map((row) => {
         const visitDay = warsawDay(row.date), to = prevDay(visitDay);
         const gm = String(row.additional_requirements || "").match(/⏰\s*Dogrywka:\s*(\d+)/);
-        const p = { row, from, to, grace: gm ? Math.min(20, Number(gm[1])) : 3, per: {} };
+        const sm2 = String(row.additional_requirements || "").match(/🎛\s*System mowy:\s*(.+?)\s*$/m);
+        const p = { row, from, to, grace: gm ? Math.min(20, Number(gm[1])) : 3, per: {}, sys: sm2 ? sysNorm(sm2[1]) : "" };
         reqs.filter((r) => r.visit_date_id === row.id).forEach((r) => {
           p.per[r.record_category_id] = { category_id: r.record_category_id, category_name: r.name_pl || catNames[r.record_category_id] || "", required_records: Number(r.records_count) || 0, all_records: 0, correct_records: 0, late_records: 0 };
         });
@@ -8522,6 +8546,29 @@ async function handleTrainerVisitDates(request, env, url) {
       }
       const order = recDays.map((r, i) => i).filter((i) => recDays[i].day && recDays[i].ok).sort((a, b) => recDays[a].day.localeCompare(recDays[b].day));
       periods.forEach((p, pi) => {
+        if (!p.sys) return;
+        for (const i of order) {
+          const r = recDays[i];
+          if (r.day <= p.to || r.sys !== p.sys) continue;
+          const oi = owner[i];
+          if (oi !== -1 && oi <= pi) continue;
+          const tgt = oi >= 0 ? periods[oi] : periods[periods.length - 1];
+          if (!tgt || tgt.sys === p.sys) continue;
+          const c = p.per[canon(p, r.cat)];
+          if (!c || !(c.required_records > 0) || c.correct_records >= c.required_records) continue;
+          if (oi >= 0) {
+            const q = cell(periods[oi], r.cat);
+            q.all_records--;
+            q.correct_records--;
+          }
+          c.all_records++;
+          c.correct_records++;
+          c.late_records++;
+          c.sys_records = (c.sys_records || 0) + 1;
+          owner[i] = pi;
+        }
+      });
+      periods.forEach((p, pi) => {
         const last = !periods[pi + 1], limit = !p.grace ? 0 : last ? Infinity : p.grace;
         if (!limit) return;
         const end = periods[pi + 1] ? periods[pi + 1].to : "9999-12-31";
@@ -8555,6 +8602,8 @@ async function handleTrainerVisitDates(request, env, url) {
           recorded_records_categories: cats,
           grace_days: p.grace,
           late_records: cats.reduce((a, c) => a + (c.late_records || 0), 0),
+          sys_records: cats.reduce((a, c) => a + (c.sys_records || 0), 0),
+          system: p.sys || null,
           all_records: cats.reduce((a, c) => a + c.all_records, 0),
           correct_records: cats.reduce((a, c) => a + c.correct_records, 0),
           required_records: cats.reduce((a, c) => a + c.required_records, 0),
