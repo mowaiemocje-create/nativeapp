@@ -16877,6 +16877,41 @@ async function handleScheduleCacheList(request, env, url) {
   const { results } = await env.DB.prepare(
     "SELECT student_id, student_name, pct, period_from, period_to, computed_at FROM schedule_pct_cache"
   ).all();
+  try {
+    const ids = (results || []).map((e) => String(e.student_id));
+    if (ids.length) {
+      const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+      await pg.connect();
+      try {
+        const rs = (await pg.query(`SELECT u.id::text AS id, u.deleted_at, (SELECT MAX(r.created_at) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL) AS last_rec
+          FROM users u WHERE u.id::text = ANY($1::text[])`, [ids])).rows;
+        const m = {};
+        rs.forEach((x) => {
+          m[x.id] = x;
+        });
+        let locks = {};
+        try {
+          await ensureStudentLock(env);
+          ((await env.DB.prepare("SELECT ns_student_id, level FROM student_lock WHERE locked = 1").all()).results || []).forEach((x) => {
+            locks[String(x.ns_student_id)] = x.level || 1;
+          });
+        } catch (e) {
+        }
+        results.forEach((e) => {
+          const x = m[String(e.student_id)];
+          e.deleted = x ? !!x.deleted_at : true;
+          e.last_record_at = x && x.last_rec ? Math.floor(new Date(x.last_rec).getTime() / 1e3) : null;
+          e.locked = locks[String(e.student_id)] || 0;
+        });
+      } finally {
+        try {
+          await pg.end();
+        } catch (e) {
+        }
+      }
+    }
+  } catch (e) {
+  }
   return json({ ok: true, entries: results });
 }
 __name(handleScheduleCacheList, "handleScheduleCacheList");
