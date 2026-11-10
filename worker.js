@@ -6847,6 +6847,34 @@ var worker_default = {
         else await env.DB.prepare("UPDATE student_lock SET seen_at = ? WHERE ns_student_id = ?").bind(now, me.id).run();
         return json({ ok: true });
       }
+      if (url.pathname === "/cat-limits/mine" && request.method === "GET") {
+        const me = await coachStudentFromRequest(request, env, url, null);
+        if (!me || !me.id) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        return json(await catLimitsFor(env, String(me.id), true));
+      }
+      if (url.pathname === "/cat-limits" || url.pathname === "/cat-limits/save") {
+        let cb = {};
+        if (request.method === "POST") {
+          try {
+            cb = await request.json();
+          } catch (e) {
+          }
+        }
+        const who = await contactAuth(env, cb.ns_token || url.searchParams.get("ns_token"), cb.ns_email || url.searchParams.get("ns_email"), cb.ns_server || url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        await catLimitsTable(env);
+        if (request.method === "GET") return json(await catLimitsFor(env, String(url.searchParams.get("student_id") || ""), url.searchParams.get("today") === "1"));
+        const sid = String(cb.student_id || "");
+        if (!sid) return json({ error: "Brak student_id" }, 400);
+        const L = (Array.isArray(cb.limits) ? cb.limits : []).map((x) => ({ cat: String(x.category_id || "").slice(0, 64), name: String(x.category_name || "").slice(0, 120), n: Math.max(0, Math.min(99, parseInt(x.per_day, 10) || 0)) })).filter((x) => x.cat);
+        const now = Math.floor(Date.now() / 1e3);
+        for (const x of L) {
+          if (!x.n) await env.DB.prepare("DELETE FROM cat_limits WHERE ns_student_id = ? AND category_id = ?").bind(sid, x.cat).run();
+          else await env.DB.prepare("INSERT INTO cat_limits (ns_student_id, category_id, category_name, per_day, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(ns_student_id, category_id) DO UPDATE SET category_name = excluded.category_name, per_day = excluded.per_day, set_by = excluded.set_by, set_at = excluded.set_at").bind(sid, x.cat, x.name, x.n, who.email, now).run();
+        }
+        return json(await catLimitsFor(env, sid, false));
+      }
       if (url.pathname === "/student-lock/mine" && request.method === "GET") {
         const me = await coachStudentFromRequest(request, env, url, null);
         if (!me || !me.id) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -7727,6 +7755,51 @@ async function harmoStatsCached(env, nsEmail, dateFrom, dateTo) {
 }
 __name(harmoStatsCached, "harmoStatsCached");
 __name2(harmoStatsCached, "harmoStatsCached");
+async function catLimitsTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS cat_limits (ns_student_id TEXT NOT NULL, category_id TEXT NOT NULL, category_name TEXT, per_day INTEGER NOT NULL, set_by TEXT, set_at INTEGER, PRIMARY KEY (ns_student_id, category_id))").run();
+}
+__name(catLimitsTable, "catLimitsTable");
+__name2(catLimitsTable, "catLimitsTable");
+async function catLimitsFor(env, sid, withToday) {
+  await catLimitsTable(env);
+  const rows = (await env.DB.prepare("SELECT category_id, category_name, per_day, set_by, set_at FROM cat_limits WHERE ns_student_id = ?").bind(sid).all()).results || [];
+  const wDay = /* @__PURE__ */ __name((d) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw" }).format(d), "wDay");
+  const today = wDay(/* @__PURE__ */ new Date());
+  const out = rows.map((r) => ({ category_id: r.category_id, category_name: r.category_name, per_day: r.per_day, set_by: r.set_by, set_at: r.set_at }));
+  if (withToday && out.length) {
+    try {
+      const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+      await pg.connect();
+      try {
+        const cnt = (await pg.query(`SELECT r.record_category_id::text AS cat, r.created_at FROM records r WHERE r.user_id::text = $1 AND r.deleted_at IS NULL AND r.created_at > now() - interval '2 days'`, [sid])).rows;
+        const m = {};
+        cnt.forEach((x) => {
+          if (wDay(new Date(x.created_at)) === today) m[x.cat] = (m[x.cat] || 0) + 1;
+        });
+        out.forEach((o) => {
+          o.today = m[o.category_id] || 0;
+          o.left = Math.max(0, o.per_day - o.today);
+          o.blocked = o.today >= o.per_day;
+        });
+      } finally {
+        try {
+          await pg.end();
+        } catch (e) {
+        }
+      }
+    } catch (e) {
+    }
+  }
+  return {
+    ok: true,
+    student_id: sid,
+    date: today,
+    limits: out,
+    message: { pl: "Na dzi\u015B masz ju\u017C komplet nagra\u0144 w tej kategorii ({n}). Wr\xF3\u0107 jutro \u2014 albo nagraj co\u015B w innej sytuacji \u{1F642}", en: "You have reached today's limit for this category ({n}). Come back tomorrow \u2014 or record a different situation \u{1F642}", sk: "Na dnes u\u017E m\xE1\u0161 v tejto kateg\xF3rii pln\xFD po\u010Det nahr\xE1vok ({n}). Vr\xE1\u0165 sa zajtra \u2014 alebo nahraj in\xFA situ\xE1ciu \u{1F642}", cs: "Na dne\u0161ek u\u017E m\xE1\u0161 v t\xE9to kategorii pln\xFD po\u010Det nahr\xE1vek ({n}). Vra\u0165 se z\xEDtra \u2014 nebo nahraj jinou situaci \u{1F642}" }
+  };
+}
+__name(catLimitsFor, "catLimitsFor");
+__name2(catLimitsFor, "catLimitsFor");
 async function fetchHarmonogramStatsFromPostgres(env, nsEmail, dateFrom, dateTo) {
   const pgClient = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pgClient.connect();
