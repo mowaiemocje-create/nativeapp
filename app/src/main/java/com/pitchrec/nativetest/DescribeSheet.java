@@ -267,7 +267,13 @@ public class DescribeSheet {
         };
         final boolean[] nsAsked = {false};
         final boolean[] clAsked = {false};
+        final boolean[] catInit = {false};
         Runnable onCat = () -> {
+            // 🚦 limit kategorii na dziś wyczerpany — mówimy od razu przy wyborze (zapisać można, wysłać nie)
+            if (catInit[0] && !local && m.fixRecordId.isEmpty() && CatLimits.blockedNow(NsClient.categoryId(selCat[0]))) {
+                new AlertDialog.Builder(a).setTitle("⛔").setMessage(CatLimits.msg(NsClient.categoryId(selCat[0])))
+                        .setPositiveButton(L.t("OK"), null).show();
+            }
             buildSpecial[0].run();
             buildContacts[0].run();
             if (ContactList.CATEGORY.equals(selCat[0]) && !clAsked[0]) {
@@ -281,6 +287,23 @@ public class DescribeSheet {
         };
         buildGrid(a, catGrid, local ? localCategories() : NsClient.CATEGORIES, catBtns, selCat, onCat);
         onCat.run();
+        catInit[0] = true;
+        if (!local) {
+            // 🚦 licznik „zostało dziś: N/M” przy kategoriach z limitem od trenera
+            final Runnable catBadges = () -> {
+                for (Button b : catBtns) {
+                    String item = String.valueOf(b.getTag());
+                    String lab = CatLimits.leftLabel(NsClient.categoryId(item));
+                    if (lab == null) { b.setText(L.t(item)); continue; }
+                    String full = L.t(item) + "\n" + lab;
+                    android.text.SpannableString sp = new android.text.SpannableString(full);
+                    sp.setSpan(new android.text.style.RelativeSizeSpan(0.75f), full.length() - lab.length(), full.length(), 0);
+                    b.setText(sp);
+                }
+            };
+            catBadges.run();
+            CatLimits.fetch(a, ok -> { if (ok) catBadges.run(); });
+        }
         body.addView(Ui.spacer(a, 12));
 
         // SYSTEM NOWEJ MOWY (ostatni wybor zapamietany)

@@ -1169,7 +1169,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 AvailWatch.schedule(this);
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
                 updateNavForLogin();
-                refreshLock();
+                refreshLock(); CatLimits.fetch(MainActivity.this, null); // 🚦 limity kategorii
                 refreshAccountSection();
                 refreshCoach();
                 Toast.makeText(this, L.t("✓ Zalogowano do NewSpeech"), Toast.LENGTH_SHORT).show();
@@ -1375,7 +1375,17 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // 🔒 przed wysłaniem: czy trener nie wstrzymał treningu (błąd sieci = wysyłamy normalnie)
     private void sendToNs(File file) {
         if (!isLoggedIn()) { sendToNsNow(file); return; }
-        StudentLock.check(this, () -> { applyLock(); if (StudentLock.locked) showLockDialog(); else sendToNsNow(file); });
+        StudentLock.check(this, () -> { applyLock(); if (StudentLock.locked) showLockDialog(); else CatLimits.fetch(this, ok -> sendToNsNow(file)); });
+    }
+
+    // 🚦 dzienny limit w kategorii ustawiony przez trenera — komunikat z workera
+    private void showCatLimitBlocked(String catId) {
+        String msg = CatLimits.msg(catId);
+        setStatus("⛔ " + msg);
+        new AlertDialog.Builder(this)
+                .setCustomTitle(nsLogoTitle("⛔ " + L.t("Komplet na dziś")))
+                .setMessage(msg + "\n\n" + L.t("Nagranie zostaje w telefonie (NAGRANIA → ☁ Niewysłane) — wyślij je jutro."))
+                .setPositiveButton(L.t("OK"), null).show();
     }
 
     private void sendToNsNow(File file) {
@@ -1410,12 +1420,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         String catId = NsClient.categoryId(meta.cat);
         if (catId == null) { sendingNow.remove(file.getName()); Toast.makeText(this, L.t("Nieznana kategoria: ") + meta.cat, Toast.LENGTH_LONG).show(); return; }
         boolean isFix = !meta.fixRecordId.isEmpty();
+        if (!isFix && CatLimits.blockedNow(catId)) { sendingNow.remove(file.getName()); showCatLimitBlocked(catId); if ("recs".equals(currentPage)) renderRecsPage(); return; }
         setStatus(isFix ? L.t("☁ Wysyłanie poprawki…") : L.t("☁ Wysyłanie do NS…"));
         NsClient.Callback cb = r -> {
             sendingNow.remove(file.getName());
             if (r.ok) {
                 markNs(file, "sent");
-                if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); }
+                if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); CatLimits.sent(catId); }
                 ContactList.logCall(this, file.getName()); // 📞 do kogo dzwonił — trener widzi
                 LocalTempo.announce(this, file.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, file.getName()); // 📱 tekst z telefonu → baza tekstów
@@ -1457,7 +1468,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     // kategorii, po kolei. Zatrzymuje sie na pierwszym bledzie (np. limit dzienny).
     private void sendAllToNs(File[] files) {
         if (!isLoggedIn()) { sendAllToNsNow(files); return; }
-        StudentLock.check(this, () -> { applyLock(); if (StudentLock.locked) showLockDialog(); else sendAllToNsNow(files); });
+        StudentLock.check(this, () -> { applyLock(); if (StudentLock.locked) showLockDialog(); else CatLimits.fetch(this, ok -> sendAllToNsNow(files)); });
     }
 
     private void sendAllToNsNow(File[] files) {
@@ -1478,7 +1489,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         new AlertDialog.Builder(this)
                 .setTitle(L.t("Wysłać ") + todo.size() + L.t(" nagrań do NS?"))
                 .setMessage(L.t("Każde nagranie trafi do NS w kategorii ze swojego opisu.") + extra)
-                .setPositiveButton(L.t("Wyślij"), (d, w) -> sendNext(todo, 0, 0))
+                .setPositiveButton(L.t("Wyślij"), (d, w) -> { catSkipped = 0; catSkipId = null; sendNext(todo, 0, 0); })
                 .setNegativeButton(getString(R.string.btn_cancel), null)
                 .show();
     }
@@ -1502,9 +1513,13 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         return today.equals(getSharedPreferences("app_settings", MODE_PRIVATE).getString("ns_limit_day", ""));
     }
 
+    private int catSkipped = 0;
+    private String catSkipId = null;
+
     private void sendNext(java.util.List<File> todo, int idx, int okCount) {
         if (idx >= todo.size()) {
-            setStatus(L.t("☁✓ Wysłano ") + okCount + L.t(" nagrań do NS"));
+            setStatus(L.t("☁✓ Wysłano ") + okCount + L.t(" nagrań do NS") + (catSkipped > 0 ? " · ⛔ " + catSkipped : ""));
+            if (catSkipped > 0 && catSkipId != null) showCatLimitBlocked(catSkipId);
             StatsPage.invalidateHarmonogram(this);
             if ("recs".equals(currentPage)) renderRecsPage();
             return;
@@ -1513,6 +1528,8 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         RecMeta fm = RecMeta.load(this, f.getName());
         String catId = NsClient.categoryId(fm.cat);
         if (catId == null) { sendNext(todo, idx + 1, okCount); return; }
+        // 🚦 limit kategorii na dziś wyczerpany — to nagranie czeka w telefonie, reszta idzie dalej
+        if (fm.fixRecordId.isEmpty() && CatLimits.blockedNow(catId)) { catSkipped++; catSkipId = catId; sendNext(todo, idx + 1, okCount); return; }
         if (!fm.fixRecordId.isEmpty() && !coachAllowed.contains(f.getName()) && CoachNotices.forRecord(this, fm.fixRecordId) != null) {
             new AlertDialog.Builder(this)
                     .setTitle("📞 " + L.t("Zadzwoń do trenera"))
@@ -1533,6 +1550,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok) {
                 markNs(f, "sent");
                 rememberNsId(f, r.body);
+                if (fm.fixRecordId.isEmpty()) CatLimits.sent(catId);
                 ContactList.logCall(this, f.getName()); // 📞 do kogo dzwonił — trener widzi
                 LocalTempo.announce(this, f.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, f.getName()); // 📱 tekst z telefonu → baza tekstów
@@ -4014,7 +4032,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.loggedIn = isLoggedIn();
         LiveAudioData.full = Access.full(this);
         Translator.ensureRunning(this); // 📥 tryb tłumacza (konto trenera)
-        refreshLock(); // 🔒 przerwa w treningu (trener wstrzymał aplikację)
+        refreshLock(); CatLimits.fetch(MainActivity.this, null); // 🚦 limity kategorii · 🔒 przerwa w treningu (trener wstrzymał aplikację)
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
         new Handler(Looper.getMainLooper()).postDelayed(this::handlePendingCallRec, 350);
