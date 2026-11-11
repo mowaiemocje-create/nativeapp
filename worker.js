@@ -6486,7 +6486,7 @@ var worker_default = {
           if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
           return json(await resLinkCreate(env, r, body, who, url));
         }
-        if (/^\/offers\/reminders\/(paid|reschedule|resign|reactivate|time|preview-mail|unreschedule|arm)$/.test(url.pathname) && request.method === "POST") {
+        if (/^\/offers\/reminders\/(paid|reschedule|resign|reactivate|time|preview-mail|unreschedule|arm|gcal)$/.test(url.pathname) && request.method === "POST") {
           const act = url.pathname.split("/").pop(), id = Number(body.id) || 0, now = Math.floor(Date.now() / 1e3);
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(id).first();
           if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
@@ -6505,7 +6505,7 @@ var worker_default = {
           await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
           return json({ ok: true });
         }
-        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
+        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events, gcal_event_id, gcal_days FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
         try {
           const ra = (await env.DB.prepare("SELECT id, remind_at FROM course_reminders WHERE remind_at IS NOT NULL").all()).results || [];
           const m = {};
@@ -11347,7 +11347,10 @@ async function ofTables(env) {
     "status_note TEXT",
     "orig_start TEXT",
     "events TEXT",
-    "auto_armed INTEGER"
+    "auto_armed INTEGER",
+    "gcal_event_id TEXT",
+    "gcal_days INTEGER",
+    "gcal_by TEXT"
   ]) {
     try {
       await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
@@ -12578,10 +12581,41 @@ async function ofLifecycle(env, r, act, b, who, now) {
   } else if (act === "reactivate") {
     upd = { status: null, status_at: null, status_note: null };
     ev.push({ t: now, a: "reactivate", by });
+  } else if (act === "gcal") {
+    if (r.gcal_event_id) {
+      try {
+        await gcalDelete(env, r.gcal_event_id);
+      } catch (e) {
+      }
+    }
+    if (b.on === false) {
+      upd = { gcal_event_id: null, gcal_days: null, gcal_by: null };
+      ev.push({ t: now, a: "gcal-off", by });
+    } else {
+      const days = Math.max(1, Math.min(14, parseInt(b.days, 10) || r.gcal_days || 5)), tm = tmOk(b.time) || r.start_time || null;
+      const g = await gcalCourseInsert(env, Object.assign({}, r, { start_time: tm }), days, by);
+      if (g.status !== "ok") return { ok: false, error: g.status === "not_configured" ? "Kalendarz Google nie jest skonfigurowany na serwerze" : "Kalendarz Google: " + (g.error || "b\u0142\u0105d") };
+      upd = { gcal_event_id: g.id, gcal_days: days, gcal_by: by };
+      if (tm && tm !== r.start_time) upd.start_time = tm;
+      ev.push({ t: now, a: "gcal", v: days + " dni" + (tm ? " od " + tm : ""), by });
+    }
   } else return { ok: false, error: "Nieznana akcja" };
   Object.assign(x, upd);
   const mail = kind ? ofLifeMail(x, kind, opt) : null;
   if (act === "preview-mail") return { ok: true, subject: mail && mail.subject, html: mail && mail.html };
+  if (r.gcal_event_id && act !== "gcal" && act !== "preview-mail") {
+    try {
+      if (upd.status === "resigned" || upd.status === "cancelled_school") {
+        await gcalDelete(env, r.gcal_event_id);
+        upd.gcal_event_id = null;
+      } else if (upd.start_date && upd.start_date !== r.start_date || upd.start_time && upd.start_time !== r.start_time) {
+        await gcalDelete(env, r.gcal_event_id);
+        const g = await gcalCourseInsert(env, Object.assign({}, r, upd), r.gcal_days || 5, r.gcal_by || by);
+        upd.gcal_event_id = g.status === "ok" ? g.id : null;
+      }
+    } catch (e) {
+    }
+  }
   const keys = Object.keys(upd);
   upd.events = JSON.stringify(ev.slice(-60));
   keys.push("events");
@@ -16152,6 +16186,49 @@ Telefon trenera: ${row.trainer_phone || "\u2014"}`;
 }
 __name(gcalInsert, "gcalInsert");
 __name2(gcalInsert, "gcalInsert");
+async function gcalCourseInsert(env, r, days, trainerEmail) {
+  const auth = await gcalAuth(env);
+  if (!auth) return { status: "not_configured" };
+  const tz = "Europe/Warsaw", pad = /* @__PURE__ */ __name((n) => String(n).padStart(2, "0"), "pad"), name = r.student_name || r.to_email || "kursant";
+  const body = {
+    summary: `\u{1F393} Kurs Nowej Mowy: ${name}`,
+    description: [
+      `Kursant: ${name}${r.child ? " (dziecko)" : ""}`,
+      r.to_email ? `E-mail: ${r.to_email}` : "",
+      `Start: ${r.start_date}${r.start_time ? " o " + r.start_time : ""} \xB7 ${days} dni`,
+      r.deposit_at ? "\u2705 Zadatek wp\u0142acony" : "",
+      r.paid_at ? "\u{1F4B3} Op\u0142acony" : "",
+      "Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w",
+      "Dodane z panelu trenera (rezerwacje)"
+    ].filter(Boolean).join("\n"),
+    location: "Szko\u0142a Nowej Mowy, Rynek 3/1A, Miko\u0142\xF3w",
+    reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 24 * 60 }, { method: "popup", minutes: 60 }] }
+  };
+  if (r.start_time && /^\d{1,2}:\d{2}$/.test(r.start_time)) {
+    const [h, m] = r.start_time.split(":").map(Number), e = h * 60 + m + 6 * 60;
+    body.start = { dateTime: `${r.start_date}T${pad(h)}:${pad(m)}:00`, timeZone: tz };
+    body.end = { dateTime: `${r.start_date}T${pad(Math.floor(e / 60) % 24)}:${pad(e % 60)}:00`, timeZone: tz };
+    if (days > 1) body.recurrence = [`RRULE:FREQ=DAILY;COUNT=${days}`];
+  } else {
+    body.start = { date: r.start_date };
+    body.end = { date: ofAddDays(r.start_date, days) };
+  }
+  let qs = "";
+  if (auth.mode === "oauth") {
+    const g = [trainerEmail].concat(callDaysCc(env)).map((e) => String(e || "").trim().toLowerCase()).filter((e) => /@/.test(e));
+    if (g.length) {
+      body.attendees = [...new Set(g)].map((email) => ({ email }));
+      body.guestsCanModify = false;
+      qs = "?sendUpdates=all";
+    }
+  }
+  const rr = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(gcalCalendarId(env, auth.mode))}/events${qs}`, { method: "POST", headers: { "Authorization": "Bearer " + auth.token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const d = await rr.json().catch(() => null);
+  if (!rr.ok || !d || !d.id) return { status: "error", error: d && d.error && d.error.message || "HTTP " + rr.status };
+  return { status: "ok", id: d.id, link: d.htmlLink || null };
+}
+__name(gcalCourseInsert, "gcalCourseInsert");
+__name2(gcalCourseInsert, "gcalCourseInsert");
 async function gcalDelete(env, eventId) {
   if (!eventId) return;
   const auth = await gcalAuth(env);
