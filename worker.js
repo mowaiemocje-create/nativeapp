@@ -5669,6 +5669,7 @@ var CORS = {
 var worker_default = {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    env = aiBudgetEnv(env, false);
     const url = new URL(request.url);
     SPEED_ENV = env;
     SPEED_CTX = ctx || null;
@@ -6328,6 +6329,12 @@ var worker_default = {
         }
         return json(await svCheck(env));
       }
+      if (url.pathname === "/ai-usage" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        return json(await handleAiUsage(env, who));
+      }
       if (url.pathname === "/offers/send" && request.method === "POST") return await handleOfferSend(request, env);
       if (url.pathname === "/offers/translate" && request.method === "POST") return await handleOfferTranslate(request, env);
       if (url.pathname === "/raty" && request.method === "GET") return ofRatyPage(url);
@@ -6418,7 +6425,7 @@ var worker_default = {
         await auditLog(env, ctx, request, who, "\u{1F4CE} dopisana oferta/umowa", "e-mail:" + to, kind);
         return json({ ok: true, id });
       }
-      if (url.pathname.startsWith("/offers/reminders")) {
+      if (url.pathname.startsWith("/offers/reminders") || url.pathname === "/offers/fluency/send") {
         let body = {};
         if (request.method === "POST") {
           try {
@@ -6486,6 +6493,7 @@ var worker_default = {
           if (!r) return json({ error: "Nie ma takiej rezerwacji" }, 404);
           return json(await resLinkCreate(env, r, body, who, url));
         }
+        if (url.pathname === "/offers/fluency/send" && request.method === "POST") return json(await ofFluencySend(env, body, who));
         if (/^\/offers\/reminders\/(paid|reschedule|resign|reactivate|time|preview-mail|unreschedule|arm|gcal)$/.test(url.pathname) && request.method === "POST") {
           const act = url.pathname.split("/").pop(), id = Number(body.id) || 0, now = Math.floor(Date.now() / 1e3);
           const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(id).first();
@@ -6505,7 +6513,7 @@ var worker_default = {
           await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
           return json({ ok: true });
         }
-        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events, gcal_event_id, gcal_days FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
+        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events, gcal_event_id, gcal_days, kind, sys, days, pay_account, pay_due, pay_by, extra FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
         try {
           const ra = (await env.DB.prepare("SELECT id, remind_at FROM course_reminders WHERE remind_at IS NOT NULL").all()).results || [];
           const m = {};
@@ -7341,8 +7349,9 @@ var worker_default = {
   // danego kursanta, synchronizujemy tylko jego (nie wszystkich).
   async scheduled(event, env, ctx) {
     ctx.waitUntil(pollPostgresChanges(env));
-    ctx.waitUntil(transcribeTick(env).catch(() => {
+    ctx.waitUntil(transcribeTick(aiBudgetEnv(env, true)).catch(() => {
     }));
+    env = aiBudgetEnv(env, false);
     ctx.waitUntil(srJobTick(env).catch(() => {
     }));
     ctx.waitUntil(ofReminderTick(env).catch(() => {
@@ -11350,7 +11359,14 @@ async function ofTables(env) {
     "auto_armed INTEGER",
     "gcal_event_id TEXT",
     "gcal_days INTEGER",
-    "gcal_by TEXT"
+    "gcal_by TEXT",
+    "kind TEXT",
+    "sys TEXT",
+    "days INTEGER",
+    "pay_account TEXT",
+    "pay_due TEXT",
+    "pay_by TEXT",
+    "extra TEXT"
   ]) {
     try {
       await env.DB.prepare("ALTER TABLE course_reminders ADD COLUMN " + c).run();
@@ -11966,6 +11982,7 @@ async function ofbReply(env, b, who) {
 __name(ofbReply, "ofbReply");
 __name2(ofbReply, "ofbReply");
 function ofAddDays(ymd, n) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd || ""))) return "";
   const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
@@ -11973,6 +11990,7 @@ function ofAddDays(ymd, n) {
 __name(ofAddDays, "ofAddDays");
 var OF_MONTHS = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "wrze\u015Bnia", "pa\u017Adziernika", "listopada", "grudnia"];
 function ofLong(ymd) {
+  if (!ymd) return "termin do ustalenia";
   const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
   return d.getUTCDate() + " " + OF_MONTHS[d.getUTCMonth()];
 }
@@ -11991,7 +12009,152 @@ function ofLang(l) {
   return ["sk", "cs", "en"].indexOf(l) >= 0 ? l : "pl";
 }
 __name(ofLang, "ofLang");
+var OF_FLU_SYS = ["U1", "U1K", "K1", "K2", "FULL"];
+var OF_FLU = {
+  pl: { subj: "Rezerwacja kursu up\u0142ynniania Nowej Mowy \u2013 %s", hi: "Dzie\u0144 dobry,", intro: "potwierdzam rezerwacj\u0119 <b>kursu up\u0142ynniania Nowej Mowy \u2013 system %s</b>. Poni\u017Cej najwa\u017Cniejsze informacje:", course: "Kurs", courseV: "Kurs up\u0142ynniania Nowej Mowy \u2013 %s", days: "Liczba dni", daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "dzie\u0144" : "dni"), "daysV"), term: "Termin", at: "godz.", tbd: "do ustalenia \u2014 ustalimy go wsp\xF3lnie", tbdShort: "termin do ustalenia", price: "Cena kursu", dep: "Zadatek", due: "p\u0142atny do", acc: "Numer konta", iban: "Numer konta (IBAN)", swift: "BIC / SWIFT", rest: "Pozosta\u0142a kwota", payAll: "P\u0142atno\u015B\u0107", payDue: "p\u0142atna do", more: "Opcjonalnie: wi\u0119cej dni", holder: "Odbiorca", bank: "Bank", title: "Tytu\u0142 przelewu", titleV: "Kurs up\u0142ynniania %s \u2013 %n", depBy: "Wp\u0142ata zadatku potwierdza rezerwacj\u0119 miejsca.", moreTxt: "Je\u015Bli d\u0142u\u017Cszy wariant b\u0119dzie lepszy, prosz\u0119 da\u0107 zna\u0107 \u2014 prze\u015Bl\u0119 zaktualizowan\u0105 kwot\u0119.", depTxt: "Wp\u0142ata zadatku potwierdza rezerwacj\u0119 miejsca. Pozosta\u0142\u0105 kwot\u0119 (%r) nale\u017Cy wp\u0142aci\u0107 najp\xF3\u017Aniej 3 dni przed rozpocz\u0119ciem kursu.", fullTxt: "Kwot\u0119 za kurs nale\u017Cy wp\u0142aci\u0107 najp\xF3\u017Aniej 3 dni przed rozpocz\u0119ciem kursu.", tbdTxt: "Gdy ustalimy termin, potwierdz\u0119 go osobn\u0105 wiadomo\u015Bci\u0105.", q: "Je\u015Bli s\u0105 pytania, wystarczy odpowiedzie\u0107 na t\u0119 wiadomo\u015B\u0107.", bye: "Pozdrawiam serdecznie," },
+  sk: { subj: "Rezerv\xE1cia kurzu plynulosti Nowa Mowa \u2013 %s", hi: "Dobr\xFD de\u0148,", intro: "potvrdzujem rezerv\xE1ciu <b>kurzu plynulosti Nowa Mowa \u2013 syst\xE9m %s</b>. Ni\u017E\u0161ie s\xFA najd\xF4le\u017Eitej\u0161ie inform\xE1cie:", course: "Kurz", courseV: "Kurz plynulosti Nowa Mowa \u2013 %s", days: "Po\u010Det dn\xED", daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "de\u0148" : n < 5 ? "dni" : "dn\xED"), "daysV"), term: "Term\xEDn", at: "o", tbd: "dohodneme spolo\u010Dne", tbdShort: "term\xEDn dohodneme", price: "Cena kurzu", dep: "Z\xE1loha", due: "splatn\xE1 do", acc: "\u010C\xEDslo \xFA\u010Dtu", iban: "\u010C\xEDslo \xFA\u010Dtu (IBAN)", swift: "BIC / SWIFT", rest: "Zvy\u0161n\xE1 suma", payAll: "Platba", payDue: "splatn\xE1 do", more: "Volite\u013Ene: viac dn\xED", holder: "Pr\xEDjemca", bank: "Banka", title: "Spr\xE1va pre prij\xEDmate\u013Ea", titleV: "Kurz %s \u2013 %n", depBy: "\xDAhrada z\xE1lohy potvrdzuje rezerv\xE1ciu miesta.", moreTxt: "Ak v\xE1m viac vyhovuje dlh\u0161\xED variant, dajte mi vedie\u0165 \u2014 po\u0161lem upraven\xFA sumu.", depTxt: "\xDAhrada z\xE1lohy potvrdzuje rezerv\xE1ciu miesta. Zvy\u0161n\xFA sumu (%r) je potrebn\xE9 uhradi\u0165 najnesk\xF4r 3 dni pred za\u010Diatkom kurzu.", fullTxt: "Sumu za kurz je potrebn\xE9 uhradi\u0165 najnesk\xF4r 3 dni pred za\u010Diatkom kurzu.", tbdTxt: "Ke\u010F term\xEDn dohodneme, potvrd\xEDm ho samostatnou spr\xE1vou.", q: "Ak m\xE1te ot\xE1zky, sta\u010D\xED odpoveda\u0165 na t\xFAto spr\xE1vu.", bye: "S pozdravom," },
+  cs: { subj: "Rezervace kurzu plynulosti Nowa Mowa \u2013 %s", hi: "Dobr\xFD den,", intro: "potvrzuji rezervaci <b>kurzu plynulosti Nowa Mowa \u2013 syst\xE9m %s</b>. N\xED\u017Ee jsou nejd\u016Fle\u017Eit\u011Bj\u0161\xED informace:", course: "Kurz", courseV: "Kurz plynulosti Nowa Mowa \u2013 %s", days: "Po\u010Det dn\xED", daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "den" : n < 5 ? "dny" : "dn\xED"), "daysV"), term: "Term\xEDn", at: "v", tbd: "domluv\xEDme spole\u010Dn\u011B", tbdShort: "term\xEDn domluv\xEDme", price: "Cena kurzu", dep: "Z\xE1loha", due: "splatn\xE1 do", acc: "\u010C\xEDslo \xFA\u010Dtu", iban: "\u010C\xEDslo \xFA\u010Dtu (IBAN)", swift: "BIC / SWIFT", rest: "Zb\xFDvaj\xEDc\xED \u010D\xE1stka", payAll: "Platba", payDue: "splatn\xE1 do", more: "Voliteln\u011B: v\xEDce dn\xED", holder: "P\u0159\xEDjemce", bank: "Banka", title: "Zpr\xE1va pro p\u0159\xEDjemce", titleV: "Kurz %s \u2013 %n", depBy: "Zaplacen\xED z\xE1lohy potvrzuje rezervaci m\xEDsta.", moreTxt: "Pokud v\xE1m v\xEDce vyhovuje del\u0161\xED varianta, dejte mi v\u011Bd\u011Bt \u2014 po\u0161lu upravenou \u010D\xE1stku.", depTxt: "Zaplacen\xED z\xE1lohy potvrzuje rezervaci m\xEDsta. Zb\xFDvaj\xEDc\xED \u010D\xE1stku (%r) je t\u0159eba uhradit nejpozd\u011Bji 3 dny p\u0159ed za\u010D\xE1tkem kurzu.", fullTxt: "\u010C\xE1stku za kurz je t\u0159eba uhradit nejpozd\u011Bji 3 dny p\u0159ed za\u010D\xE1tkem kurzu.", tbdTxt: "Jakmile term\xEDn domluv\xEDme, potvrd\xEDm ho samostatnou zpr\xE1vou.", q: "Pokud m\xE1te dotazy, sta\u010D\xED odpov\u011Bd\u011Bt na tuto zpr\xE1vu.", bye: "S pozdravem," },
+  en: { subj: "Booking: Nowa Mowa fluency course \u2013 %s", hi: "Hello,", intro: "I confirm your booking of the <b>Nowa Mowa fluency course \u2013 system %s</b>. The key details:", course: "Course", courseV: "Nowa Mowa fluency course \u2013 %s", days: "Number of days", daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "day" : "days"), "daysV"), term: "Dates", at: "at", tbd: "to be agreed together", tbdShort: "dates to be agreed", price: "Course price", dep: "Deposit", due: "due by", acc: "Account number", iban: "Account number (IBAN)", swift: "BIC / SWIFT", rest: "Remaining amount", payAll: "Payment", payDue: "due by", more: "Optional: more days", holder: "Beneficiary", bank: "Bank", title: "Payment reference", titleV: "Fluency course %s \u2013 %n", depBy: "Paying the deposit confirms your place.", moreTxt: "If a longer option suits you better, let me know and I will send the updated amount.", depTxt: "Paying the deposit confirms your place. The remaining amount (%r) is due no later than 3 days before the course starts.", fullTxt: "The course fee is due no later than 3 days before the course starts.", tbdTxt: "Once we agree on the dates, I will confirm them in a separate message.", q: "If you have any questions, just reply to this message.", bye: "Kind regards," }
+};
+function ofFluMoney(n, cur) {
+  const v = Math.round(Number(n) || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, "\xA0");
+  return cur === "EUR" ? v + "\xA0\u20AC" : v + "\xA0z\u0142";
+}
+__name(ofFluMoney, "ofFluMoney");
+function ofFluencyHtml(x) {
+  const L = OF_FLU[ofLang(x.lang)], e = ofEsc, sys = e(x.sys), eur = x.currency === "EUR";
+  const end = x.start && x.days > 1 ? ofAddDays(x.start, x.days - 1) : "";
+  const term = x.start ? "<b>" + e(ofDateL(x.start, x.lang, true)) + (end ? " \u2013 " + e(ofDateL(end, x.lang, true)) : "") + "</b>" + (x.time ? " \xB7 " + L.at + " " + e(x.time) : "") : "<i>" + L.tbd + "</i>";
+  const td = 'style="padding:7px 10px;border-bottom:1px solid #EFE6D8;vertical-align:top"', k = 'style="padding:7px 10px;border-bottom:1px solid #EFE6D8;color:#7A6A55;white-space:nowrap;vertical-align:top"';
+  const row = /* @__PURE__ */ __name((a, b) => "<tr><td " + k + ">" + a + "</td><td " + td + ">" + b + "</td></tr>", "row");
+  const dep = Number(x.deposit) || 0, price = Number(x.price) || 0;
+  let t = row(L.course, "<b>" + L.courseV.replace("%s", sys) + "</b>") + row(L.days, e(L.daysV(x.days))) + row(L.term, term);
+  if (price) t += row(L.price, "<b>" + ofFluMoney(price, x.currency) + "</b>");
+  const more = (x.extra || []).filter((o) => o.days && o.price);
+  if (more.length) t += row(L.more, more.map((o) => e(L.daysV(o.days)) + " \u2014 <b>" + ofFluMoney(o.price, x.currency) + "</b>").join("<br>"));
+  if (dep) t += row(L.dep, "<b>" + ofFluMoney(dep, x.currency) + "</b>" + (x.due ? " \u2014 " + L.due + " " + e(ofDateL(x.due, x.lang, true)) : ""));
+  if (x.pay_by && price) t += dep && price > dep ? row(L.rest, "<b>" + ofFluMoney(price - dep, x.currency) + "</b> \u2014 " + L.payDue + " " + e(ofDateL(x.pay_by, x.lang, true))) : !dep ? row(L.payAll, "<b>" + ofFluMoney(price, x.currency) + "</b> \u2014 " + L.payDue + " " + e(ofDateL(x.pay_by, x.lang, true))) : "";
+  if (x.account) t += (x.holder ? row(L.holder, e(x.holder)) : "") + row(eur ? L.iban : L.acc, '<b translate="no">' + e(x.account) + "</b>") + (eur && x.swift ? row(L.swift, '<span translate="no">' + e(x.swift) + "</span>") : "") + (x.bank ? row(L.bank, e(x.bank) + (eur && x.bank_addr ? "<br>" + e(x.bank_addr) : "")) : "");
+  if (x.account) t += row(L.title, e(L.titleV.replace("%s", x.sys).replace("%n", x.name || x.to)));
+  const pay = x.pay_by ? dep ? L.depBy : "" : dep && price > dep ? L.depTxt.replace("%r", ofFluMoney(price - dep, x.currency)) : price ? L.fullTxt : "";
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222;max-width:620px"><p>' + e(x.hello || L.hi) + "</p><p>" + L.intro.replace("%s", sys) + '</p><table style="border-collapse:collapse;width:100%;font-size:14.5px;background:#FFFCF7;border:1px solid #EFE6D8;border-radius:8px;margin:6px 0 14px">' + t + "</table>" + (pay ? "<p>" + pay + "</p>" : "") + (more.length ? "<p>" + L.moreTxt + "</p>" : "") + (x.start ? "" : "<p>" + L.tbdTxt + "</p>") + (x.note ? "<p>" + e(x.note).replace(/\n/g, "<br>") + "</p>" : "") + "<p>" + L.q + "</p><p>" + L.bye + (x.signer ? "<br>" + e(x.signer) : "") + "<br>Szko\u0142a Nowej Mowy<br>Rynek 3/1A, Miko\u0142\xF3w</p></div>";
+}
+__name(ofFluencyHtml, "ofFluencyHtml");
+__name2(ofFluencyHtml, "ofFluencyHtml");
+async function ofFluencySend(env, b, who) {
+  const S = /* @__PURE__ */ __name((v, n) => String(v == null ? "" : v).trim().slice(0, n || 200), "S"), ymd = /* @__PURE__ */ __name((v) => /^\d{4}-\d{2}-\d{2}$/.test(S(v)) ? S(v) : "", "ymd");
+  await ofTables(env);
+  const old = Number(b.id) ? await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ? AND COALESCE(cancelled, 0) = 0").bind(Number(b.id)).first() : null;
+  if (Number(b.id) && !old) return { ok: false, error: "Nie ma takiej rezerwacji" };
+  const lang = /^(pl|sk|cs|en)$/.test(S(b.lang)) ? S(b.lang) : "pl";
+  const x = {
+    to: S(b.to, 200),
+    name: S(b.name, 120),
+    lang,
+    sys: OF_FLU_SYS.indexOf(S(b.sys).toUpperCase()) >= 0 ? S(b.sys).toUpperCase() : "",
+    days: Math.max(1, Math.min(30, parseInt(b.days, 10) || 0)),
+    price: Math.max(0, Math.round(Number(String(b.price || "").replace(/[^\d.,]/g, "").replace(",", ".")) || 0)),
+    deposit: Math.max(0, Math.round(Number(String(b.deposit || "").replace(/[^\d.,]/g, "").replace(",", ".")) || 0)),
+    currency: S(b.currency) === "EUR" || !b.currency && lang !== "pl" ? "EUR" : "PLN",
+    start: ymd(b.start),
+    time: /^\d{1,2}:\d{2}$/.test(S(b.time)) ? S(b.time).padStart(5, "0") : "",
+    due: ymd(b.due),
+    pay_by: ymd(b.pay_by),
+    extra: (Array.isArray(b.extra) ? b.extra : []).slice(0, 4).map((o) => ({ days: Math.max(0, Math.min(30, parseInt(o && o.days, 10) || 0)), price: Math.max(0, Math.round(Number(String(o && o.price || "").replace(/[^\d.,]/g, "").replace(",", ".")) || 0)) })).filter((o) => o.days && o.price),
+    account: S(b.account, 80),
+    swift: S(b.swift, 20),
+    holder: S(b.holder, 120),
+    bank: S(b.bank, 80),
+    bank_addr: S(b.bank_addr, 120),
+    hello: S(b.hello, 120),
+    note: S(b.note, 1500),
+    signer: S(b.signer, 80)
+  };
+  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i.test(x.to)) return { ok: false, error: "Nieprawid\u0142owy adres e-mail kursanta" };
+  if (!x.sys) return { ok: false, error: "Wybierz system: " + OF_FLU_SYS.join(", ") };
+  if (!b.days) return { ok: false, error: "Podaj liczb\u0119 dni kursu" };
+  if (x.deposit && x.price && x.deposit > x.price) return { ok: false, error: "Zadatek jest wi\u0119kszy ni\u017C cena kursu" };
+  const L = OF_FLU[lang], subject = L.subj.replace("%s", x.sys), html = ofFluencyHtml(x);
+  if (b.preview) return { ok: true, preview: true, subject, html };
+  let mailed = false;
+  if (b.mail !== false) {
+    if (!x.account && (x.price || x.deposit)) return { ok: false, error: "Podaj numer konta" };
+    await ensureGoogleTables(env);
+    const account = await appSettingGet(env, "google_account") || "";
+    const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: x.to, cc: b.cc_me ? who.email : null, replyTo: who.email, subject, html }));
+    if (!s.ok) return { ok: false, error: s.error || "Nie wys\u0142ano maila" };
+    mailed = true;
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+      await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", x.to, subject, who.email, s.id || "", Math.floor(Date.now() / 1e3)).run();
+    } catch (e) {
+    }
+  }
+  const now = Math.floor(Date.now() / 1e3), by = String(who.email || "");
+  let id = old && old.id, ev = [];
+  try {
+    ev = JSON.parse(old && old.events || "[]") || [];
+  } catch (e) {
+  }
+  ev.push({ t: now, a: old ? "fluency-edit" : "fluency", v: x.sys + " \xB7 " + x.days + " dni \xB7 " + (x.start || "termin do ustalenia") + (mailed ? " \xB7 mail" : ""), by });
+  const f = {
+    to_email: x.to,
+    student_name: x.name,
+    start_date: x.start,
+    lang,
+    kind: "fluency",
+    sys: x.sys,
+    days: x.days,
+    price: x.price || null,
+    deposit: x.deposit || null,
+    currency: x.currency,
+    start_time: x.time || null,
+    pay_account: x.account || null,
+    pay_due: x.due || null,
+    pay_by: x.pay_by || null,
+    extra: x.extra.length ? JSON.stringify(x.extra) : null,
+    events: JSON.stringify(ev.slice(-60))
+  };
+  if (old) {
+    if (old.start_date && old.start_date !== x.start && old.start_date !== "") {
+      f.orig_start = old.orig_start || old.start_date;
+      f.sent_at = null;
+    }
+    const keys = Object.keys(f);
+    await env.DB.prepare("UPDATE course_reminders SET " + keys.map((k) => k + " = ?").join(", ") + " WHERE id = ?").bind(...keys.map((k) => f[k]), id).run();
+  } else {
+    f.created_by = by;
+    f.created_at = now;
+    f.child = 0;
+    const keys = Object.keys(f);
+    const r = await env.DB.prepare("INSERT INTO course_reminders (" + keys.join(", ") + ") VALUES (" + keys.map(() => "?").join(", ") + ")").bind(...keys.map((k) => f[k])).run();
+    id = r.meta && r.meta.last_row_id;
+  }
+  let gcal = null;
+  try {
+    const r = await env.DB.prepare("SELECT * FROM course_reminders WHERE id = ?").bind(id).first();
+    if (r && r.gcal_event_id && (!b.gcal || !x.start || old && (old.start_date !== x.start || old.start_time !== r.start_time || (old.days || 0) !== x.days))) {
+      await gcalDelete(env, r.gcal_event_id);
+      await env.DB.prepare("UPDATE course_reminders SET gcal_event_id = NULL WHERE id = ?").bind(id).run();
+      r.gcal_event_id = null;
+      if (b.gcal) gcal = "moved";
+    }
+    if (b.gcal && x.start && r && !r.gcal_event_id) {
+      const g = await gcalCourseInsert(env, r, x.days, by);
+      if (g.status === "ok") {
+        await env.DB.prepare("UPDATE course_reminders SET gcal_event_id = ?, gcal_days = ?, gcal_by = ? WHERE id = ?").bind(g.id, x.days, by, id).run();
+        gcal = "ok";
+      } else gcal = g.status === "not_configured" ? "Kalendarz Google nie jest skonfigurowany" : g.error || "b\u0142\u0105d kalendarza";
+    } else if (b.gcal && !x.start) gcal = "bez daty \u2014 dodasz po ustaleniu terminu";
+  } catch (e) {
+    gcal = String(e && e.message || e);
+  }
+  return { ok: true, id, mailed, subject, gcal };
+}
+__name(ofFluencySend, "ofFluencySend");
+__name2(ofFluencySend, "ofFluencySend");
 function ofDateL(ymd, lang, year) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd || ""))) return (OF_FLU[ofLang(lang)] || OF_FLU.pl).tbdShort;
   const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z"), y = year ? " " + d.getUTCFullYear() : "";
   lang = ofLang(lang);
   if (lang === "pl") return d.getUTCDate() + " " + OF_MONTHS[d.getUTCMonth()] + y;
@@ -12592,7 +12755,8 @@ async function ofLifecycle(env, r, act, b, who, now) {
       upd = { gcal_event_id: null, gcal_days: null, gcal_by: null };
       ev.push({ t: now, a: "gcal-off", by });
     } else {
-      const days = Math.max(1, Math.min(14, parseInt(b.days, 10) || r.gcal_days || 5)), tm = tmOk(b.time) || r.start_time || null;
+      if (!ymdOk(r.start_date)) return { ok: false, error: "Najpierw ustal termin kursu \u2014 bez daty nie da si\u0119 doda\u0107 do kalendarza" };
+      const days = Math.max(1, Math.min(14, parseInt(b.days, 10) || r.gcal_days || r.days || 5)), tm = tmOk(b.time) || r.start_time || null;
       const g = await gcalCourseInsert(env, Object.assign({}, r, { start_time: tm }), days, by);
       if (g.status !== "ok") return { ok: false, error: g.status === "not_configured" ? "Kalendarz Google nie jest skonfigurowany na serwerze" : "Kalendarz Google: " + (g.error || "b\u0142\u0105d") };
       upd = { gcal_event_id: g.id, gcal_days: days, gcal_by: by };
@@ -12610,7 +12774,7 @@ async function ofLifecycle(env, r, act, b, who, now) {
         upd.gcal_event_id = null;
       } else if (upd.start_date && upd.start_date !== r.start_date || upd.start_time && upd.start_time !== r.start_time) {
         await gcalDelete(env, r.gcal_event_id);
-        const g = await gcalCourseInsert(env, Object.assign({}, r, upd), r.gcal_days || 5, r.gcal_by || by);
+        const g = await gcalCourseInsert(env, Object.assign({}, r, upd), r.gcal_days || r.days || 5, r.gcal_by || by);
         upd.gcal_event_id = g.status === "ok" ? g.id : null;
       }
     } catch (e) {
@@ -14874,6 +15038,126 @@ function txLlmText(res) {
 }
 __name(txLlmText, "txLlmText");
 __name2(txLlmText, "txLlmText");
+var AI_NEURON_USD = 0.011 / 1e3;
+var AI_FREE_DAY = 1e4;
+var AI_BG_SHARE = 0.85;
+var AI_RATES = {
+  // neurony: za minutę nagrania albo za 1 mln tokenów [wejście, wyjście]
+  "@cf/openai/whisper-large-v3-turbo": { min: 46.63 },
+  "@cf/openai/whisper": { min: 41.14 },
+  "@cf/deepgram/nova-3": { min: 472.73 },
+  "@cf/openai/gpt-oss-120b": { tok: [31818, 68182] },
+  "@cf/openai/gpt-oss-20b": { tok: [18182, 27273] },
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": { tok: [26668, 204805] },
+  "@cf/meta/llama-3.1-8b-instruct": { tok: [25608, 75147] }
+};
+function aiBudgetUsd(env) {
+  const e = parseFloat(env.AI_BUDGET_EUR), r = parseFloat(env.AI_EUR_USD);
+  return (isFinite(e) && e >= 0 ? e : 5) * (r > 0 ? r : 1.08);
+}
+__name(aiBudgetUsd, "aiBudgetUsd");
+function aiCycleStart(env, now) {
+  const d = Math.min(28, Math.max(1, parseInt(env.AI_BILLING_DAY, 10) || 12)), t = now || /* @__PURE__ */ new Date();
+  let y = t.getUTCFullYear(), m = t.getUTCMonth();
+  if (t.getUTCDate() < d) {
+    m--;
+    if (m < 0) {
+      m = 11;
+      y--;
+    }
+  }
+  return y + "-" + String(m + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+}
+__name(aiCycleStart, "aiCycleStart");
+var AI_USAGE_READY = false;
+var AI_BUDGET_CACHE = null;
+async function aiUsageTable(env) {
+  if (AI_USAGE_READY) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS ai_usage (day TEXT, model TEXT, neurons REAL, calls INTEGER, bg_calls INTEGER, PRIMARY KEY (day, model))").run();
+  AI_USAGE_READY = true;
+}
+__name(aiUsageTable, "aiUsageTable");
+async function aiBudgetState(env, fresh) {
+  if (!fresh && AI_BUDGET_CACHE && Date.now() - AI_BUDGET_CACHE.at < 2e4) return AI_BUDGET_CACHE;
+  await aiUsageTable(env);
+  const start = aiCycleStart(env), rows = (await env.DB.prepare("SELECT day, SUM(neurons) AS n FROM ai_usage WHERE day >= ? GROUP BY day").bind(start).all()).results || [];
+  let billable = 0, total = 0;
+  rows.forEach((r) => {
+    total += r.n || 0;
+    billable += Math.max(0, (r.n || 0) - AI_FREE_DAY);
+  });
+  AI_BUDGET_CACHE = { at: Date.now(), start, neurons: total, billable_usd: billable * AI_NEURON_USD, budget_usd: aiBudgetUsd(env) };
+  return AI_BUDGET_CACHE;
+}
+__name(aiBudgetState, "aiBudgetState");
+function aiNeurons(model, inp, res) {
+  const R = AI_RATES[model] || { tok: [6e4, 15e4] };
+  if (R.min) {
+    let sec = Number(res && (res.transcription_info && res.transcription_info.duration || res.metadata && res.metadata.duration || res.duration)) || 0;
+    if (!sec && inp && typeof inp.audio === "string") sec = inp.audio.length * 0.75 / 4e3;
+    if (!sec && inp && inp.audio && inp.audio.body) sec = 60;
+    return R.min * Math.max(sec, 1) / 60;
+  }
+  const u = res && res.usage || {};
+  let i = Number(u.prompt_tokens || u.input_tokens) || 0, o = Number(u.completion_tokens || u.output_tokens) || 0;
+  if (!i) i = JSON.stringify(inp && (inp.messages || inp.input || inp.prompt) || "").length / 3;
+  if (!o) o = (typeof res === "string" ? res.length : JSON.stringify(res && (res.response || res.output || res.output_text) || "").length) / 3 * (/gpt-oss/.test(model) ? 2 : 1);
+  return (i * R.tok[0] + o * R.tok[1]) / 1e6;
+}
+__name(aiNeurons, "aiNeurons");
+function aiBudgetEnv(env, bg) {
+  if (!env || !env.AI || env.__aiBudget) return env;
+  const ai = env.AI;
+  const wrapped = {
+    run: /* @__PURE__ */ __name(async (model, inp, opts) => {
+      let b = null;
+      try {
+        b = await aiBudgetState(env);
+      } catch (e) {
+      }
+      if (b && b.billable_usd >= b.budget_usd * (bg ? AI_BG_SHARE : 1)) {
+        const nd = ofAddDays(aiCycleStart(env, new Date(Date.parse(b.start + "T12:00:00Z") + 40 * 864e5)), 0);
+        throw new Error("Miesi\u0119czny bud\u017Cet AI wyczerpany (" + (b.budget_usd / (parseFloat(env.AI_EUR_USD) || 1.08)).toFixed(0) + " \u20AC) \u2014 AI wr\xF3ci " + nd.split("-").reverse().join("."));
+      }
+      const res = await ai.run(model, inp, opts);
+      try {
+        const n = aiNeurons(model, inp, res), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+        await aiUsageTable(env);
+        await env.DB.prepare("INSERT INTO ai_usage (day, model, neurons, calls, bg_calls) VALUES (?, ?, ?, 1, ?) ON CONFLICT(day, model) DO UPDATE SET neurons = neurons + excluded.neurons, calls = calls + 1, bg_calls = bg_calls + excluded.bg_calls").bind(day, String(model).slice(0, 80), n, bg ? 1 : 0).run();
+        if (AI_BUDGET_CACHE) AI_BUDGET_CACHE.at = 0;
+      } catch (e) {
+      }
+      return res;
+    }, "run")
+  };
+  return new Proxy(env, { get: /* @__PURE__ */ __name((t, k) => k === "AI" ? wrapped : k === "__aiBudget" ? true : t[k], "get") });
+}
+__name(aiBudgetEnv, "aiBudgetEnv");
+async function handleAiUsage(env, who) {
+  const b = await aiBudgetState(env, true);
+  const rows = (await env.DB.prepare("SELECT day, model, neurons, calls, bg_calls FROM ai_usage WHERE day >= ? ORDER BY day").bind(b.start).all()).results || [];
+  const byModel = {}, byDay = {};
+  rows.forEach((r) => {
+    const m = byModel[r.model] = byModel[r.model] || { model: r.model, neurons: 0, calls: 0, bg_calls: 0 };
+    m.neurons += r.neurons;
+    m.calls += r.calls;
+    m.bg_calls += r.bg_calls || 0;
+    byDay[r.day] = (byDay[r.day] || 0) + r.neurons;
+  });
+  const rate = parseFloat(env.AI_EUR_USD) || 1.08;
+  return {
+    ok: true,
+    cycle_start: b.start,
+    budget_eur: +(b.budget_usd / rate).toFixed(2),
+    spent_eur: +(b.billable_usd / rate).toFixed(2),
+    neurons: Math.round(b.neurons),
+    bg_stop_eur: +(b.budget_usd * AI_BG_SHARE / rate).toFixed(2),
+    models: Object.values(byModel).map((m) => Object.assign(m, { neurons: Math.round(m.neurons), share: b.neurons ? Math.round(m.neurons / b.neurons * 100) : 0 })).sort((a, c) => c.neurons - a.neurons),
+    days: Object.keys(byDay).sort().map((d) => ({ day: d, neurons: Math.round(byDay[d]), eur: +(Math.max(0, byDay[d] - AI_FREE_DAY) * AI_NEURON_USD / rate).toFixed(2) })),
+    note: "Szacunek z liczby token\xF3w / minut nagra\u0144 \u2014 dok\u0142adna kwota na rachunku Cloudflare. Abonament Workers Paid (5 $) liczony osobno."
+  };
+}
+__name(handleAiUsage, "handleAiUsage");
 async function txLlm(env, sys, user, maxTokens) {
   let text = "";
   try {
@@ -15125,6 +15409,11 @@ __name(transcribeAndStore, "transcribeAndStore");
 __name2(transcribeAndStore, "transcribeAndStore");
 async function transcribeTick(env) {
   if (!env.AI || !env.HYPERDRIVE) return;
+  try {
+    const b = await aiBudgetState(env);
+    if (b.billable_usd >= b.budget_usd * AI_BG_SHARE) return;
+  } catch (e) {
+  }
   await ensureTranscriptTables(env);
   const t0 = Date.now(), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
@@ -16191,7 +16480,7 @@ async function gcalCourseInsert(env, r, days, trainerEmail) {
   if (!auth) return { status: "not_configured" };
   const tz = "Europe/Warsaw", pad = /* @__PURE__ */ __name((n) => String(n).padStart(2, "0"), "pad"), name = r.student_name || r.to_email || "kursant";
   const body = {
-    summary: `\u{1F393} Kurs Nowej Mowy: ${name}`,
+    summary: (r.kind === "fluency" ? `\u{1F393} Kurs up\u0142ynniania ${r.sys || ""}: ` : "\u{1F393} Kurs Nowej Mowy: ") + name,
     description: [
       `Kursant: ${name}${r.child ? " (dziecko)" : ""}`,
       r.to_email ? `E-mail: ${r.to_email}` : "",
