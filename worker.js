@@ -6329,6 +6329,64 @@ var worker_default = {
         }
         return json(await svCheck(env));
       }
+      if (url.pathname === "/surveys/online/pending" && request.method === "GET" || url.pathname === "/surveys/online/retry" && request.method === "POST") {
+        const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+        const who = await contactAuth(env, url.searchParams.get("ns_token") || q.ns_token, url.searchParams.get("ns_email") || q.ns_email, url.searchParams.get("ns_server") || q.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (request.method === "GET") {
+          ctx.waitUntil(svfFixTsText(env, url.searchParams.get("fix_dates") === "1").catch(() => {
+          }).then(() => svfTableFix(env, url.searchParams.get("fix_table") === "1")).catch(() => {
+          }).then(() => svfNumFix(env, url.searchParams.get("fix_num") === "1")).catch(() => {
+          }));
+          let recent = [];
+          try {
+            recent = ((await env.DB.prepare("SELECT id, created_at, email, sheet_ok, sheet_tab, sheet_error, data FROM survey_online WHERE COALESCE(test, 0) = 0 ORDER BY id DESC LIMIT 8").all()).results || []).map((r) => {
+              let d = {};
+              try {
+                d = JSON.parse(r.data || "{}");
+              } catch (e) {
+              }
+              const row = d.row || [];
+              return { id: r.id, at: r.created_at, email: r.email, name: (row[3] || row[21] || row[20] || "").trim(), ok: r.sheet_ok === 1, tab: r.sheet_tab || "", error: r.sheet_error || "" };
+            });
+          } catch (e) {
+          }
+          return json({ ok: true, items: await svfPending(env), recent, main_tab: await appSettingGet(env, "svf_main_tab") });
+        }
+        const ids = Array.isArray(q.ids) && q.ids.length ? q.ids.map(Number).filter(Boolean) : (await svfPending(env)).map((x) => x.id);
+        try {
+          return json({ ok: true, results: await svfRetry(env, ids.slice(0, 20)) });
+        } catch (e) {
+          return json({ error: String(e && e.message || e) }, 500);
+        }
+      }
+      if (url.pathname === "/student-data" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(url.searchParams.get("student_id") || "");
+        if (!/^[A-Za-z0-9-]{1,64}$/.test(sid)) return json({ error: "Brak student_id" }, 400);
+        try {
+          const t = await bkCollect(env, sid);
+          return json({ ok: true, tabs: t.map((x) => ({ name: x[0], rows: x[1] })) });
+        } catch (e) {
+          return json({ error: String(e && e.message || e) }, 500);
+        }
+      }
+      if (url.pathname === "/backup/status" && request.method === "GET" || url.pathname === "/backup/run" && request.method === "POST") {
+        const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+        const who = await contactAuth(env, url.searchParams.get("ns_token") || q.ns_token, url.searchParams.get("ns_email") || q.ns_email, url.searchParams.get("ns_server") || q.ns_server);
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        await ensureGoogleTables(env);
+        if (request.method === "GET") return json(await backupStatus(env));
+        await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, at: Math.floor(Date.now() / 1e3) }));
+        ctx.waitUntil(backupRun(env, { snapshot: !!q.snapshot }).catch(async (e) => {
+          await appSettingSet(env, "backup_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
+        }));
+        return json({ ok: true, started: true });
+      }
       if (url.pathname === "/ai-usage" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -6599,13 +6657,25 @@ var worker_default = {
           return json({ ok: true });
         }
       }
+      if (url.pathname === "/research/days/status" || url.pathname === "/research/days/run") {
+        const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+        const g = /* @__PURE__ */ __name((k) => q[k] || url.searchParams.get(k), "g");
+        const who = await contactAuth(env, g("ns_token"), g("ns_email"), g("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        if (url.pathname === "/research/days/run" && request.method === "POST") {
+          const r = await rdTick(env, true);
+          return json(Object.assign({ done: r }, await rdStatus(env)));
+        }
+        return json(await rdStatus(env));
+      }
       if ((url.pathname === "/research/inventory" || url.pathname === "/research/export") && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
         if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
         if (url.pathname === "/research/inventory") return json(await rsInventory(env));
         const ex = await rsExport(env, url);
-        return new Response(ex.csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "X-Rows": String(ex.n), "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Rows" } });
+        return new Response(ex.csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "X-Rows": String(ex.n), "X-Survey": encodeURIComponent(String(ex.survey == null ? "" : ex.survey)), "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Rows, X-Survey" } });
       }
       if (url.pathname === "/talk-stats" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
@@ -6968,6 +7038,12 @@ var worker_default = {
       }
       if (url.pathname === "/admin/force-delete-record" && request.method === "POST") {
         return await handleForceDeleteRecord(request, env);
+      }
+      if (url.pathname === "/pending-corrections" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Brak dost\u0119pu" }, 403);
+        return json(await pendingCorrections(env, url.searchParams.get("student_id")));
       }
       if (url.pathname === "/admin/period-stats" && request.method === "GET") {
         return await handleAdminPeriodStats(request, env, url);
@@ -7364,6 +7440,12 @@ var worker_default = {
     ctx.waitUntil(pwTick(env).catch(() => {
     }));
     ctx.waitUntil(studentLockTick(env).catch(() => {
+    }));
+    ctx.waitUntil(backupTick(env).catch(() => {
+    }));
+    ctx.waitUntil(svfRetryTick(env).catch(() => {
+    }));
+    ctx.waitUntil(rdTick(env).catch(() => {
     }));
   }
 };
@@ -7942,6 +8024,465 @@ function nearestVoivodeship(lat, lng) {
 }
 __name(nearestVoivodeship, "nearestVoivodeship");
 __name2(nearestVoivodeship, "nearestVoivodeship");
+var BK_SKIP_TABLES = /^(sqlite_|_cf_|d1_|access_log$|ai_usage$|app_settings$|oauth_states$|ns_token_ok$|ns_user_cache$|tx_kv$|transcript_usage$|diar_usage$|llm_usage$|record_fp$|harmo_stats_cache$|doc_counters$|offer_tr$|svf_tr$|student_report_job$|needs_correction_cache$|needs_correction_sync_state$)/i;
+var BK_SECRET_COL = /password|passwd|token|secret|otp|salt|encrypted|refresh|api_key|apikey/i;
+var BK_TAB_PL = { course_reminders: "Rezerwacje", offer_meta: "Oferty i umowy", offer_fb: "Oferty \u2013 linki odpowiedzi", offer_fb_ans: "Oferty \u2013 odpowiedzi", record_transcript: "Transkrypcje nagra\u0144", diary_entries: "Dzienniki (aplikacja)", voice_reviews: "G\u0142os\xF3wki trenera", call_days: "Dni telefon\xF3w", contact_calls: "Telefony", contact_lists: "Listy kontakt\xF3w", contact_list_members: "Listy kontakt\xF3w \u2013 osoby", disc_results: "DISC", issued_documents: "Za\u015Bwiadczenia", parent_weekly: "Tydzie\u0144 oczami rodzica", special_task_done: "Zadania specjalne", student_symptoms: "Objawy", symptom_checks: "Objawy \u2013 oceny trenera", trainer_notes: "Notatki trenera", review_log: "Historia ocen", record_system_override: "Systemy nagra\u0144 (trener)", cat_limits: "Limity nagra\u0144", survey_edits: "Ankiety \u2013 poprawki", survey_status: "Ankiety \u2013 status", student_report: "Raporty kursant\xF3w", favorite_records: "Ulubione nagrania", harm_credits: "Harmonogramy \u2013 kredyty", student_focus: "Fokus kursanta", student_lock: "Blokady kont" };
+function bkCell(v) {
+  if (v == null) return "";
+  if (v instanceof Date) return v.toISOString().replace("T", " ").slice(0, 19);
+  if (typeof v === "object") v = JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return v;
+  const t = String(v);
+  return t.length > 45e3 ? t.slice(0, 45e3) + " \u2026[uci\u0119te]" : t;
+}
+__name(bkCell, "bkCell");
+function bkTable(rows, prefer) {
+  const keys = [];
+  (prefer || []).forEach((k) => keys.push(k));
+  rows.forEach((r) => Object.keys(r).forEach((k) => {
+    if (keys.indexOf(k) < 0) keys.push(k);
+  }));
+  const cols = keys.filter((k) => !BK_SECRET_COL.test(k));
+  return [cols].concat(rows.map((r) => cols.map((k) => bkCell(r[k]))));
+}
+__name(bkTable, "bkTable");
+async function bkCollect(env, sid) {
+  const tabs = [], pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  try {
+    const flat = /* @__PURE__ */ __name((rows, extra) => rows.map((r) => Object.assign({}, extra ? extra(r) : {}, r.j || {})), "flat");
+    const users = (await pg.query(`SELECT u.id::text AS id, to_jsonb(u) AS j,
+        (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL)::int AS nagrania,
+        (SELECT MAX(COALESCE(r.date, r.created_at::date))::text FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL) AS ostatnie_nagranie,
+        (SELECT COUNT(*) FROM diaries d WHERE d.user_id = u.id AND d.deleted_at IS NULL)::int AS dzienniki
+      FROM users u ${sid ? "WHERE u.id::text = $1" : ""} ORDER BY u.created_at`, sid ? [String(sid)] : [])).rows;
+    const name = {};
+    users.forEach((u) => {
+      const j = u.j || {};
+      name[u.id] = [((j.first_name || "") + " " + (j.last_name || "")).trim(), j.email || ""];
+    });
+    const who = /* @__PURE__ */ __name((uid) => ({ kursant: (name[uid] || [])[0] || "", email: (name[uid] || [])[1] || "" }), "who");
+    tabs.push(["Kursanci", bkTable(users.map((u) => Object.assign({ nagrania: u.nagrania, ostatnie_nagranie: u.ostatnie_nagranie, dzienniki: u.dzienniki }, u.j || {})), ["id", "first_name", "last_name", "email", "role", "nagrania", "ostatnie_nagranie", "dzienniki"])]);
+    let ov = {};
+    try {
+      ((await env.DB.prepare("SELECT ns_record_id, system FROM record_system_override").all()).results || []).forEach((x) => {
+        ov[x.ns_record_id] = x.system;
+      });
+    } catch (e) {
+    }
+    const recs = (await pg.query(`SELECT r.id::text AS id, r.user_id::text AS uid, COALESCE(r.date, r.created_at::date)::text AS data, COALESCE(rc_t.name, rc.name) AS kategoria,
+        r.is_correct AS poprawne, r.reviewed_at AS ocenione, r.updated_by_author_at AS poprawione_przez_kursanta, r.review_details AS uwagi_trenera, r.record_file AS plik, r.created_at AS wyslane,
+        rt.avg_pct, rt.weak
+      FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rc_t ON rc_t.record_category_id = rc.id AND rc_t.locale = 'pl'
+      LEFT JOIN (SELECT rr.record_id, ROUND(AVG(ru.percent_mark))::int AS avg_pct,
+          string_agg(DISTINCT COALESCE(rrc_t.name, rrc.name), ', ') FILTER (WHERE ru.percent_mark < 100) AS weak
+        FROM record_rates rr LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id
+        LEFT JOIN record_rate_categories rrc ON rrc.id = rr.record_rate_category_id
+        LEFT JOIN record_rate_category_translations rrc_t ON rrc_t.record_rate_category_id = rrc.id AND rrc_t.locale = 'pl'
+        ${sid ? "WHERE rr.record_id IN (SELECT id FROM records WHERE user_id::text = $1)" : ""}
+        GROUP BY rr.record_id) rt ON rt.record_id = r.id
+      WHERE r.deleted_at IS NULL ${sid ? "AND r.user_id::text = $1" : ""} ORDER BY r.created_at`, sid ? [String(sid)] : [])).rows;
+    const tx = {};
+    try {
+      ((await (sid ? env.DB.prepare("SELECT ns_record_id, dur, json_array_length(words) AS nw FROM record_transcript WHERE dur > 0 AND ns_student_id = ?").bind(String(sid)) : env.DB.prepare("SELECT ns_record_id, dur, json_array_length(words) AS nw FROM record_transcript WHERE dur > 0")).all()).results || []).forEach((x) => {
+        tx[x.ns_record_id] = x;
+      });
+    } catch (e) {
+    }
+    const R = recs.map((r) => {
+      const f = r.plik || "", sm = (() => {
+        try {
+          return txFileSysMood(f) || {};
+        } catch (e) {
+          return {};
+        }
+      })(), g = (() => {
+        try {
+          return txFileGps(f);
+        } catch (e) {
+          return null;
+        }
+      })();
+      const tm = (() => {
+        try {
+          return txFileTime(f);
+        } catch (e) {
+          return null;
+        }
+      })(), ter = String(f).match(/teren-(\d+(?:\.\d+)?)km/), t = tx[r.id] || {};
+      let town = "";
+      if (g) {
+        try {
+          town = geoNearestTown(g[0], g[1]) || "";
+        } catch (e) {
+        }
+      }
+      const nc = isNotCountedReview(r.uwagi_trenera);
+      return {
+        r,
+        sys: ov[r.id] || sm.system || "",
+        mood: sm.mood || "",
+        gps: g,
+        town,
+        time: tm ? String(tm[0]).padStart(2, "0") + ":" + String(tm[1]).padStart(2, "0") : "",
+        teren: ter ? Number(ter[1]) : null,
+        dur: Number(t.dur) || 0,
+        words: Number(t.nw) || 0,
+        nc,
+        st: nc ? "nie liczy si\u0119" : r.ocenione == null ? "nieocenione" : r.poprawne ? "poprawne" : "do poprawy"
+      };
+    });
+    tabs.push(["Nagrania", bkTable(R.map((x) => {
+      const r = x.r;
+      return Object.assign(who(r.uid), {
+        id: r.id,
+        kursant_id: r.uid,
+        data: r.data,
+        godzina: x.time,
+        kategoria: r.kategoria,
+        system: x.sys,
+        samopoczucie: x.mood,
+        ocena: x.st,
+        ocena_proc: r.avg_pct,
+        slabe_elementy: r.weak,
+        czas_min: x.dur ? Math.round(x.dur / 6) / 10 : "",
+        slowa: x.words || "",
+        miejscowosc: x.town,
+        gps: x.gps ? x.gps.join(", ") : "",
+        mapa: x.gps ? "https://maps.google.com/?q=" + x.gps.join(",") : "",
+        teren_km: x.teren,
+        ocenione: r.ocenione,
+        poprawione_przez_kursanta: r.poprawione_przez_kursanta,
+        uwagi_trenera: r.uwagi_trenera,
+        plik: r.plik,
+        wyslane: r.wyslane
+      });
+    }))]);
+    const feel = {};
+    try {
+      for (const f of (await pg.query(`SELECT t.id::text AS id, to_jsonb(t) AS j FROM talk_feelings t`)).rows) {
+        const j = f.j || {};
+        feel[f.id] = j.name_pl || j.name || j.title || "";
+      }
+    } catch (e) {
+    }
+    try {
+      for (const f of (await pg.query(`SELECT talk_feeling_id::text AS id, name FROM talk_feeling_translations WHERE locale = 'pl'`)).rows) if (f.name) feel[f.id] = f.name;
+    } catch (e) {
+    }
+    const dia = (await pg.query(`SELECT d.user_id::text AS uid, d.date::text AS d, to_jsonb(d) AS j FROM diaries d WHERE d.deleted_at IS NULL ${sid ? "AND d.user_id::text = $1" : ""} ORDER BY d.date`, sid ? [String(sid)] : [])).rows;
+    tabs.push(["Dzienniki (NS)", bkTable(dia.map((r) => Object.assign(who(r.uid), r.j || {}, r.j && r.j.talk_feeling_id && feel[r.j.talk_feeling_id] ? { samopoczucie: feel[r.j.talk_feeling_id] } : {})), ["kursant", "email", "date", "samopoczucie"])]);
+    let ext = [];
+    try {
+      ext = (await (sid ? env.DB.prepare("SELECT de.*, u.ns_legacy_id AS ns_uid FROM diary_entries de JOIN users u ON u.id = de.user_id WHERE u.ns_legacy_id = ?").bind(String(sid)) : env.DB.prepare("SELECT de.*, u.ns_legacy_id AS ns_uid FROM diary_entries de JOIN users u ON u.id = de.user_id")).all()).results || [];
+    } catch (e) {
+    }
+    const days = {}, catSet = {}, diaKeys = [], extKeys = [];
+    const day = /* @__PURE__ */ __name((uid, d) => {
+      const k = uid + "|" + d;
+      return days[k] = days[k] || Object.assign(who(uid), { kursant_id: uid, data: d, _n: 0, _cats: {}, _sys: {}, _mood: {}, _towns: {}, _gps: [], _times: [], _dur: 0, _conv: 0, _words: 0, _rev: 0, _ok: 0, _bad: 0, _new: 0, _pct: [], _weak: {}, _ter: null, _dia: null, _ext: null });
+    }, "day");
+    for (const x of R) {
+      const r = x.r;
+      if (!r.data) continue;
+      const o = day(r.uid, String(r.data).slice(0, 10)), c = r.kategoria || "bez kategorii";
+      o._n++;
+      o._cats[c] = (o._cats[c] || 0) + 1;
+      catSet[c] = 1;
+      if (x.sys) o._sys[x.sys] = (o._sys[x.sys] || 0) + 1;
+      if (x.mood) o._mood[x.mood] = (o._mood[x.mood] || 0) + 1;
+      if (x.town) o._towns[x.town] = 1;
+      if (x.gps) o._gps.push(x.gps);
+      if (x.time) o._times.push(x.time);
+      o._dur += x.dur;
+      if (!txIsMonolog(c)) o._conv += x.dur;
+      o._words += x.words;
+      if (x.st === "poprawne") {
+        o._rev++;
+        o._ok++;
+      } else if (x.st === "do poprawy") {
+        o._rev++;
+        o._bad++;
+      } else if (x.st === "nieocenione") o._new++;
+      if (r.avg_pct != null) o._pct.push(Number(r.avg_pct));
+      if (r.weak) String(r.weak).split(", ").forEach((w) => {
+        o._weak[w] = (o._weak[w] || 0) + 1;
+      });
+      if (x.teren != null) o._ter = Math.max(o._ter || 0, x.teren);
+    }
+    const skipK = /(^|_)(id|uuid|user|created|updated|deleted|reviewed|review|trainer|token)($|_)|^date$|^entry_date$|^ns_uid$/i;
+    for (const r of dia) {
+      const o = day(r.uid, String(r.d).slice(0, 10)), j = Object.assign({}, r.j || {});
+      if (j.talk_feeling_id) j.samopoczucie_dziennik = feel[j.talk_feeling_id] || j.talk_feeling_id;
+      o._dia = j;
+      Object.keys(j).forEach((k) => {
+        if (!skipK.test(k) && diaKeys.indexOf(k) < 0) diaKeys.push(k);
+      });
+    }
+    for (const e of ext) {
+      if (!e.ns_uid || !e.entry_date) continue;
+      const o = day(String(e.ns_uid), String(e.entry_date).slice(0, 10));
+      o._ext = e;
+      Object.keys(e).forEach((k) => {
+        if (!skipK.test(k) && extKeys.indexOf(k) < 0) extKeys.push(k);
+      });
+    }
+    const cats = Object.keys(catSet).sort(), top = /* @__PURE__ */ __name((o) => Object.keys(o).sort((a, b) => o[b] - o[a]), "top");
+    const DN = ["niedziela", "poniedzia\u0142ek", "wtorek", "\u015Broda", "czwartek", "pi\u0105tek", "sobota"];
+    const dayRows = Object.values(days).sort((a, b) => (a.kursant + a.data).localeCompare(b.kursant + b.data)).map((o) => {
+      const t = o._times.sort(), row = {
+        kursant: o.kursant,
+        email: o.email,
+        kursant_id: o.kursant_id,
+        data: o.data,
+        dzien_tygodnia: DN[(/* @__PURE__ */ new Date(o.data + "T12:00:00Z")).getUTCDay()] || "",
+        system_mowy: top(o._sys).join(", "),
+        nagran_razem: o._n
+      };
+      cats.forEach((c) => {
+        row["nagra\u0144: " + c] = o._cats[c] || 0;
+      });
+      Object.assign(row, {
+        czas_nagran_min: Math.round(o._dur / 6) / 10,
+        czas_rozmow_min: Math.round(o._conv / 6) / 10,
+        slowa: o._words,
+        ocenione: o._rev,
+        poprawne: o._ok,
+        do_poprawy: o._bad,
+        nieocenione: o._new,
+        ocena_srednia_proc: o._pct.length ? Math.round(o._pct.reduce((a, b) => a + b, 0) / o._pct.length) : "",
+        najczestsze_bledy: top(o._weak).slice(0, 4).join(", "),
+        samopoczucie_nagrania: top(o._mood).map((m) => m + " " + o._mood[m]).join(", "),
+        pierwsze_nagranie: t[0] || "",
+        ostatnie_nagranie: t[t.length - 1] || "",
+        miejscowosci: Object.keys(o._towns).join(", "),
+        punkty_gps: o._gps.length,
+        mapa_pierwszy_punkt: o._gps.length ? "https://maps.google.com/?q=" + o._gps[0].join(",") : "",
+        teren_km_max: o._ter,
+        dziennik: o._dia || o._ext ? "tak" : ""
+      });
+      diaKeys.forEach((k) => {
+        row["dziennik: " + k] = o._dia ? o._dia[k] : "";
+      });
+      extKeys.forEach((k) => {
+        row["dziennik+: " + k] = o._ext ? o._ext[k] : "";
+      });
+      return row;
+    });
+    tabs.splice(1, 0, ["\u{1F4C5} Dni treningowe", bkTable(dayRows)]);
+    if (sid) return tabs;
+    try {
+      const vd = (await pg.query(`SELECT v.user_id::text AS uid, to_jsonb(v) AS j FROM visit_dates v ORDER BY v.id`)).rows;
+      tabs.push(["Harmonogramy (NS)", bkTable(flat(vd, (r) => who(r.uid)), ["kursant", "email"])]);
+    } catch (e) {
+    }
+    try {
+      const vr = (await pg.query(`SELECT to_jsonb(q) AS j FROM visit_record_requirements q`)).rows;
+      tabs.push(["Harmonogramy \u2013 wymagania (NS)", bkTable(flat(vr))]);
+    } catch (e) {
+    }
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const names = ((await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).results || []).map((x) => x.name).filter((n) => !BK_SKIP_TABLES.test(n));
+  for (const n of names) {
+    try {
+      const rows = (await env.DB.prepare('SELECT * FROM "' + n.replace(/"/g, "") + '" LIMIT 200000').all()).results || [];
+      tabs.push([BK_TAB_PL[n] ? BK_TAB_PL[n] + " (" + n + ")" : n, bkTable(rows)]);
+    } catch (e) {
+    }
+  }
+  return tabs;
+}
+__name(bkCollect, "bkCollect");
+async function bkSheets(token, path, method, body) {
+  const r = await fetch("https://sheets.googleapis.com/v4/spreadsheets" + path, { method: method || "GET", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : void 0 });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error("Google Sheets: " + (d.error && d.error.message || r.status));
+  return d;
+}
+__name(bkSheets, "bkSheets");
+async function bkWrite(token, sid, tabs, stamp) {
+  const meta = await bkSheets(token, "/" + sid + "?fields=sheets.properties");
+  const have = {};
+  (meta.sheets || []).forEach((s) => {
+    have[s.properties.title] = s.properties.sheetId;
+  });
+  const title = /* @__PURE__ */ __name((t) => String(t).replace(/[\[\]:*?\/\\]/g, "-").slice(0, 95), "title");
+  const all = [["\u2139\uFE0F Info", [["Backup danych kursant\xF3w \u2014 Szko\u0142a Nowej Mowy"], ["Stan na", stamp], ["\u0179r\xF3d\u0142a", "NS (kursanci, nagrania, dzienniki, harmonogramy) + dane panelu trenera (worker)"], ["Pobierz jako Excel", "Plik \u2192 Pobierz \u2192 Microsoft Excel (.xlsx)"], [""], ["Zak\u0142adka", "Wierszy"]].concat(tabs.map((t) => [title(t[0]), t[1].length - 1]))]].concat(tabs);
+  const reqs = [];
+  all.forEach((t) => {
+    const nm = title(t[0]), rows = Math.max(t[1].length + 1, 50), cols = Math.max(...t[1].map((r) => r.length), 2);
+    if (have[nm] === void 0) reqs.push({ addSheet: { properties: { title: nm, gridProperties: { rowCount: rows, columnCount: cols, frozenRowCount: 1 } } } });
+    else reqs.push({ updateSheetProperties: { properties: { sheetId: have[nm], gridProperties: { rowCount: rows, columnCount: cols, frozenRowCount: 1 } }, fields: "gridProperties(rowCount,columnCount,frozenRowCount)" } });
+  });
+  for (let i = 0; i < reqs.length; i += 80) await bkSheets(token, "/" + sid + ":batchUpdate", "POST", { requests: reqs.slice(i, i + 80) });
+  await bkSheets(token, "/" + sid + "/values:batchClear", "POST", { ranges: all.map((t) => "'" + title(t[0]) + "'") });
+  let batch = [], size = 0;
+  const flush = /* @__PURE__ */ __name(async () => {
+    if (!batch.length) return;
+    await bkSheets(token, "/" + sid + "/values:batchUpdate", "POST", { valueInputOption: "RAW", data: batch });
+    batch = [];
+    size = 0;
+  }, "flush");
+  for (const t of all) {
+    const nm = title(t[0]);
+    let start = 0;
+    while (start < t[1].length) {
+      let end = start, chunk = 0;
+      while (end < t[1].length && chunk < 4e6) {
+        chunk += JSON.stringify(t[1][end]).length;
+        end++;
+      }
+      batch.push({ range: "'" + nm + "'!A" + (start + 1), values: t[1].slice(start, end) });
+      size += chunk;
+      if (size > 6e6) await flush();
+      start = end;
+    }
+  }
+  await flush();
+  return all.reduce((a, t) => a + Math.max(0, t[1].length - 1), 0);
+}
+__name(bkWrite, "bkWrite");
+async function bkNewSheet(token, name) {
+  const d = await bkSheets(token, "", "POST", { properties: { title: name, locale: "pl_PL", timeZone: "Europe/Warsaw" } });
+  return d.spreadsheetId;
+}
+__name(bkNewSheet, "bkNewSheet");
+async function backupRun(env, opts) {
+  const token = await googleOAuthAccessToken(env);
+  if (!token) throw new Error("Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz");
+  const now = /* @__PURE__ */ new Date(), pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(now);
+  const tabs = await bkCollect(env);
+  let sid = await appSettingGet(env, "backup_sheet_id");
+  if (sid) {
+    try {
+      await bkSheets(token, "/" + sid + "?fields=spreadsheetId");
+    } catch (e) {
+      sid = null;
+    }
+  }
+  if (!sid) {
+    sid = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup kursant\xF3w");
+    await appSettingSet(env, "backup_sheet_id", sid);
+  }
+  const n = await bkWrite(token, sid, tabs, pl);
+  const day = pl.slice(0, 10);
+  if (day.slice(8, 10) === "01" || opts && opts.snapshot) {
+    const ym = day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
+    if (!done || opts && opts.snapshot) {
+      const s2 = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup " + (opts && opts.snapshot ? day : ym));
+      await bkWrite(token, s2, tabs, pl);
+      await appSettingSet(env, "backup_snapshot_" + ym, s2);
+    }
+  }
+  const st = { ok: true, at: Math.floor(Date.now() / 1e3), when: pl, rows: n, tabs: tabs.length + 1, sheet_id: sid };
+  await appSettingSet(env, "backup_status", JSON.stringify(st));
+  return st;
+}
+__name(backupRun, "backupRun");
+async function backupTick(env) {
+  const pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit" }).format(/* @__PURE__ */ new Date());
+  const day = pl.slice(0, 10), hour = parseInt(pl.slice(11, 13), 10);
+  if (hour !== 3) return;
+  if (await appSettingGet(env, "backup_last_day") === day) return;
+  await ensureGoogleTables(env);
+  await appSettingSet(env, "backup_last_day", day);
+  try {
+    await backupRun(env);
+  } catch (e) {
+    await appSettingSet(env, "backup_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
+  }
+}
+__name(backupTick, "backupTick");
+async function backupStatus(env) {
+  let st = {};
+  try {
+    st = JSON.parse(await appSettingGet(env, "backup_status") || "{}");
+  } catch (e) {
+  }
+  const sid = await appSettingGet(env, "backup_sheet_id");
+  const ssid = await appSettingGet(env, "students_sheet_id");
+  let sst = {};
+  try {
+    sst = JSON.parse(await appSettingGet(env, "students_sheet_status") || "{}");
+  } catch (e) {
+  }
+  return Object.assign({ ok: true }, st, {
+    ok: st.ok !== false,
+    error: st.error || null,
+    sheet_id: sid || null,
+    url: sid ? "https://docs.google.com/spreadsheets/d/" + sid : null,
+    schedule: "codziennie ok. 3:00 (Warszawa); 1. dnia miesi\u0105ca dodatkowa kopia",
+    students: { url: ssid ? "https://docs.google.com/spreadsheets/d/" + ssid : null, when: sst.when || null, ok: sst.ok !== false, error: sst.error || null, rows: sst.rows || 0 }
+  });
+}
+__name(backupStatus, "backupStatus");
+async function pendingCorrections(env, studentId) {
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let rows = [];
+  try {
+    const sid = /^[A-Za-z0-9-]{1,64}$/.test(String(studentId || "")) ? String(studentId) : null;
+    rows = (await pg.query(
+      `SELECT r.id::text AS id, r.user_id::text AS uid, u.first_name, u.last_name, u.email, r.record_file, r.reviewed_at, r.date AS d,
+              COALESCE(rc_t.name, rc.name) AS cat
+       FROM records r
+       JOIN users u ON u.id = r.user_id
+       LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+       LEFT JOIN record_category_translations rc_t ON rc_t.record_category_id = rc.id AND rc_t.locale = 'pl'
+       WHERE r.deleted_at IS NULL AND r.is_correct = false AND r.reviewed_at IS NOT NULL
+         AND (r.updated_by_author_at IS NULL OR r.updated_by_author_at <= r.reviewed_at)
+         ${sid ? "AND r.user_id::text = $1" : ""}
+       ORDER BY r.reviewed_at ASC LIMIT 5000`,
+      sid ? [sid] : []
+    )).rows;
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const ov = {};
+  try {
+    const ids = rows.map((r) => r.id);
+    for (let i = 0; i < ids.length; i += 90) {
+      const ch = ids.slice(i, i + 90);
+      const rs = await env.DB.prepare("SELECT ns_record_id, system FROM record_system_override WHERE ns_record_id IN (" + ch.map(() => "?").join(",") + ")").bind(...ch).all();
+      (rs.results || []).forEach((x) => {
+        ov[x.ns_record_id] = x.system;
+      });
+    }
+  } catch (e) {
+  }
+  const by = {};
+  for (const r of rows) {
+    let sys = ov[r.id] || "";
+    if (!sys) {
+      try {
+        const sm = txFileSysMood(r.record_file);
+        sys = sm && sm.system || "";
+      } catch (e) {
+      }
+    }
+    const g = by[r.uid] = by[r.uid] || { student_id: r.uid, name: ((r.first_name || "") + " " + (r.last_name || "")).trim(), email: r.email || "", n: 0, cats: {}, sys: {}, oldest: null, ids: [] };
+    const cat = r.cat || "bez kategorii", sk = sys || "?";
+    g.n++;
+    g.cats[cat] = (g.cats[cat] || 0) + 1;
+    g.sys[sk] = (g.sys[sk] || 0) + 1;
+    const ts = r.reviewed_at ? Math.floor(new Date(r.reviewed_at).getTime() / 1e3) : null;
+    if (ts && (!g.oldest || ts < g.oldest)) g.oldest = ts;
+    if (g.ids.length < 400) g.ids.push({ id: r.id, cat, sys, reviewed_at: ts, date: r.d instanceof Date ? r.d.toISOString().slice(0, 10) : r.d ? String(r.d).slice(0, 10) : null });
+  }
+  const students = Object.values(by).sort((a, b) => b.n - a.n);
+  return { ok: true, total: rows.length, students };
+}
+__name(pendingCorrections, "pendingCorrections");
+__name2(pendingCorrections, "pendingCorrections");
 async function handleAdminPeriodStats(request, env, url) {
   const nsToken = url.searchParams.get("ns_token");
   const nsEmail = url.searchParams.get("ns_email");
@@ -11039,6 +11580,7 @@ async function rsExport(env, url) {
   const kind = url.searchParams.get("kind") || "recordings";
   const P = await rsPseudo(await rsSalt(env));
   await ensureTranscriptTables(env);
+  if (kind === "days") return await rdExport(env, P);
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
   try {
@@ -11236,6 +11778,460 @@ async function rsExport(env, url) {
 }
 __name(rsExport, "rsExport");
 __name2(rsExport, "rsExport");
+var RD_WINDOW = 14;
+async function rdEnsure(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS research_day (uid TEXT NOT NULL, d TEXT NOT NULL, data TEXT, updated_at INTEGER, PRIMARY KEY (uid, d))").run();
+}
+__name(rdEnsure, "rdEnsure");
+function rdDay(t) {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(t ? new Date(t) : /* @__PURE__ */ new Date());
+}
+__name(rdDay, "rdDay");
+function rdAddDays(d, n) {
+  const x = /* @__PURE__ */ new Date(d + "T12:00:00Z");
+  x.setUTCDate(x.getUTCDate() + n);
+  return x.toISOString().slice(0, 10);
+}
+__name(rdAddDays, "rdAddDays");
+function rdMed(a) {
+  const v = a.filter((x) => x != null && isFinite(x)).sort((p, q) => p - q);
+  if (!v.length) return "";
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2 * 10) / 10;
+}
+__name(rdMed, "rdMed");
+function rdAvg(a) {
+  const v = a.filter((x) => x != null && isFinite(x));
+  return v.length ? Math.round(v.reduce((p, q) => p + q, 0) / v.length * 10) / 10 : "";
+}
+__name(rdAvg, "rdAvg");
+async function rdCompute(env, from, to) {
+  await rdEnsure(env);
+  await ensureTranscriptTables(env);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let recs = [], dia = [], feel = {};
+  try {
+    recs = (await pg.query(`SELECT r.id::text AS id, r.user_id::text AS uid, COALESCE(r.date, r.created_at::date)::text AS d, r.created_at, r.record_file, r.is_correct, r.reviewed_at,
+        r.review_details, COALESCE(rct.name, rc.name) AS category,
+        (SELECT ROUND(AVG(ru.percent_mark))::int FROM record_rates rr LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id WHERE rr.record_id = r.id) AS rate_pct
+      FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+      WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL AND COALESCE(r.date, r.created_at::date) >= $1::date AND COALESCE(r.date, r.created_at::date) < $2::date`, [from, to])).rows;
+    dia = (await pg.query(`SELECT d.user_id::text AS uid, d.date::text AS d, to_jsonb(d) AS j FROM diaries d WHERE d.deleted_at IS NULL AND d.date >= $1::date AND d.date < $2::date`, [from, to])).rows;
+    try {
+      for (const f of (await pg.query(`SELECT t.id::text AS id, to_jsonb(t) AS j FROM talk_feelings t`)).rows) {
+        const j = f.j || {};
+        feel[f.id] = j.name_pl || j.name || j.title || "";
+      }
+    } catch (e) {
+    }
+    try {
+      for (const f of (await pg.query(`SELECT talk_feeling_id::text AS id, name FROM talk_feeling_translations WHERE locale = 'pl'`)).rows) if (f.name) feel[f.id] = f.name;
+    } catch (e) {
+    }
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const tx = {}, ov = {};
+  for (let i = 0; i < recs.length; i += 90) {
+    const ch = recs.slice(i, i + 90).map((r) => r.id);
+    if (!ch.length) break;
+    const q = ch.map(() => "?").join(",");
+    try {
+      for (const x of (await env.DB.prepare(`SELECT ns_record_id, dur, words, speakers FROM record_transcript WHERE status = 'ok' AND ns_record_id IN (${q})`).bind(...ch).all()).results || []) tx[x.ns_record_id] = x;
+    } catch (e) {
+    }
+    try {
+      for (const x of (await env.DB.prepare(`SELECT ns_record_id, system FROM record_system_override WHERE ns_record_id IN (${q})`).bind(...ch).all()).results || []) ov[x.ns_record_id] = x.system;
+    } catch (e) {
+    }
+  }
+  let ext = [];
+  try {
+    ext = (await env.DB.prepare("SELECT de.*, u.ns_legacy_id AS ns_uid FROM diary_entries de JOIN users u ON u.id = de.user_id WHERE de.entry_date >= ? AND de.entry_date < ?").bind(from, to).all()).results || [];
+  } catch (e) {
+  }
+  const days = {};
+  const day = /* @__PURE__ */ __name((uid, d) => {
+    const k = uid + "|" + d;
+    return days[k] = days[k] || { uid, d, n: 0, cats: {}, sys: {}, dur: 0, mono: 0, conv: 0, rev: 0, ok: 0, bad: 0, nc: 0, rate: [], mood: [], ter: [], home: 0, gps: 0, hours: [], syl: [], sylT: [], pause: [], p1: 0, monoN: 0, dia: null };
+  }, "day");
+  for (const r of recs) {
+    if (!r.d) continue;
+    const o = day(r.uid, String(r.d).slice(0, 10)), f = rsFile(r.record_file), cat = r.category || "bez kategorii", t = tx[r.id];
+    if (isNotCountedReview(r.review_details)) {
+      o.nc++;
+      continue;
+    }
+    o.n++;
+    o.cats[cat] = (o.cats[cat] || 0) + 1;
+    const sys = ov[r.id] || f.system;
+    if (sys) o.sys[sys] = (o.sys[sys] || 0) + 1;
+    if (f.mood && RS_MOOD[f.mood]) o.mood.push(RS_MOOD[f.mood]);
+    if (f.teren_km != null) o.ter.push(f.teren_km);
+    if (f.dom) o.home++;
+    if (f.has_gps) o.gps++;
+    const h = f.hour != null ? f.hour : rsWarsaw(r.created_at).hour;
+    if (h != null) o.hours.push(h);
+    if (r.reviewed_at) {
+      o.rev++;
+      if (r.is_correct === true) o.ok++;
+      else if (r.is_correct === false) o.bad++;
+    }
+    if (r.rate_pct != null) o.rate.push(Number(r.rate_pct));
+    const dur = t ? Number(t.dur) || 0 : 0;
+    o.dur += dur;
+    if (txIsMonolog(cat)) {
+      o.mono += dur;
+      if (t) {
+        let w = [];
+        try {
+          w = JSON.parse(t.words || "[]");
+        } catch (e) {
+        }
+        let sp = null;
+        try {
+          sp = t.speakers ? JSON.parse(t.speakers) : null;
+        } catch (e) {
+        }
+        if (!(sp && sp.length === w.length && new Set(sp).size > 1)) {
+          const m = srMeasure(w, t.dur, 20);
+          if (m) {
+            o.monoN++;
+            o.syl.push(m.syl_min_speech);
+            o.sylT.push(m.syl_min);
+            o.pause.push(m.pause_pct);
+            o.p1 += m.pauses_1s;
+          }
+        }
+      }
+    } else o.conv += dur;
+  }
+  const dget = /* @__PURE__ */ __name((o) => o.dia = o.dia || { old: null, med: null, motiv: null, sleep: null, tired: null, coffee: null, feel: "", correct: null }, "dget");
+  for (const r of dia) {
+    const j = r.j || {}, o = dget(day(r.uid, String(r.d).slice(0, 10)));
+    if (j.old_speech_usage != null) o.old = j.old_speech_usage ? 1 : 0;
+    if (j.meditation_count != null) o.med = Number(j.meditation_count) || 0;
+    if (j.talk_feeling_id) o.feel = feel[String(j.talk_feeling_id)] || "";
+    if (j.is_correct != null) o.correct = j.is_correct ? 1 : 0;
+  }
+  for (const e of ext) {
+    if (!e.ns_uid || !e.entry_date) continue;
+    const o = dget(day(String(e.ns_uid), String(e.entry_date).slice(0, 10)));
+    const num = /* @__PURE__ */ __name((v) => v != null && v !== "" && /^-?\d+(\.\d+)?$/.test(String(v)) ? Number(v) : null, "num");
+    if (o.med == null && num(e.meditation_count) != null) o.med = num(e.meditation_count);
+    if (num(e.motivation) != null) o.motiv = num(e.motivation);
+    if (num(e.sleep_hours) != null) o.sleep = num(e.sleep_hours);
+    if (num(e.tiredness) != null) o.tired = num(e.tiredness);
+    if (num(e.coffee_count) != null) o.coffee = num(e.coffee_count);
+    if (!o.feel && e.feeling) o.feel = feel[String(e.feeling)] || "";
+  }
+  const top = /* @__PURE__ */ __name((m) => Object.keys(m).sort((a, b) => m[b] - m[a]), "top");
+  const rows = Object.values(days).filter((o) => o.n || o.dia).map((o) => {
+    const D = o.dia || {}, mm = /* @__PURE__ */ __name((s) => Math.round(s / 6) / 10, "mm");
+    return { uid: o.uid, d: o.d, data: {
+      recordings: o.n,
+      not_counted: o.nc,
+      cats: o.cats,
+      system: top(o.sys)[0] || "",
+      systems: top(o.sys).join(" + "),
+      min_total: mm(o.dur),
+      min_monolog: mm(o.mono),
+      min_conversation: mm(o.conv),
+      reviewed: o.rev,
+      correct: o.ok,
+      to_fix: o.bad,
+      fluent_pct: o.rev ? Math.round(o.ok / o.rev * 100) : "",
+      rate_avg_pct: rdAvg(o.rate),
+      mood_avg: rdAvg(o.mood),
+      mood_n: o.mood.length,
+      teren_km_max: o.ter.length ? Math.max(...o.ter) : "",
+      at_home: o.home,
+      with_gps: o.gps,
+      hour_first: o.hours.length ? Math.min(...o.hours) : "",
+      hour_last: o.hours.length ? Math.max(...o.hours) : "",
+      monolog_measured: o.monoN,
+      syl_min_speech_med: rdMed(o.syl),
+      syl_min_med: rdMed(o.sylT),
+      pause_pct_med: rdMed(o.pause),
+      pauses_1s: o.monoN ? o.p1 : "",
+      diary: o.dia ? 1 : 0,
+      old_speech: D.old != null ? D.old : "",
+      diary_correct: D.correct != null ? D.correct : "",
+      meditation: D.med != null ? D.med : "",
+      motivation: D.motiv != null ? D.motiv : "",
+      sleep_h: D.sleep != null ? D.sleep : "",
+      tiredness: D.tired != null ? D.tired : "",
+      coffee: D.coffee != null ? D.coffee : "",
+      feeling: D.feel || ""
+    } };
+  });
+  const now = Math.floor(Date.now() / 1e3), st = [env.DB.prepare("DELETE FROM research_day WHERE d >= ? AND d < ?").bind(from, to)];
+  for (const r of rows) st.push(env.DB.prepare("INSERT OR REPLACE INTO research_day (uid, d, data, updated_at) VALUES (?, ?, ?, ?)").bind(r.uid, r.d, JSON.stringify(r.data), now));
+  for (let i = 0; i < st.length; i += 80) await env.DB.batch(st.slice(i, i + 80));
+  return rows.length;
+}
+__name(rdCompute, "rdCompute");
+async function rdTick(env, force) {
+  await ensureGoogleTables(env);
+  const today = rdDay(), hour = Number(new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", hour: "2-digit", hourCycle: "h23" }).format(/* @__PURE__ */ new Date()));
+  const winFrom = rdAddDays(today, -RD_WINDOW);
+  let did = null;
+  if (force || hour >= 2 && await appSettingGet(env, "rd_last_day") !== today) {
+    await appSettingSet(env, "rd_last_day", today);
+    const n = await rdCompute(env, winFrom, today);
+    await appSettingSet(env, "rd_status", JSON.stringify({ ok: true, at: Math.floor(Date.now() / 1e3), window: [winFrom, today], rows: n }));
+    did = "window";
+  }
+  let cur = await appSettingGet(env, "rd_backfill");
+  if (cur === "done") return did;
+  if (!force && (/* @__PURE__ */ new Date()).getUTCMinutes() % 5 !== 3) return did;
+  if (!cur) {
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    await pg.connect();
+    try {
+      const r = (await pg.query(`SELECT MIN(COALESCE(date, created_at::date))::text AS m FROM records WHERE deleted_at IS NULL AND record_file IS NOT NULL`)).rows[0];
+      cur = r && r.m ? String(r.m).slice(0, 7) + "-01" : winFrom;
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+  }
+  if (cur >= winFrom) {
+    await appSettingSet(env, "rd_backfill", "done");
+    return did;
+  }
+  const nx = /* @__PURE__ */ new Date(cur + "T12:00:00Z");
+  nx.setUTCMonth(nx.getUTCMonth() + 1);
+  const to = nx.toISOString().slice(0, 10) < winFrom ? nx.toISOString().slice(0, 10) : winFrom;
+  await rdCompute(env, cur, to);
+  await appSettingSet(env, "rd_backfill", to >= winFrom ? "done" : to);
+  return did || "backfill " + cur;
+}
+__name(rdTick, "rdTick");
+async function rdStatus(env) {
+  await rdEnsure(env);
+  await ensureGoogleTables(env);
+  const c = await env.DB.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT uid) AS s, MIN(d) AS a, MAX(d) AS b FROM research_day").first();
+  let st = {};
+  try {
+    st = JSON.parse(await appSettingGet(env, "rd_status") || "{}");
+  } catch (e) {
+  }
+  return { rows: c.n, students: c.s, first: c.a, last: c.b, backfill: await appSettingGet(env, "rd_backfill") || "start", last_run: st };
+}
+__name(rdStatus, "rdStatus");
+var RD_SV_SKIP = /sygnatura|e-?mail|imi[ęe]|nazwisk|telefon|data urodzenia|miejscowo|adres|nazwa aktualnej|przedszkole|szko[łl]a \/|^\s*szko[łl]a\s*$|rodzic/i;
+async function rdSurvey(env) {
+  const out = { cols: [], by: {}, error: "" };
+  let L;
+  try {
+    L = await svList(env);
+  } catch (e) {
+    out.error = String(e && e.message || e);
+    return out;
+  }
+  if (!L || !L.ok) {
+    out.error = L && L.error || "brak ankiet";
+    return out;
+  }
+  const H = (L.header || []).map((h) => String(h || "").replace(/\s+/g, " ").trim());
+  const items = L.items.filter((x) => !x.hidden && !x.merged_into && x.student && x.student.id && !(x.row && x.row._test));
+  const tsOf = /* @__PURE__ */ __name((x) => {
+    const t = svfTsParse(String(x.row[0] || ""));
+    return t ? t.serial : 1e9;
+  }, "tsOf");
+  items.sort((a, b) => tsOf(a) - tsOf(b));
+  const first = {};
+  for (const x of items) {
+    const k = String(x.student.id);
+    if (!first[k]) first[k] = x;
+  }
+  const F = Object.values(first), keep = [];
+  for (let j = 1; j < H.length; j++) {
+    if (!H[j] || RD_SV_SKIP.test(H[j])) continue;
+    const vals = F.map((x) => String(x.row[j] == null ? "" : x.row[j]).trim()).filter(Boolean);
+    if (!vals.length) continue;
+    const avg = vals.reduce((p, v) => p + v.length, 0) / vals.length, uniq = new Set(vals).size / vals.length;
+    if (avg > 45 || uniq > 0.9 && avg > 20 && vals.length >= 5) continue;
+    keep.push(j);
+  }
+  const sym = {};
+  try {
+    await ssTable(env);
+    for (const x of (await env.DB.prepare("SELECT ns_student_id, levels FROM student_symptoms").all()).results || []) {
+      try {
+        sym[x.ns_student_id] = JSON.parse(x.levels || "{}");
+      } catch (e) {
+      }
+    }
+  } catch (e) {
+  }
+  const symCols = [...new Set(Object.values(sym).flatMap((o) => Object.keys(o)))].map(Number).filter((k) => H[k]).sort((a, b) => a - b);
+  const name = /* @__PURE__ */ __name((h) => "ankieta: " + h.replace(/^.*\[(.*)\]\s*$/, (m0, g) => h.replace(/\s*\[.*$/, "").slice(0, 40) + " [" + g + "]").slice(0, 90), "name");
+  out.cols = ["survey_date", "trainer_severity"].concat(keep.map((j) => name(H[j]))).concat(symCols.map((k) => "trener objawy: " + H[k].replace(/^.*\[(.*)\]\s*$/, "$1").slice(0, 60)));
+  const W = ["brak", "czasami", "cz\u0119sto", "zawsze"], sev = typeof SV_SEVERITY !== "undefined" ? SV_SEVERITY : [];
+  for (const [sid, x] of Object.entries(first)) {
+    const o = { survey_date: String(x.row[0] || "").slice(0, 10).replace(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/, "$3-$2-$1"), trainer_severity: sev[x.severity || 0] || "" };
+    const t = svfTsParse(String(x.row[0] || ""));
+    if (t) o.survey_date = new Date((t.serial - 25569) * 864e5).toISOString().slice(0, 10);
+    keep.forEach((j) => {
+      o[name(H[j])] = x.row[j] == null ? "" : x.row[j];
+    });
+    const lv = sym[sid] || {};
+    symCols.forEach((k) => {
+      o["trener objawy: " + H[k].replace(/^.*\[(.*)\]\s*$/, "$1").slice(0, 60)] = lv[k] != null ? W[lv[k]] || lv[k] : "";
+    });
+    out.by[sid] = o;
+  }
+  return out;
+}
+__name(rdSurvey, "rdSurvey");
+async function rdExport(env, P) {
+  await rdEnsure(env);
+  const all = (await env.DB.prepare("SELECT uid, d, data FROM research_day ORDER BY uid, d").all()).results || [];
+  const uids = [...new Set(all.map((r) => r.uid))], info = {};
+  if (uids.length) {
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    await pg.connect();
+    try {
+      for (const u of (await pg.query(`SELECT u.id::text AS id, u.country, to_jsonb(u) ->> 'gender' AS gender, to_jsonb(u) ->> 'birth_date' AS birth_date,
+        (SELECT MIN(COALESCE(r.date, r.created_at::date))::text FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL AND r.record_file IS NOT NULL) AS first_rec,
+        (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL AND r.record_file IS NOT NULL)::int AS n_rec
+      FROM users u WHERE u.id::text = ANY($1::text[])`, [uids])).rows) info[u.id] = u;
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+  }
+  const disc = {};
+  try {
+    for (const x of (await env.DB.prepare("SELECT ns_user_id, profile_code FROM disc_results ORDER BY created_at").all()).results || []) disc[x.ns_user_id] = x.profile_code;
+  } catch (e) {
+  }
+  const SV = await rdSurvey(env).catch((e) => ({ cols: [], by: {}, error: String(e && e.message || e) }));
+  const slug = /* @__PURE__ */ __name((s) => "n_" + String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""), "slug");
+  const catCols = {};
+  const parsed = all.map((r) => {
+    let j = {};
+    try {
+      j = JSON.parse(r.data || "{}");
+    } catch (e) {
+    }
+    Object.keys(j.cats || {}).forEach((c) => {
+      catCols[slug(c)] = 1;
+    });
+    return { uid: r.uid, d: r.d, j };
+  });
+  const out = [];
+  let prev = null, first = null, active = 0, streak = 0, prevActive = null;
+  for (const r of parsed) {
+    if (r.uid !== prev) {
+      prev = r.uid;
+      first = null;
+      active = 0;
+      streak = 0;
+      prevActive = null;
+    }
+    const j = r.j, u = info[r.uid] || {}, isRec = (j.recordings || 0) > 0;
+    if (!first) first = (info[r.uid] || {}).first_rec || null;
+    if (isRec && (!first || r.d < first)) first = r.d;
+    const gap = isRec && prevActive ? Math.round((Date.parse(r.d) - Date.parse(prevActive)) / 864e5) : "";
+    if (isRec) {
+      active++;
+      streak = gap === 1 ? streak + 1 : 1;
+      prevActive = r.d;
+    }
+    const by = u.birth_date ? Number(String(u.birth_date).slice(0, 4)) : null, age = by ? Number(r.d.slice(0, 4)) - by : null;
+    const o = Object.assign({
+      pid: await P("K", r.uid),
+      date: r.d,
+      weekday: RS_WD[(/* @__PURE__ */ new Date(r.d + "T12:00:00Z")).getUTCDay()],
+      day_no: first ? Math.round((Date.parse(r.d) - Date.parse(first)) / 864e5) + 1 : "",
+      active_day_no: isRec ? active : "",
+      gap_days: gap,
+      streak: isRec ? streak : "",
+      country: u.country || "",
+      gender: u.gender || "",
+      age_band: age == null ? "" : age < 13 ? "<13" : age < 18 ? "13-17" : age < 30 ? "18-29" : age < 45 ? "30-44" : age < 60 ? "45-59" : "60+",
+      student_first_day: u.first_rec || "",
+      student_recordings_total: u.n_rec != null ? u.n_rec : "",
+      disc_profile: disc[r.uid] || ""
+    }, j);
+    delete o.cats;
+    Object.keys(j.cats || {}).forEach((c) => {
+      o[slug(c)] = j.cats[c];
+    });
+    const sv = SV.by[r.uid];
+    if (sv) {
+      Object.assign(o, sv);
+      o.days_survey_to_first = sv.survey_date && first ? Math.round((Date.parse(first) - Date.parse(sv.survey_date)) / 864e5) : "";
+    }
+    out.push(o);
+  }
+  const cols = [
+    "pid",
+    "date",
+    "weekday",
+    "day_no",
+    "active_day_no",
+    "gap_days",
+    "streak",
+    "country",
+    "gender",
+    "age_band",
+    "student_first_day",
+    "student_recordings_total",
+    "disc_profile",
+    "system",
+    "systems",
+    "recordings",
+    "not_counted"
+  ].concat(Object.keys(catCols).sort()).concat([
+    "min_total",
+    "min_monolog",
+    "min_conversation",
+    "reviewed",
+    "correct",
+    "to_fix",
+    "fluent_pct",
+    "rate_avg_pct",
+    "mood_avg",
+    "mood_n",
+    "teren_km_max",
+    "at_home",
+    "with_gps",
+    "hour_first",
+    "hour_last",
+    "monolog_measured",
+    "syl_min_speech_med",
+    "syl_min_med",
+    "pause_pct_med",
+    "pauses_1s",
+    "diary",
+    "old_speech",
+    "diary_correct",
+    "meditation",
+    "motivation",
+    "sleep_h",
+    "tiredness",
+    "coffee",
+    "feeling"
+  ]).concat(SV.cols.length ? ["days_survey_to_first"].concat(SV.cols) : []);
+  out.forEach((o) => Object.keys(catCols).forEach((c) => {
+    if (o[c] == null) o[c] = 0;
+  }));
+  return { csv: rsCsv(out, cols), n: out.length, survey: SV.error ? "b\u0142\u0105d: " + SV.error : Object.keys(SV.by).length };
+}
+__name(rdExport, "rdExport");
 var RS_DOC_URL = "https://claude.ai/artifact/2jHj5o4mXQRFPzQrqUZo2J";
 var RS_NOTES_SEED = [
   { slug: "dokument", sort: 10, title: "\u{1F4C4} Dokument dla Politechniki \u015Al\u0105skiej", body: `Pe\u0142ny opis danych, propozycji bada\u0144, sprawdzania automatyki, ogranicze\u0144 i etyki: [Nowa Mowa \u2014 dane do bada\u0144 z Politechnik\u0105 \u015Al\u0105sk\u0105](${RS_DOC_URL})
@@ -13147,6 +14143,7 @@ async function svCheck(env) {
     columns: headers,
     write_ok: /spreadsheets(\s|$)/.test(scopes),
     export_at: Number(await appSettingGet(env, "survey_export_at")) || null,
+    students_url: await appSettingGet(env, "students_sheet_id") ? "https://docs.google.com/spreadsheets/d/" + await appSettingGet(env, "students_sheet_id") : null,
     extras: await svCheckExtras(env, headers)
   };
 }
@@ -14054,6 +15051,332 @@ function setLang(l){
 document.querySelectorAll('.flag').forEach(function(b){b.onclick=function(){setLang(b.dataset.lang);};});
 render();
 `;
+async function svfSheetAppend(env, id, test, row, ext, H, check) {
+  let tab = SVF_TEST_TAB, ok = false, err = "";
+  try {
+    const sid = await svSheetId(env);
+    const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title)");
+    if (!meta.ok) throw new Error(meta.error);
+    const titles = (meta.data.sheets || []).map((x) => x.properties.title);
+    if (!test) tab = await svfMainTab(env, sid, titles, H);
+    if (titles.indexOf(tab) < 0) {
+      const a = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ addSheet: { properties: { title: tab, gridProperties: { frozenRowCount: 1 } } } }] } });
+      if (!a.ok) throw new Error(a.error);
+    }
+    const q = /* @__PURE__ */ __name((r) => encodeURIComponent("'" + tab.replace(/'/g, "''") + "'!" + r), "q");
+    if (check) {
+      const ab = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A2:B20000"));
+      if (ab.ok && (ab.data.values || []).some((v) => String(v[0] || "") === String(row[0] || "") && String(v[1] || "").toLowerCase() === String(row[1] || "").toLowerCase())) {
+        ok = true;
+      }
+    }
+    if (!ok) {
+      const hv = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("1:1"));
+      if (!hv.ok) throw new Error(hv.error);
+      let head = ((hv.data.values || [])[0] || []).map(String);
+      if (test) {
+        const extra = head.slice(H.length);
+        head = H.slice().concat(extra);
+      }
+      if (!head.length) throw new Error("Brak nag\u0142\xF3wk\xF3w w zak\u0142adce");
+      const head0 = ((hv.data.values || [])[0] || []).map(String).join("");
+      const pos = ext.map(([h]) => {
+        let j = head.indexOf(h);
+        if (j < 0) {
+          head.push(h);
+          j = head.length - 1;
+        }
+        return j;
+      });
+      if (head.join("") !== head0) {
+        const w = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + "?valueInputOption=RAW", { method: "PUT", body: { values: [head] } });
+        if (!w.ok) throw new Error(w.error);
+      }
+      const out = new Array(head.length).fill("");
+      row.forEach((v, i) => {
+        if (i < out.length) out[i] = v;
+      });
+      pos.forEach((j, k) => {
+        if (ext[k][1] || !out[j]) out[j] = ext[k][1];
+      });
+      for (let i = 1; i < out.length; i++) out[i] = svfNum(out[i]);
+      for (let i = 1; i < out.length; i++) if (/^\s*wiek/i.test(head[i] || "")) out[i] = svfAge(out[i]);
+      const ti = await svfTableInfo(env, sid, tab);
+      let rowIdx = null;
+      if (ti && ti.table) {
+        const r0 = (ti.table.range.startRowIndex || 0) + 1;
+        const ins = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ insertDimension: { range: { sheetId: ti.sheetId, dimension: "ROWS", startIndex: r0, endIndex: r0 + 1 }, inheritFromBefore: false } }] } });
+        if (ins.ok) {
+          const up = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A" + (r0 + 1)) + "?valueInputOption=RAW", { method: "PUT", body: { values: [out] } });
+          if (!up.ok) throw new Error(up.error);
+          rowIdx = r0;
+        }
+      }
+      if (rowIdx === null) {
+        const ap = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", { method: "POST", body: { values: [out] } });
+        if (!ap.ok) throw new Error(ap.error);
+        const rm = String((ap.data.updates || {}).updatedRange || "").match(/!A(\d+)/);
+        if (rm) rowIdx = Number(rm[1]) - 1;
+      }
+      ok = true;
+      try {
+        const p = svfTsParse(out[0]), shId = ti ? ti.sheetId : null;
+        if (p && rowIdx !== null && shId !== null) await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [svfTsCell(shId, rowIdx, p)] } });
+      } catch (e) {
+      }
+    }
+  } catch (e) {
+    err = String(e && e.message || e).slice(0, 300);
+  }
+  try {
+    await env.DB.prepare("UPDATE survey_online SET sheet_tab = ?, sheet_ok = ?, sheet_error = ?, tries = COALESCE(tries, 0) + 1 WHERE id = ?").bind(tab, ok ? 1 : 0, err || null, id).run();
+  } catch (e) {
+    try {
+      await env.DB.prepare("ALTER TABLE survey_online ADD COLUMN tries INTEGER").run();
+      await env.DB.prepare("UPDATE survey_online SET sheet_tab = ?, sheet_ok = ?, sheet_error = ?, tries = 1 WHERE id = ?").bind(tab, ok ? 1 : 0, err || null, id).run();
+    } catch (e2) {
+    }
+  }
+  return { ok, err, tab };
+}
+__name(svfSheetAppend, "svfSheetAppend");
+__name2(svfSheetAppend, "svfSheetAppend");
+function svfNum(v) {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  return /^-?(0|[1-9]\d{0,5})([.,]\d{1,4})?$/.test(t) ? Number(t.replace(",", ".")) : v;
+}
+__name(svfNum, "svfNum");
+function svfAge(v) {
+  if (typeof v !== "string") return v;
+  const m = v.trim().match(/^(\d{1,3})\s*(lat|lata|latka|rok|roku|l\.|r\.|rokov|roky|let|year|years|yrs|y\.?o\.?)?\.?$/i);
+  return m ? Number(m[1]) : v;
+}
+__name(svfAge, "svfAge");
+async function svfNumFix(env, force) {
+  if (!force && await appSettingGet(env, "svf_num_fixed_v1")) return { ok: true, skipped: true };
+  const sid = await svSheetId(env);
+  const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title)");
+  if (!meta.ok) return meta;
+  const titles = (meta.data.sheets || []).map((x) => x.properties.title);
+  let H = [];
+  try {
+    H = (await svfDef(env, false, null)).header || [];
+  } catch (e) {
+  }
+  let fixed = 0;
+  for (const tab of [await svfMainTab(env, sid, titles, H), SVF_TEST_TAB].filter((t, i, a) => t && titles.indexOf(t) >= 0 && a.indexOf(t) === i)) {
+    const q = "'" + tab.replace(/'/g, "''") + "'";
+    const v = await svGoogle(env, encodeURIComponent(sid) + "/values/" + encodeURIComponent(q + "!A1:ZZ20000") + "?valueRenderOption=UNFORMATTED_VALUE");
+    if (!v.ok) continue;
+    const vals = v.data.values || [], li = (vals[0] || []).map((h) => String(h || "").trim()).indexOf("J\u0119zyk ankiety");
+    if (li < 0) continue;
+    const data = [];
+    vals.forEach((r, i) => {
+      if (!i || !r || !String(r[li] || "").trim()) return;
+      let ch = false;
+      const nr = r.map((c, j) => {
+        if (j === 0) return c;
+        const n = svfNum(c);
+        if (n !== c) ch = true;
+        return n;
+      });
+      if (ch) {
+        data.push({ range: q + "!A" + (i + 1), values: [nr] });
+        fixed++;
+      }
+    });
+    for (let k = 0; k < data.length; k += 200) {
+      const u = await svGoogle(env, encodeURIComponent(sid) + "/values:batchUpdate", { method: "POST", body: { valueInputOption: "RAW", data: data.slice(k, k + 200) } });
+      if (!u.ok) return u;
+    }
+  }
+  await appSettingSet(env, "svf_num_fixed_v1", String(Math.floor(Date.now() / 1e3)));
+  return { ok: true, fixed };
+}
+__name(svfNumFix, "svfNumFix");
+function svfTsParse(t) {
+  const s = String(t || "").trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{1,2}):(\d{2}):(\d{2})$/);
+  if (m) return { serial: Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 864e5 + 25569, pattern: "yyyy-mm-dd " + (m[4].length === 2 ? "hh" : "h") + ":mm:ss" };
+  m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4}) (\d{1,2}):(\d{2}):(\d{2})$/);
+  if (m) return { serial: Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6]) / 864e5 + 25569, pattern: (m[1].length === 2 ? "dd" : "d") + "." + (m[2].length === 2 ? "mm" : "m") + ".yyyy " + (m[4].length === 2 ? "hh" : "h") + ":mm:ss" };
+  return null;
+}
+__name(svfTsParse, "svfTsParse");
+function svfTsCell(sheetId, rowIdx, p) {
+  return { updateCells: {
+    range: { sheetId, startRowIndex: rowIdx, endRowIndex: rowIdx + 1, startColumnIndex: 0, endColumnIndex: 1 },
+    rows: [{ values: [{ userEnteredValue: { numberValue: p.serial }, userEnteredFormat: { numberFormat: { type: "DATE_TIME", pattern: p.pattern } } }] }],
+    fields: "userEnteredValue,userEnteredFormat.numberFormat"
+  } };
+}
+__name(svfTsCell, "svfTsCell");
+async function svfFixTsText(env, force) {
+  if (!force && await appSettingGet(env, "svf_ts_fixed_v1")) return { ok: true, skipped: true };
+  const sid = await svSheetId(env);
+  const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title,sheetId)");
+  if (!meta.ok) return meta;
+  const props = (meta.data.sheets || []).map((x) => x.properties), titles = props.map((x) => x.title);
+  let H = [];
+  try {
+    H = (await svfDef(env, false, null)).header || [];
+  } catch (e) {
+  }
+  const main = await svfMainTab(env, sid, titles, H), tabs = [main, SVF_TEST_TAB].filter((t, i, a) => t && titles.indexOf(t) >= 0 && a.indexOf(t) === i);
+  let fixed = 0;
+  for (const tab of tabs) {
+    const shId = (props.find((x) => x.title === tab) || {}).sheetId;
+    const v = await svGoogle(env, encodeURIComponent(sid) + "/values/" + encodeURIComponent("'" + tab.replace(/'/g, "''") + "'!A1:A20000") + "?valueRenderOption=UNFORMATTED_VALUE");
+    if (!v.ok) continue;
+    const reqs = [];
+    (v.data.values || []).forEach((r, i) => {
+      if (!i) return;
+      const c = r && r[0];
+      if (typeof c !== "string") return;
+      const p = svfTsParse(c);
+      if (p) reqs.push(svfTsCell(shId, i, p));
+    });
+    for (let k = 0; k < reqs.length; k += 400) {
+      const u = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: reqs.slice(k, k + 400) } });
+      if (!u.ok) return u;
+    }
+    fixed += reqs.length;
+  }
+  await appSettingSet(env, "svf_ts_fixed_v1", String(Math.floor(Date.now() / 1e3)));
+  return { ok: true, fixed };
+}
+__name(svfFixTsText, "svfFixTsText");
+async function svfTableInfo(env, sid, tab) {
+  try {
+    let r = await svGoogle(env, encodeURIComponent(sid) + "?fields=" + encodeURIComponent("sheets(properties(title,sheetId),tables(tableId,name,range))"));
+    if (!r.ok) r = await svGoogle(env, encodeURIComponent(sid) + "?fields=" + encodeURIComponent("sheets.properties(title,sheetId)"));
+    if (!r.ok) return null;
+    const sh = (r.data.sheets || []).find((x) => x.properties && x.properties.title === tab);
+    if (!sh) return null;
+    const t = (sh.tables || []).find((x) => x.range && (x.range.startRowIndex || 0) === 0) || (sh.tables || [])[0] || null;
+    return { sheetId: sh.properties.sheetId, table: t };
+  } catch (e) {
+    return null;
+  }
+}
+__name(svfTableInfo, "svfTableInfo");
+async function svfTableFix(env, force) {
+  if (!force && await appSettingGet(env, "svf_table_fixed_v1")) return { ok: true, skipped: true };
+  const sid = await svSheetId(env);
+  const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title,sheetId)");
+  if (!meta.ok) return meta;
+  const titles = (meta.data.sheets || []).map((x) => x.properties.title);
+  let H = [];
+  try {
+    H = (await svfDef(env, false, null)).header || [];
+  } catch (e) {
+  }
+  const tab = await svfMainTab(env, sid, titles, H), ti = await svfTableInfo(env, sid, tab);
+  if (!ti || !ti.table) {
+    await appSettingSet(env, "svf_table_fixed_v1", "no-table");
+    return { ok: true, table: false };
+  }
+  const v = await svGoogle(env, encodeURIComponent(sid) + "/values/" + encodeURIComponent("'" + tab.replace(/'/g, "''") + "'!A1:B20000"));
+  if (!v.ok) return v;
+  let last = 0;
+  (v.data.values || []).forEach((r, i) => {
+    if (r && (String(r[0] || "").trim() || String(r[1] || "").trim())) last = i;
+  });
+  const R = ti.table.range, end = R.endRowIndex || 0;
+  if (last + 1 > end) {
+    const u = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ updateTable: { table: { tableId: ti.table.tableId, range: Object.assign({}, R, { endRowIndex: last + 1 }) }, fields: "range" } }] } });
+    if (!u.ok) return u;
+  }
+  await appSettingSet(env, "svf_table_fixed_v1", String(Math.floor(Date.now() / 1e3)));
+  return { ok: true, table: true, extended_to: last + 1 };
+}
+__name(svfTableFix, "svfTableFix");
+async function svfMainTab(env, sid, titles, H) {
+  const saved = await appSettingGet(env, "svf_main_tab");
+  if (saved && titles.indexOf(saved) >= 0 && saved !== SV_PANEL_TAB && saved !== SVF_TEST_TAB) return saved;
+  const cand = titles.filter((t) => t !== SVF_TEST_TAB && t !== SV_PANEL_TAB);
+  if (!cand.length) return titles[0];
+  let best = cand[0], bestN = -1;
+  try {
+    const r = await svGoogle(env, encodeURIComponent(sid) + "/values:batchGet?" + cand.map((t) => "ranges=" + encodeURIComponent("'" + t.replace(/'/g, "''") + "'!1:1")).join("&"));
+    if (r.ok) (r.data.valueRanges || []).forEach((vr, i) => {
+      const h = ((vr.values || [])[0] || []).map((x) => String(x).trim());
+      const n = (H || []).filter((x) => x && h.indexOf(String(x).trim()) >= 0).length;
+      if (n > bestN) {
+        bestN = n;
+        best = cand[i];
+      }
+    });
+  } catch (e) {
+  }
+  if (bestN > 0) await appSettingSet(env, "svf_main_tab", best);
+  return best;
+}
+__name(svfMainTab, "svfMainTab");
+__name2(svfMainTab, "svfMainTab");
+async function svfPending(env) {
+  try {
+    await env.DB.prepare("ALTER TABLE survey_online ADD COLUMN tries INTEGER").run();
+  } catch (e) {
+  }
+  const rows = (await env.DB.prepare("SELECT id, created_at, email, sheet_ok, sheet_error, tries, data FROM survey_online WHERE COALESCE(test, 0) = 0 AND (COALESCE(sheet_ok, 0) = 0 OR sheet_tab = ?) AND created_at > ? ORDER BY created_at DESC LIMIT 50").bind(SV_PANEL_TAB, Math.floor(Date.now() / 1e3) - 90 * 86400).all()).results || [];
+  return rows.map((r) => {
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch (e) {
+    }
+    const row = d.row || [];
+    return { id: r.id, at: r.created_at, email: r.email, name: (row[3] || row[21] || row[20] || "").trim(), error: r.sheet_tab === SV_PANEL_TAB ? "trafi\u0142a do zak\u0142adki \u201EPanel trenera\u201D (by\u0142a pierwsza z lewej) zamiast do zak\u0142adki z ankietami" : r.sheet_error || (r.sheet_ok == null ? "zapis w tle si\u0119 nie sko\u0144czy\u0142" : ""), tries: r.tries || 0 };
+  });
+}
+__name(svfPending, "svfPending");
+async function svfRetry(env, ids) {
+  const D = await svfDef(env, false, null);
+  if (!D.header) throw new Error(D.error || "Brak definicji ankiety");
+  const out = [];
+  for (const id of ids) {
+    const r = await env.DB.prepare("SELECT id, data FROM survey_online WHERE id = ?").bind(id).first();
+    if (!r) continue;
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch (e) {
+    }
+    if (!Array.isArray(d.row)) {
+      out.push({ id, ok: false, err: "brak danych ankiety" });
+      continue;
+    }
+    const w = await svfSheetAppend(env, id, false, d.row, d.ext || [], D.header, true);
+    out.push(Object.assign({ id }, w));
+  }
+  return out;
+}
+__name(svfRetry, "svfRetry");
+async function svfRetryTick(env) {
+  if ((/* @__PURE__ */ new Date()).getUTCMinutes() !== 17) return;
+  try {
+    await svfFixTsText(env, false);
+  } catch (e) {
+  }
+  try {
+    await svfTableFix(env, false);
+  } catch (e) {
+  }
+  try {
+    await svfNumFix(env, false);
+  } catch (e) {
+  }
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare("SELECT id FROM survey_online WHERE COALESCE(test, 0) = 0 AND (COALESCE(sheet_ok, 0) = 0 OR sheet_tab = ?) AND created_at BETWEEN ? AND ? AND COALESCE(tries, 0) < 6 ORDER BY id LIMIT 10").bind(SV_PANEL_TAB, Math.floor(Date.now() / 1e3) - 90 * 86400, Math.floor(Date.now() / 1e3) - 600).all()).results || [];
+  } catch (e) {
+    return;
+  }
+  if (rows.length) await svfRetry(env, rows.map((r) => r.id));
+}
+__name(svfRetryTick, "svfRetryTick");
 async function svfSubmit(request, env, ctx) {
   let b = {};
   try {
@@ -14144,6 +15467,9 @@ async function svfSubmit(request, env, ctx) {
     if (idx(q.k) != null) put(idx(q.k), v);
     else ext.push([svfHdr(q), v]);
   }
+  if (parent) [[3, 21], [4, 22], [5, 24], [6, 25], [7, 26], [8, 27]].forEach(([to, from]) => {
+    if (!String(row[to] || "").trim() && String(row[from] || "").trim()) row[to] = row[from];
+  });
   ext.push(["J\u0119zyk ankiety", lang]);
   Object.keys(A).forEach((k) => {
     const m = k.match(/^c(\d+)$/);
@@ -14155,55 +15481,10 @@ async function svfSubmit(request, env, ctx) {
   const id = ins.meta && ins.meta.last_row_id;
   let tab = SVF_TEST_TAB, ok = false, err = "";
   const sheetJob = /* @__PURE__ */ __name(async () => {
-    try {
-      const sid = await svSheetId(env);
-      const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title)");
-      if (!meta.ok) throw new Error(meta.error);
-      const titles = (meta.data.sheets || []).map((x) => x.properties.title);
-      if (!test) tab = titles[0];
-      if (titles.indexOf(tab) < 0) {
-        const a = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ addSheet: { properties: { title: tab, gridProperties: { frozenRowCount: 1 } } } }] } });
-        if (!a.ok) throw new Error(a.error);
-      }
-      const q = /* @__PURE__ */ __name((r) => encodeURIComponent("'" + tab.replace(/'/g, "''") + "'!" + r), "q");
-      const hv = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("1:1"));
-      if (!hv.ok) throw new Error(hv.error);
-      let head = ((hv.data.values || [])[0] || []).map(String);
-      if (test) {
-        const extra = head.slice(H.length);
-        head = H.slice().concat(extra);
-      }
-      if (!head.length) throw new Error("Brak nag\u0142\xF3wk\xF3w w zak\u0142adce");
-      const head0 = ((hv.data.values || [])[0] || []).map(String).join("");
-      const pos = ext.map(([h]) => {
-        let j = head.indexOf(h);
-        if (j < 0) {
-          head.push(h);
-          j = head.length - 1;
-        }
-        return j;
-      });
-      if (head.join("") !== head0) {
-        const w = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + "?valueInputOption=RAW", { method: "PUT", body: { values: [head] } });
-        if (!w.ok) throw new Error(w.error);
-      }
-      const out = new Array(head.length).fill("");
-      row.forEach((v, i) => {
-        if (i < out.length) out[i] = v;
-      });
-      pos.forEach((j, k) => {
-        if (ext[k][1] || !out[j]) out[j] = ext[k][1];
-      });
-      const ap = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A1") + ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", { method: "POST", body: { values: [out] } });
-      if (!ap.ok) throw new Error(ap.error);
-      ok = true;
-    } catch (e) {
-      err = String(e && e.message || e).slice(0, 300);
-    }
-    try {
-      await env.DB.prepare("UPDATE survey_online SET sheet_tab = ?, sheet_ok = ?, sheet_error = ? WHERE id = ?").bind(tab, ok ? 1 : 0, err || null, id).run();
-    } catch (e) {
-    }
+    const w = await svfSheetAppend(env, id, test, row, ext, H, false);
+    ok = w.ok;
+    err = w.err;
+    tab = w.tab;
   }, "sheetJob");
   const mailJob = /* @__PURE__ */ __name(async () => {
     try {
@@ -14758,19 +16039,37 @@ async function svExportSheet(env) {
       x.source || "PL"
     ];
   });
-  const meta = await svGoogle(env, encodeURIComponent(id) + "?fields=sheets.properties(title,sheetId)");
-  if (!meta.ok) return meta;
-  if (!(meta.data.sheets || []).some((x) => x.properties.title === SV_PANEL_TAB)) {
-    const a = await svGoogle(env, encodeURIComponent(id) + ":batchUpdate", { method: "POST", body: { requests: [{ addSheet: { properties: { title: SV_PANEL_TAB, gridProperties: { frozenRowCount: 1 } } } }] } });
-    if (!a.ok) return a.code === "scope" || a.code === "no_access" ? Object.assign(a, { error: "Brak zgody na zapis w arkuszu: po\u0142\u0105cz konto Google ponownie (\u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Roz\u0142\u0105cz \u2192 Po\u0142\u0105cz) i daj kontu " + (await appSettingGet(env, "google_account") || "") + " uprawnienie \u201EEdytuj\u0105cy\u201D w arkuszu." }) : a;
+  try {
+    const token = await googleOAuthAccessToken(env);
+    if (!token) return { ok: false, code: "no_google", error: "Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz." };
+    let sid = await appSettingGet(env, "students_sheet_id");
+    if (sid) {
+      try {
+        await bkSheets(token, "/" + sid + "?fields=spreadsheetId");
+      } catch (e) {
+        sid = null;
+      }
+    }
+    if (!sid) {
+      sid = await bkNewSheet(token, "\u{1F464} Nowa Mowa \u2014 kursanci (dzie\u0144 po dniu)");
+      await appSettingSet(env, "students_sheet_id", sid);
+    }
+    let more = [];
+    try {
+      more = (await bkCollect(env)).filter((t) => ["\u{1F4C5} Dni treningowe", "Nagrania", "Dzienniki (NS)", "Harmonogramy (NS)"].indexOf(t[0]) >= 0 || t[0] === "Kursanci");
+    } catch (e) {
+      more = [["\u26A0\uFE0F b\u0142\u0105d danych NS", [["b\u0142\u0105d"], [String(e && e.message || e)]]]];
+    }
+    more = more.map((t) => t[0] === "Kursanci" ? ["Konta NS", t[1]] : t);
+    const stamp = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(/* @__PURE__ */ new Date());
+    const n = await bkWrite(token, sid, [["\u{1F464} Kursanci", [head].concat(rows)]].concat(more), stamp);
+    await appSettingSet(env, "survey_export_at", String(Math.floor(Date.now() / 1e3)));
+    await appSettingSet(env, "students_sheet_status", JSON.stringify({ ok: true, at: Math.floor(Date.now() / 1e3), when: stamp, rows: n }));
+    return { ok: true, rows: rows.length, tab: "\u{1F464} Kursanci", sheet_id: sid, url: "https://docs.google.com/spreadsheets/d/" + sid, total_rows: n };
+  } catch (e) {
+    await appSettingSet(env, "students_sheet_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
+    return { ok: false, error: String(e && e.message || e) };
   }
-  const rng = encodeURIComponent("'" + SV_PANEL_TAB + "'!A1:ZZ50000");
-  const c = await svGoogle(env, encodeURIComponent(id) + "/values/" + rng + ":clear", { method: "POST", body: {} });
-  if (!c.ok) return c;
-  const w = await svGoogle(env, encodeURIComponent(id) + "/values/" + encodeURIComponent("'" + SV_PANEL_TAB + "'!A1") + "?valueInputOption=RAW", { method: "PUT", body: { values: [head].concat(rows) } });
-  if (!w.ok) return w;
-  await appSettingSet(env, "survey_export_at", String(Math.floor(Date.now() / 1e3)));
-  return { ok: true, rows: rows.length, tab: SV_PANEL_TAB, sheet_id: id };
 }
 __name(svExportSheet, "svExportSheet");
 __name2(svExportSheet, "svExportSheet");
