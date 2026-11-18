@@ -6374,6 +6374,17 @@ var worker_default = {
           return json({ error: String(e && e.message || e) }, 500);
         }
       }
+      if (url.pathname === "/backup/file" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        const key = String(url.searchParams.get("key") || "");
+        if (!/^backups\/\d{4}-\d{2}-\d{2}\/[a-z0-9-]+\.csv\.gz$/.test(key)) return json({ error: "Z\u0142y plik" }, 400);
+        const o = await env.RECORDINGS.get(key);
+        if (!o) return json({ error: "Nie ma takiego pliku" }, 404);
+        const name = key.split("/").slice(1).join("_").replace(/\.gz$/, "");
+        return new Response(o.body.pipeThrough(new DecompressionStream("gzip")), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="nowa-mowa-backup_' + name + '"', "Access-Control-Allow-Origin": "*" } });
+      }
       if (url.pathname === "/backup/status" && request.method === "GET" || url.pathname === "/backup/run" && request.method === "POST") {
         const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
         const who = await contactAuth(env, url.searchParams.get("ns_token") || q.ns_token, url.searchParams.get("ns_email") || q.ns_email, url.searchParams.get("ns_server") || q.ns_server);
@@ -6381,10 +6392,8 @@ var worker_default = {
         if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
         await ensureGoogleTables(env);
         if (request.method === "GET") return json(await backupStatus(env));
-        await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, at: Math.floor(Date.now() / 1e3) }));
-        ctx.waitUntil(backupRun(env, { snapshot: !!q.snapshot }).catch(async (e) => {
-          await appSettingSet(env, "backup_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
-        }));
+        await appSettingSet(env, "backup_req", JSON.stringify({ snapshot: !!q.snapshot, at: Math.floor(Date.now() / 1e3) }));
+        await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, queued: true, step: "w kolejce \u2014 start w ci\u0105gu minuty", at: Math.floor(Date.now() / 1e3) }));
         return json({ ok: true, started: true });
       }
       if (url.pathname === "/ai-usage" && request.method === "GET") {
@@ -6655,6 +6664,16 @@ var worker_default = {
           await rsNotesTable(env);
           await env.DB.prepare("UPDATE research_notes SET deleted = 1, updated_by = ?, updated_at = ? WHERE slug = ?").bind(String(who.email || ""), Math.floor(Date.now() / 1e3), String(body.slug || "")).run();
           return json({ ok: true });
+        }
+      }
+      if (url.pathname === "/admin/course-stats" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        try {
+          return json(await courseStats(env));
+        } catch (e) {
+          return json({ ok: false, error: String(e && e.message || e) }, 500);
         }
       }
       if (url.pathname === "/research/days/status" || url.pathname === "/research/days/run") {
@@ -8353,34 +8372,154 @@ async function bkNewSheet(token, name) {
   return d.spreadsheetId;
 }
 __name(bkNewSheet, "bkNewSheet");
-async function backupRun(env, opts) {
-  const token = await googleOAuthAccessToken(env);
-  if (!token) throw new Error("Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz");
-  const now = /* @__PURE__ */ new Date(), pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(now);
-  const tabs = await bkCollect(env);
-  let sid = await appSettingGet(env, "backup_sheet_id");
-  if (sid) {
+function bkCsv(rows) {
+  const esc = /* @__PURE__ */ __name((v) => {
+    if (v === null || v === void 0) return "";
+    const s = String(v);
+    return /[",;\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }, "esc");
+  return "\uFEFF" + rows.map((r) => r.map(esc).join(",")).join("\n") + "\n";
+}
+__name(bkCsv, "bkCsv");
+function bkSlug(t) {
+  return String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "tab";
+}
+__name(bkSlug, "bkSlug");
+async function bkGzip(text) {
+  const cs = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(cs).arrayBuffer());
+}
+__name(bkGzip, "bkGzip");
+async function bkR2Write(env, tabs, day) {
+  if (!env.RECORDINGS) return null;
+  const files = [];
+  for (const t of tabs) {
+    const key = "backups/" + day + "/" + bkSlug(t[0]) + ".csv.gz", gz = await bkGzip(bkCsv(t[1]));
+    await env.RECORDINGS.put(key, gz, { httpMetadata: { contentType: "text/csv; charset=utf-8", contentEncoding: "gzip" }, customMetadata: { tab: String(t[0]).slice(0, 200), rows: String(Math.max(0, t[1].length - 1)) } });
+    files.push({ key, tab: t[0], rows: Math.max(0, t[1].length - 1), bytes: gz.length });
+  }
+  await env.RECORDINGS.put("backups/" + day + "/manifest.json", JSON.stringify({ day, at: Math.floor(Date.now() / 1e3), files }), { httpMetadata: { contentType: "application/json" } });
+  try {
+    const cut = new Date(Date.now() - 35 * 864e5).toISOString().slice(0, 10);
+    let cursor;
+    do {
+      const L = await env.RECORDINGS.list({ prefix: "backups/", cursor, limit: 1e3 });
+      const old = L.objects.map((o) => o.key).filter((k) => {
+        const d = k.split("/")[1] || "";
+        return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < cut && d.slice(8, 10) !== "01";
+      });
+      if (old.length) await env.RECORDINGS.delete(old);
+      cursor = L.truncated ? L.cursor : null;
+    } while (cursor);
+  } catch (e) {
+  }
+  return { day, files: files.length, rows: files.reduce((a, f) => a + f.rows, 0), bytes: files.reduce((a, f) => a + f.bytes, 0) };
+}
+__name(bkR2Write, "bkR2Write");
+async function bkR2List(env) {
+  if (!env.RECORDINGS) return [];
+  const days = /* @__PURE__ */ new Set();
+  let cursor;
+  do {
+    const L = await env.RECORDINGS.list({ prefix: "backups/", delimiter: "/", cursor, limit: 1e3 });
+    (L.delimitedPrefixes || []).forEach((p) => days.add(p.split("/")[1]));
+    cursor = L.truncated ? L.cursor : null;
+  } while (cursor);
+  const out = [];
+  for (const d of [...days].sort().reverse().slice(0, 40)) {
+    let m = null;
     try {
-      await bkSheets(token, "/" + sid + "?fields=spreadsheetId");
+      const o = await env.RECORDINGS.get("backups/" + d + "/manifest.json");
+      if (o) m = await o.json();
     } catch (e) {
-      sid = null;
     }
+    if (m) out.push({ day: d, files: m.files.map((f) => ({ key: f.key, tab: f.tab, rows: f.rows, bytes: f.bytes })) });
   }
-  if (!sid) {
-    sid = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup kursant\xF3w");
-    await appSettingSet(env, "backup_sheet_id", sid);
+  return out;
+}
+__name(bkR2List, "bkR2List");
+function bkFit(tabs, maxCells) {
+  maxCells = maxCells || 85e5;
+  const cells = /* @__PURE__ */ __name((t) => t[1].length * Math.max(1, ...t[1].slice(0, 50).map((r) => r.length)), "cells");
+  let total = tabs.reduce((a, t) => a + cells(t), 0);
+  const notes = [];
+  if (total <= maxCells) return { tabs, notes };
+  const out = tabs.map((t) => [t[0], t[1]]);
+  const order = out.map((t, i) => i).sort((a, b) => cells(out[b]) - cells(out[a]));
+  for (const i of order) {
+    if (total <= maxCells) break;
+    const t = out[i], head = t[1][0] || [], cols = Math.max(1, ...t[1].slice(0, 50).map((r) => r.length)), cur = cells(t);
+    const keep = Math.max(1e3, Math.floor((cur - (total - maxCells)) / cols) - 1);
+    if (keep >= t[1].length - 1) continue;
+    const di = head.findIndex((h) => /^(data|date|d|dzien|created_at|nagrano|data_nagrania|entry_date)$/i.test(String(h || "").trim()));
+    let body = t[1].slice(1);
+    if (di >= 0) body = body.slice().sort((a, b) => String(b[di] || "").localeCompare(String(a[di] || "")));
+    else body = body.slice(-keep).reverse();
+    const n = t[1].length - 1;
+    t[1] = [head].concat(body.slice(0, keep));
+    total -= cur - cells(t);
+    notes.push([t[0], "tylko najnowsze " + keep + " z " + n + " wierszy (limit Google: 10 mln kom\xF3rek) \u2014 pe\u0142ne dane w kopii plikowej w panelu"]);
   }
-  const n = await bkWrite(token, sid, tabs, pl);
+  return { tabs: out, notes };
+}
+__name(bkFit, "bkFit");
+async function backupRun(env, opts) {
+  const now = /* @__PURE__ */ new Date(), pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(now);
   const day = pl.slice(0, 10);
-  if (day.slice(8, 10) === "01" || opts && opts.snapshot) {
-    const ym = day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
-    if (!done || opts && opts.snapshot) {
-      const s2 = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup " + (opts && opts.snapshot ? day : ym));
-      await bkWrite(token, s2, tabs, pl);
-      await appSettingSet(env, "backup_snapshot_" + ym, s2);
-    }
+  await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, step: "zbieram dane z NS i panelu", at: Math.floor(Date.now() / 1e3) }));
+  const tabs = await bkCollect(env);
+  let r2 = null, r2err = null;
+  try {
+    await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, step: "zapisuj\u0119 pe\u0142n\u0105 kopi\u0119 plikow\u0105", at: Math.floor(Date.now() / 1e3) }));
+    r2 = await bkR2Write(env, tabs, day);
+  } catch (e) {
+    r2err = String(e && e.message || e);
   }
-  const st = { ok: true, at: Math.floor(Date.now() / 1e3), when: pl, rows: n, tabs: tabs.length + 1, sheet_id: sid };
+  let sid = null, n = 0, gerr = null, notes = [];
+  try {
+    const token = await googleOAuthAccessToken(env);
+    if (!token) throw new Error("Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz");
+    await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, step: "zapisuj\u0119 arkusz Google", at: Math.floor(Date.now() / 1e3) }));
+    const F = bkFit(tabs);
+    notes = F.notes;
+    const gt = notes.length ? [["\u26A0\uFE0F Przyci\u0119te zak\u0142adki", [["Zak\u0142adka", "Uwaga"]].concat(notes)]].concat(F.tabs) : F.tabs;
+    sid = await appSettingGet(env, "backup_sheet_id");
+    if (sid) {
+      try {
+        await bkSheets(token, "/" + sid + "?fields=spreadsheetId");
+      } catch (e) {
+        sid = null;
+      }
+    }
+    if (!sid) {
+      sid = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup kursant\xF3w");
+      await appSettingSet(env, "backup_sheet_id", sid);
+    }
+    n = await bkWrite(token, sid, gt, pl);
+    if (day.slice(8, 10) === "01" || opts && opts.snapshot) {
+      const ym = day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
+      if (!done || opts && opts.snapshot) {
+        const s2 = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup " + (opts && opts.snapshot ? day : ym));
+        await bkWrite(token, s2, gt, pl);
+        await appSettingSet(env, "backup_snapshot_" + ym, s2);
+      }
+    }
+  } catch (e) {
+    gerr = String(e && e.message || e);
+  }
+  const st = {
+    ok: !!(r2 || !gerr),
+    at: Math.floor(Date.now() / 1e3),
+    when: pl,
+    rows: n,
+    tabs: tabs.length + 1,
+    sheet_id: sid,
+    r2,
+    r2_error: r2err,
+    sheet_error: gerr,
+    trimmed: notes.map((x) => x[0]),
+    error: r2 ? null : [r2err && "kopia plikowa: " + r2err, gerr && "arkusz: " + gerr].filter(Boolean).join(" \xB7 ") || null
+  };
   await appSettingSet(env, "backup_status", JSON.stringify(st));
   return st;
 }
@@ -8388,6 +8527,21 @@ __name(backupRun, "backupRun");
 async function backupTick(env) {
   const pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit" }).format(/* @__PURE__ */ new Date());
   const day = pl.slice(0, 10), hour = parseInt(pl.slice(11, 13), 10);
+  const req = await appSettingGet(env, "backup_req");
+  if (req) {
+    await appSettingSet(env, "backup_req", "");
+    let o = {};
+    try {
+      o = JSON.parse(req);
+    } catch (e) {
+    }
+    try {
+      await backupRun(env, { snapshot: !!o.snapshot });
+    } catch (e) {
+      await appSettingSet(env, "backup_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
+    }
+    return;
+  }
   if (hour !== 3) return;
   if (await appSettingGet(env, "backup_last_day") === day) return;
   await ensureGoogleTables(env);
@@ -8404,6 +8558,12 @@ async function backupStatus(env) {
   try {
     st = JSON.parse(await appSettingGet(env, "backup_status") || "{}");
   } catch (e) {
+  }
+  if (st.running && st.at && Date.now() / 1e3 - st.at > 20 * 60) st = { ok: false, at: st.at, error: "backup przerwany (" + (st.step || "w trakcie") + ") \u2014 prawdopodobnie limit czasu; spr\xF3buj ponownie" };
+  try {
+    st.files = await bkR2List(env);
+  } catch (e) {
+    st.files = [];
   }
   const sid = await appSettingGet(env, "backup_sheet_id");
   const ssid = await appSettingGet(env, "students_sheet_id");
@@ -11778,6 +11938,235 @@ async function rsExport(env, url) {
 }
 __name(rsExport, "rsExport");
 __name2(rsExport, "rsExport");
+function csDay(t) {
+  return t ? new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t)) : "";
+}
+__name(csDay, "csDay");
+function csDiff(a, b) {
+  return Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 864e5);
+}
+__name(csDiff, "csDiff");
+function csQ(a) {
+  const v = a.filter((x) => x != null && isFinite(x)).sort((p, q) => p - q);
+  if (!v.length) return null;
+  const at = /* @__PURE__ */ __name((p) => v[Math.min(v.length - 1, Math.floor(p * (v.length - 1) + 0.5))], "at");
+  return { n: v.length, p25: at(0.25), med: at(0.5), p75: at(0.75) };
+}
+__name(csQ, "csQ");
+function csGroupCourses(visits) {
+  const v = visits.filter((x) => x.date).sort((a, b) => (a.created || a.date).localeCompare(b.created || b.date));
+  const batches = [];
+  for (const x of v) {
+    const c = x.created || x.date, b = batches[batches.length - 1];
+    if (b && csDiff(b.created, c) <= 2) {
+      b.dates.push(x.date);
+    } else batches.push({ created: c, dates: [x.date] });
+  }
+  const courses = [];
+  for (const b of batches) {
+    const first = b.dates.slice().sort()[0], last = b.dates.slice().sort().pop(), cur = courses[courses.length - 1];
+    if (cur && csDiff(b.created, cur.end) > 7) {
+      cur.end = last > cur.end ? last : cur.end;
+      cur.visits += b.dates.length;
+      cur.extended = true;
+      continue;
+    }
+    courses.push({ start: b.created < first ? b.created : first, created: b.created, end: last, visits: b.dates.length });
+  }
+  return courses;
+}
+__name(csGroupCourses, "csGroupCourses");
+async function courseStats(env) {
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let vis, users, recs, sysRecs;
+  try {
+    vis = (await pg.query(`SELECT student_id::text AS uid, date, created_at FROM visit_dates vd WHERE (to_jsonb(vd) ->> 'deleted_at') IS NULL AND student_id IS NOT NULL ORDER BY student_id, created_at`)).rows;
+    const uids = [...new Set(vis.map((r) => r.uid))];
+    users = (await pg.query(`SELECT id::text AS id, first_name, last_name, email, country, to_jsonb(u) ->> 'birth_date' AS birth_date FROM users u WHERE id::text = ANY($1::text[])`, [uids])).rows;
+    recs = (await pg.query(`SELECT user_id::text AS uid, COALESCE(date, created_at::date)::text AS d, COUNT(*)::int AS n,
+        SUM(CASE WHEN reviewed_at IS NOT NULL THEN 1 ELSE 0 END)::int AS rev, SUM(CASE WHEN is_correct = true THEN 1 ELSE 0 END)::int AS ok
+      FROM records WHERE deleted_at IS NULL AND record_file IS NOT NULL AND user_id::text = ANY($1::text[]) GROUP BY 1, 2`, [uids])).rows;
+    sysRecs = (await pg.query(`SELECT id::text AS id, user_id::text AS uid, COALESCE(date, created_at::date)::text AS d, record_file FROM records
+      WHERE deleted_at IS NULL AND record_file ~ 's\\)?_?-[A-Za-z][A-Za-z0-9]*-[A-Za-z]' AND user_id::text = ANY($1::text[])`, [uids])).rows;
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const ov = {};
+  try {
+    for (const x of (await env.DB.prepare("SELECT ns_record_id, system FROM record_system_override").all()).results || []) ov[x.ns_record_id] = x.system;
+  } catch (e) {
+  }
+  const U = {};
+  users.forEach((u) => {
+    U[u.id] = u;
+  });
+  const byU = {};
+  vis.forEach((r) => {
+    (byU[r.uid] = byU[r.uid] || []).push({ date: csDay(r.date), created: csDay(r.created_at) });
+  });
+  const dayRec = {};
+  recs.forEach((r) => {
+    (dayRec[r.uid] = dayRec[r.uid] || []).push(r);
+  });
+  const daySys = {};
+  sysRecs.forEach((r) => {
+    const f = txFileSysMood(r.record_file), s = ov[r.id] || f && f.system;
+    if (!s) return;
+    (daySys[r.uid] = daySys[r.uid] || []).push({ d: r.d, s: String(s).toUpperCase() });
+  });
+  const today = csDay(Date.now()), all = [];
+  for (const [uid, v] of Object.entries(byU)) {
+    const cs = csGroupCourses(v);
+    cs.forEach((c, i) => {
+      const next = cs[i + 1], till = next ? next.start : csDay(Date.now());
+      let n = 0, rev = 0, ok = 0, days = 0;
+      for (const r of dayRec[uid] || []) if (r.d >= c.start && r.d <= till) {
+        n += r.n;
+        rev += r.rev;
+        ok += r.ok;
+        days++;
+      }
+      const sc = {};
+      for (const r of daySys[uid] || []) if (r.d >= c.start && r.d <= till) sc[r.s] = (sc[r.s] || 0) + 1;
+      const sys = Object.keys(sc).sort((a, b) => sc[b] - sc[a])[0] || "?";
+      Object.assign(c, { uid, no: i + 1, n, days, fluent: rev ? Math.round(ok / rev * 100) : null, sys, year: c.start.slice(0, 4), gap_next: next ? csDiff(c.end, next.start) : null, last: !next });
+      all.push(c);
+    });
+  }
+  const maxNo = {};
+  all.forEach((c) => {
+    maxNo[c.uid] = Math.max(maxNo[c.uid] || 0, c.no);
+  });
+  const funnel = [];
+  for (let k = 1; k <= 6; k++) {
+    const a = Object.values(maxNo).filter((m) => m >= k).length;
+    if (!a) break;
+    funnel.push({ course: k, students: a, continued: Object.values(maxNo).filter((m) => m >= k + 1).length });
+  }
+  const gaps = all.filter((c) => c.gap_next != null).map((c) => c.gap_next);
+  const B = [["do 2 tyg.", -1e9, 14], ["2 tyg. \u2013 1 mies.", 15, 31], ["1\u20133 mies.", 32, 92], ["3\u20136 mies.", 93, 183], ["6\u201312 mies.", 184, 366], ["1\u20132 lata", 367, 731], ["ponad 2 lata", 732, 1e9]];
+  const gapBuckets = B.map(([l, a, b]) => ({ label: l, n: gaps.filter((g) => g >= a && g <= b).length }));
+  const gapBy = {};
+  all.filter((c) => c.gap_next != null).forEach((c) => {
+    const k = c.no === 1 ? "1 \u2192 2" : c.no === 2 ? "2 \u2192 3" : "3+ \u2192 kolejny";
+    (gapBy[k] = gapBy[k] || []).push(c.gap_next);
+  });
+  const years = {};
+  all.forEach((c) => {
+    const y = years[c.year] = years[c.year] || { year: c.year, basic: 0, next: 0, sys_basic: {}, sys_next: {} };
+    if (c.no === 1) {
+      y.basic++;
+      y.sys_basic[c.sys] = (y.sys_basic[c.sys] || 0) + 1;
+    } else {
+      y.next++;
+      y.sys_next[c.sys] = (y.sys_next[c.sys] || 0) + 1;
+    }
+  });
+  const trans = {};
+  for (const uid of Object.keys(byU)) {
+    const cs = all.filter((c) => c.uid === uid).sort((a, b) => a.no - b.no);
+    for (let i = 0; i + 1 < cs.length; i++) {
+      const k = cs[i].sys + " \u2192 " + cs[i + 1].sys;
+      trans[k] = (trans[k] || 0) + 1;
+    }
+  }
+  const first = all.filter((c) => c.no === 1 && csDiff(c.end, today) >= 183);
+  const grp = /* @__PURE__ */ __name((cont) => {
+    const g = first.filter((c) => maxNo[c.uid] > 1 === cont), ag = /* @__PURE__ */ __name((u) => {
+      const b = U[u] && U[u].birth_date ? Number(String(U[u].birth_date).slice(0, 4)) : null;
+      return b ? Number(g0(u).start.slice(0, 4)) - b : null;
+    }, "ag"), g0 = /* @__PURE__ */ __name((u) => g.find((c) => c.uid === u), "g0");
+    return {
+      students: g.length,
+      recordings: csQ(g.map((c) => c.n)),
+      active_days: csQ(g.map((c) => c.days)),
+      fluent_pct: csQ(g.map((c) => c.fluent)),
+      course_days: csQ(g.map((c) => csDiff(c.start, c.end))),
+      visits: csQ(g.map((c) => c.visits)),
+      age: csQ(g.map((c) => ag(c.uid))),
+      after_30d_active: g.filter((c) => (dayRec[c.uid] || []).some((r) => r.d > c.end && csDiff(c.end, r.d) <= 60 && csDiff(c.end, r.d) > 30)).length
+    };
+  }, "grp");
+  const compare = { continued: grp(true), stopped: grp(false) };
+  const coh = {};
+  for (const uid of Object.keys(byU)) {
+    const cs = all.filter((c) => c.uid === uid).sort((a, b) => a.no - b.no), f = cs[0];
+    if (!f) continue;
+    const y = coh[f.year] = coh[f.year] || { year: f.year, students: 0, c2: 0, c3: 0, c4: 0, to2: [], courses: [], span: [], a6m: 0, a1y: 0, a2y: 0, a3y: 0, now: 0, sys: {}, sysLast: {}, el6m: 0, el1y: 0, el2y: 0, el3y: 0 };
+    y.students++;
+    if (cs.length >= 2) {
+      y.c2++;
+      y.to2.push(csDiff(f.start, cs[1].start));
+    }
+    if (cs.length >= 3) y.c3++;
+    if (cs.length >= 4) y.c4++;
+    y.courses.push(cs.length);
+    const rd = (dayRec[uid] || []).map((r) => r.d).filter((d) => d >= f.start).sort(), lastD = rd[rd.length - 1] || f.start;
+    y.span.push(csDiff(f.start, lastD));
+    const after = /* @__PURE__ */ __name((n) => rd.some((d) => csDiff(f.start, d) >= n), "after"), eligible = /* @__PURE__ */ __name((n) => csDiff(f.start, today) >= n, "eligible");
+    if (eligible(183)) {
+      y.el6m++;
+      if (after(183)) y.a6m++;
+    }
+    if (eligible(365)) {
+      y.el1y++;
+      if (after(365)) y.a1y++;
+    }
+    if (eligible(730)) {
+      y.el2y++;
+      if (after(730)) y.a2y++;
+    }
+    if (eligible(1095)) {
+      y.el3y++;
+      if (after(1095)) y.a3y++;
+    }
+    if (csDiff(lastD, today) <= 90) y.now++;
+    const ls = cs[cs.length - 1].sys;
+    y.sysLast[ls] = (y.sysLast[ls] || 0) + 1;
+    cs.slice(1).forEach((c) => {
+      y.sys[c.sys] = (y.sys[c.sys] || 0) + 1;
+    });
+  }
+  const cohorts = Object.values(coh).sort((a, b) => a.year.localeCompare(b.year)).map((y) => ({
+    year: y.year,
+    students: y.students,
+    c2: y.c2,
+    c3: y.c3,
+    c4: y.c4,
+    to2: csQ(y.to2),
+    courses: csQ(y.courses),
+    courses_avg: Math.round(y.courses.reduce((p, q) => p + q, 0) / y.courses.length * 10) / 10,
+    span_days: csQ(y.span),
+    active: { m6: [y.a6m, y.el6m], y1: [y.a1y, y.el1y], y2: [y.a2y, y.el2y], y3: [y.a3y, y.el3y] },
+    now: y.now,
+    sys_next: y.sys
+  }));
+  const cand = all.filter((c) => c.last && csDiff(c.end, today) >= 21 && csDiff(c.end, today) <= 366).map((c) => {
+    const u = U[c.uid] || {}, rr = dayRec[c.uid] || [], last = rr.map((r) => r.d).sort().pop() || "";
+    const n30 = rr.filter((r) => csDiff(r.d, today) <= 30).reduce((p, r) => p + r.n, 0);
+    return { id: c.uid, name: ((u.first_name || "") + " " + (u.last_name || "")).trim(), email: u.email || "", country: u.country || "", courses: c.no, last_sys: c.sys, end: c.end, since_days: csDiff(c.end, today), fluent: c.fluent, recordings: c.n, last_rec: last, rec_30d: n30 };
+  }).sort((a, b) => b.rec_30d - a.rec_30d || a.since_days - b.since_days);
+  return {
+    ok: true,
+    at: Math.floor(Date.now() / 1e3),
+    students: Object.keys(byU).length,
+    courses: all.length,
+    funnel,
+    gapBuckets,
+    gapStats: Object.fromEntries(Object.entries(gapBy).map(([k, v]) => [k, csQ(v)])),
+    years: Object.values(years).sort((a, b) => a.year.localeCompare(b.year)),
+    cohorts,
+    transitions: Object.entries(trans).sort((a, b) => b[1] - a[1]).slice(0, 25),
+    compare,
+    candidates: cand.slice(0, 300),
+    rule: "Kurs = harmonogram (wizyty utworzone razem, w ci\u0105gu 2 dni). Wizyty dopisane w trakcie kursu = przed\u0142u\u017Cenie, nie nowy kurs. Kurs nr 1 = podstawowy."
+  };
+}
+__name(courseStats, "courseStats");
 var RD_WINDOW = 14;
 async function rdEnsure(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS research_day (uid TEXT NOT NULL, d TEXT NOT NULL, data TEXT, updated_at INTEGER, PRIMARY KEY (uid, d))").run();
@@ -16062,7 +16451,8 @@ async function svExportSheet(env) {
     }
     more = more.map((t) => t[0] === "Kursanci" ? ["Konta NS", t[1]] : t);
     const stamp = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(/* @__PURE__ */ new Date());
-    const n = await bkWrite(token, sid, [["\u{1F464} Kursanci", [head].concat(rows)]].concat(more), stamp);
+    const F = bkFit([["\u{1F464} Kursanci", [head].concat(rows)]].concat(more));
+    const n = await bkWrite(token, sid, F.notes.length ? [["\u26A0\uFE0F Przyci\u0119te zak\u0142adki", [["Zak\u0142adka", "Uwaga"]].concat(F.notes)]].concat(F.tabs) : F.tabs, stamp);
     await appSettingSet(env, "survey_export_at", String(Math.floor(Date.now() / 1e3)));
     await appSettingSet(env, "students_sheet_status", JSON.stringify({ ok: true, at: Math.floor(Date.now() / 1e3), when: stamp, rows: n }));
     return { ok: true, rows: rows.length, tab: "\u{1F464} Kursanci", sheet_id: sid, url: "https://docs.google.com/spreadsheets/d/" + sid, total_rows: n };
