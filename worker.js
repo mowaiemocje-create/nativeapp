@@ -6378,12 +6378,10 @@ var worker_default = {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
         if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
-        const key = String(url.searchParams.get("key") || "");
-        if (!/^backups\/\d{4}-\d{2}-\d{2}\/[a-z0-9-]+\.csv\.gz$/.test(key)) return json({ error: "Z\u0142y plik" }, 400);
-        const o = await env.RECORDINGS.get(key);
-        if (!o) return json({ error: "Nie ma takiego pliku" }, 404);
-        const name = key.split("/").slice(1).join("_").replace(/\.gz$/, "");
-        return new Response(o.body.pipeThrough(new DecompressionStream("gzip")), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="nowa-mowa-backup_' + name + '"', "Access-Control-Allow-Origin": "*" } });
+        const day = String(url.searchParams.get("day") || ""), fs = String(url.searchParams.get("f") || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[a-z0-9-]+$/.test(fs)) return json({ error: "Z\u0142y plik" }, 400);
+        const resp = await bkFileResponse(env, day, fs);
+        return resp || json({ error: "Nie ma takiego pliku" }, 404);
       }
       if (url.pathname === "/backup/status" && request.method === "GET" || url.pathname === "/backup/run" && request.method === "POST") {
         const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
@@ -6695,6 +6693,19 @@ var worker_default = {
         if (url.pathname === "/research/inventory") return json(await rsInventory(env));
         const ex = await rsExport(env, url);
         return new Response(ex.csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "X-Rows": String(ex.n), "X-Survey": encodeURIComponent(String(ex.survey == null ? "" : ex.survey)), "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Rows, X-Survey" } });
+      }
+      if (url.pathname === "/technique-stats" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener/admin" }, 403);
+        const sid = String(url.searchParams.get("student_id") || "");
+        if (!sid && !who.admin) return json({ error: "Tylko administrator" }, 403);
+        const D = /* @__PURE__ */ __name((v, d) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : d, "D");
+        try {
+          return json(await techniqueStats(env, sid || null, D(url.searchParams.get("from"), "2000-01-01"), D(url.searchParams.get("to"), "2100-01-01")));
+        } catch (e) {
+          return json({ error: String(e && e.message || e) }, 500);
+        }
       }
       if (url.pathname === "/talk-stats" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
@@ -8065,7 +8076,10 @@ function bkTable(rows, prefer) {
   return [cols].concat(rows.map((r) => cols.map((k) => bkCell(r[k]))));
 }
 __name(bkTable, "bkTable");
-async function bkCollect(env, sid) {
+async function bkCollect(env, sid, opt) {
+  opt = opt || {};
+  const F = sid ? { u: "WHERE u.id::text = $1", pu: [String(sid)], rr: "WHERE rr.record_id IN (SELECT id FROM records WHERE user_id::text = $1)", r: "AND r.user_id::text = $1", pr: [String(sid)], d: "AND d.user_id::text = $1", pd: [String(sid)] } : opt.uids ? { u: "WHERE u.id::text = ANY($1::text[])", pu: [opt.uids], rr: "WHERE rr.record_id IN (SELECT id FROM records WHERE user_id::text = ANY($1::text[]))", r: "AND r.user_id::text = ANY($1::text[])", pr: [opt.uids], d: "AND d.user_id::text = ANY($1::text[])", pd: [opt.uids] } : opt.global ? { u: "", pu: [], rr: "WHERE false", r: "AND false", pr: [], d: "AND false", pd: [] } : opt.since ? { u: "", pu: [], rr: "WHERE rr.record_id IN (SELECT id FROM records WHERE COALESCE(date, created_at::date) >= $1::date)", r: "AND COALESCE(r.date, r.created_at::date) >= $1::date", pr: [opt.since], d: "AND d.date >= $1::date", pd: [opt.since] } : { u: "", pu: [], rr: "", r: "", pr: [], d: "", pd: [] };
+  const uset = opt.uids ? new Set(opt.uids.map(String)) : null;
   const tabs = [], pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
   try {
@@ -8074,7 +8088,7 @@ async function bkCollect(env, sid) {
         (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL)::int AS nagrania,
         (SELECT MAX(COALESCE(r.date, r.created_at::date))::text FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL) AS ostatnie_nagranie,
         (SELECT COUNT(*) FROM diaries d WHERE d.user_id = u.id AND d.deleted_at IS NULL)::int AS dzienniki
-      FROM users u ${sid ? "WHERE u.id::text = $1" : ""} ORDER BY u.created_at`, sid ? [String(sid)] : [])).rows;
+      FROM users u ${F.u} ORDER BY u.created_at`, F.pu)).rows;
     const name = {};
     users.forEach((u) => {
       const j = u.j || {};
@@ -8099,9 +8113,9 @@ async function bkCollect(env, sid) {
         FROM record_rates rr LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id
         LEFT JOIN record_rate_categories rrc ON rrc.id = rr.record_rate_category_id
         LEFT JOIN record_rate_category_translations rrc_t ON rrc_t.record_rate_category_id = rrc.id AND rrc_t.locale = 'pl'
-        ${sid ? "WHERE rr.record_id IN (SELECT id FROM records WHERE user_id::text = $1)" : ""}
+        ${F.rr}
         GROUP BY rr.record_id) rt ON rt.record_id = r.id
-      WHERE r.deleted_at IS NULL ${sid ? "AND r.user_id::text = $1" : ""} ORDER BY r.created_at`, sid ? [String(sid)] : [])).rows;
+      WHERE r.deleted_at IS NULL ${F.r} ORDER BY r.created_at`, F.pr)).rows;
     const tx = {};
     try {
       ((await (sid ? env.DB.prepare("SELECT ns_record_id, dur, json_array_length(words) AS nw FROM record_transcript WHERE dur > 0 AND ns_student_id = ?").bind(String(sid)) : env.DB.prepare("SELECT ns_record_id, dur, json_array_length(words) AS nw FROM record_transcript WHERE dur > 0")).all()).results || []).forEach((x) => {
@@ -8190,13 +8204,16 @@ async function bkCollect(env, sid) {
       for (const f of (await pg.query(`SELECT talk_feeling_id::text AS id, name FROM talk_feeling_translations WHERE locale = 'pl'`)).rows) if (f.name) feel[f.id] = f.name;
     } catch (e) {
     }
-    const dia = (await pg.query(`SELECT d.user_id::text AS uid, d.date::text AS d, to_jsonb(d) AS j FROM diaries d WHERE d.deleted_at IS NULL ${sid ? "AND d.user_id::text = $1" : ""} ORDER BY d.date`, sid ? [String(sid)] : [])).rows;
+    const dia = (await pg.query(`SELECT d.user_id::text AS uid, d.date::text AS d, to_jsonb(d) AS j FROM diaries d WHERE d.deleted_at IS NULL ${F.d} ORDER BY d.date`, F.pd)).rows;
     tabs.push(["Dzienniki (NS)", bkTable(dia.map((r) => Object.assign(who(r.uid), r.j || {}, r.j && r.j.talk_feeling_id && feel[r.j.talk_feeling_id] ? { samopoczucie: feel[r.j.talk_feeling_id] } : {})), ["kursant", "email", "date", "samopoczucie"])]);
     let ext = [];
     try {
       ext = (await (sid ? env.DB.prepare("SELECT de.*, u.ns_legacy_id AS ns_uid FROM diary_entries de JOIN users u ON u.id = de.user_id WHERE u.ns_legacy_id = ?").bind(String(sid)) : env.DB.prepare("SELECT de.*, u.ns_legacy_id AS ns_uid FROM diary_entries de JOIN users u ON u.id = de.user_id")).all()).results || [];
     } catch (e) {
     }
+    if (uset) ext = ext.filter((e) => uset.has(String(e.ns_uid)));
+    else if (opt.global) ext = [];
+    else if (opt.since) ext = ext.filter((e) => String(e.entry_date || "") >= opt.since);
     const days = {}, catSet = {}, diaKeys = [], extKeys = [];
     const day = /* @__PURE__ */ __name((uid, d) => {
       const k = uid + "|" + d;
@@ -8290,7 +8307,7 @@ async function bkCollect(env, sid) {
       return row;
     });
     tabs.splice(1, 0, ["\u{1F4C5} Dni treningowe", bkTable(dayRows)]);
-    if (sid) return tabs;
+    if (sid || opt.nsOnly) return tabs;
     try {
       const vd = (await pg.query(`SELECT v.user_id::text AS uid, to_jsonb(v) AS j FROM visit_dates v ORDER BY v.id`)).rows;
       tabs.push(["Harmonogramy (NS)", bkTable(flat(vd, (r) => who(r.uid)), ["kursant", "email"])]);
@@ -8307,10 +8324,12 @@ async function bkCollect(env, sid) {
     } catch (e) {
     }
   }
+  if (opt.noD1) return tabs;
   const names = ((await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).results || []).map((x) => x.name).filter((n) => !BK_SKIP_TABLES.test(n));
   for (const n of names) {
     try {
-      const rows = (await env.DB.prepare('SELECT * FROM "' + n.replace(/"/g, "") + '" LIMIT 200000').all()).results || [];
+      if (opt.d1Light && /^(record_transcript|research_day|sr_|tx_|.*_cache$)/i.test(n)) continue;
+      const rows = (await env.DB.prepare('SELECT * FROM "' + n.replace(/"/g, "") + '" LIMIT ' + (opt.d1Light ? 2e4 : 2e5)).all()).results || [];
       tabs.push([BK_TAB_PL[n] ? BK_TAB_PL[n] + " (" + n + ")" : n, bkTable(rows)]);
     } catch (e) {
     }
@@ -8390,32 +8409,6 @@ async function bkGzip(text) {
   return new Uint8Array(await new Response(cs).arrayBuffer());
 }
 __name(bkGzip, "bkGzip");
-async function bkR2Write(env, tabs, day) {
-  if (!env.RECORDINGS) return null;
-  const files = [];
-  for (const t of tabs) {
-    const key = "backups/" + day + "/" + bkSlug(t[0]) + ".csv.gz", gz = await bkGzip(bkCsv(t[1]));
-    await env.RECORDINGS.put(key, gz, { httpMetadata: { contentType: "text/csv; charset=utf-8", contentEncoding: "gzip" }, customMetadata: { tab: String(t[0]).slice(0, 200), rows: String(Math.max(0, t[1].length - 1)) } });
-    files.push({ key, tab: t[0], rows: Math.max(0, t[1].length - 1), bytes: gz.length });
-  }
-  await env.RECORDINGS.put("backups/" + day + "/manifest.json", JSON.stringify({ day, at: Math.floor(Date.now() / 1e3), files }), { httpMetadata: { contentType: "application/json" } });
-  try {
-    const cut = new Date(Date.now() - 35 * 864e5).toISOString().slice(0, 10);
-    let cursor;
-    do {
-      const L = await env.RECORDINGS.list({ prefix: "backups/", cursor, limit: 1e3 });
-      const old = L.objects.map((o) => o.key).filter((k) => {
-        const d = k.split("/")[1] || "";
-        return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < cut && d.slice(8, 10) !== "01";
-      });
-      if (old.length) await env.RECORDINGS.delete(old);
-      cursor = L.truncated ? L.cursor : null;
-    } while (cursor);
-  } catch (e) {
-  }
-  return { day, files: files.length, rows: files.reduce((a, f) => a + f.rows, 0), bytes: files.reduce((a, f) => a + f.bytes, 0) };
-}
-__name(bkR2Write, "bkR2Write");
 async function bkR2List(env) {
   if (!env.RECORDINGS) return [];
   const days = /* @__PURE__ */ new Set();
@@ -8433,7 +8426,7 @@ async function bkR2List(env) {
       if (o) m = await o.json();
     } catch (e) {
     }
-    if (m) out.push({ day: d, files: m.files.map((f) => ({ key: f.key, tab: f.tab, rows: f.rows, bytes: f.bytes })) });
+    if (m) out.push({ day: d, files: m.files.filter((f) => f.slug).map((f) => ({ slug: f.slug, tab: f.tab, rows: f.rows, bytes: f.bytes })) });
   }
   return out;
 }
@@ -8463,70 +8456,237 @@ function bkFit(tabs, maxCells) {
   return { tabs: out, notes };
 }
 __name(bkFit, "bkFit");
-async function backupRun(env, opts) {
-  const now = /* @__PURE__ */ new Date(), pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(now);
-  const day = pl.slice(0, 10);
-  await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, step: "zbieram dane z NS i panelu", at: Math.floor(Date.now() / 1e3) }));
-  const tabs = await bkCollect(env);
-  let r2 = null, r2err = null;
+var BK_STEP_MS = 2e4;
+async function bkJobGet(env) {
   try {
-    await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, step: "zapisuj\u0119 pe\u0142n\u0105 kopi\u0119 plikow\u0105", at: Math.floor(Date.now() / 1e3) }));
-    r2 = await bkR2Write(env, tabs, day);
+    return JSON.parse(await appSettingGet(env, "bk_job") || "null");
   } catch (e) {
-    r2err = String(e && e.message || e);
+    return null;
   }
-  let sid = null, n = 0, gerr = null, notes = [];
-  try {
-    const token = await googleOAuthAccessToken(env);
-    if (!token) throw new Error("Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz");
-    await appSettingSet(env, "backup_status", JSON.stringify({ ok: true, running: true, step: "zapisuj\u0119 arkusz Google", at: Math.floor(Date.now() / 1e3) }));
-    const F = bkFit(tabs);
-    notes = F.notes;
-    const gt = notes.length ? [["\u26A0\uFE0F Przyci\u0119te zak\u0142adki", [["Zak\u0142adka", "Uwaga"]].concat(notes)]].concat(F.tabs) : F.tabs;
-    sid = await appSettingGet(env, "backup_sheet_id");
-    if (sid) {
-      try {
-        await bkSheets(token, "/" + sid + "?fields=spreadsheetId");
-      } catch (e) {
-        sid = null;
-      }
-    }
-    if (!sid) {
-      sid = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup kursant\xF3w");
-      await appSettingSet(env, "backup_sheet_id", sid);
-    }
-    n = await bkWrite(token, sid, gt, pl);
-    if (day.slice(8, 10) === "01" || opts && opts.snapshot) {
-      const ym = day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
-      if (!done || opts && opts.snapshot) {
-        const s2 = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup " + (opts && opts.snapshot ? day : ym));
-        await bkWrite(token, s2, gt, pl);
-        await appSettingSet(env, "backup_snapshot_" + ym, s2);
-      }
-    }
-  } catch (e) {
-    gerr = String(e && e.message || e);
-  }
-  const st = {
-    ok: !!(r2 || !gerr),
-    at: Math.floor(Date.now() / 1e3),
-    when: pl,
-    rows: n,
-    tabs: tabs.length + 1,
-    sheet_id: sid,
-    r2,
-    r2_error: r2err,
-    sheet_error: gerr,
-    trimmed: notes.map((x) => x[0]),
-    error: r2 ? null : [r2err && "kopia plikowa: " + r2err, gerr && "arkusz: " + gerr].filter(Boolean).join(" \xB7 ") || null
-  };
-  await appSettingSet(env, "backup_status", JSON.stringify(st));
-  return st;
 }
-__name(backupRun, "backupRun");
+__name(bkJobGet, "bkJobGet");
+async function bkJobSave(env, job) {
+  await appSettingSet(env, "bk_job", JSON.stringify(job));
+}
+__name(bkJobSave, "bkJobSave");
+async function bkSetStatus(env, o) {
+  await appSettingSet(env, "backup_status", JSON.stringify(Object.assign({ at: Math.floor(Date.now() / 1e3) }, o)));
+}
+__name(bkSetStatus, "bkSetStatus");
+async function bkJobStart(env, snapshot) {
+  const pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(/* @__PURE__ */ new Date());
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let us = [];
+  try {
+    us = (await pg.query(`SELECT u.id::text AS id, (SELECT COUNT(*) FROM records r WHERE r.user_id = u.id AND r.deleted_at IS NULL)::int AS n FROM users u ORDER BY u.created_at`)).rows;
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const chunks = [];
+  let cur = [], sum = 0;
+  for (const u of us) {
+    if (cur.length && (sum + u.n > 8e3 || cur.length >= 300)) {
+      chunks.push(cur);
+      cur = [];
+      sum = 0;
+    }
+    cur.push(u.id);
+    sum += u.n;
+  }
+  if (cur.length) chunks.push(cur);
+  const names = ((await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).results || []).map((x) => x.name).filter((n) => !BK_SKIP_TABLES.test(n));
+  const job = { day: pl.slice(0, 10), pl, snapshot: !!snapshot, started: Math.floor(Date.now() / 1e3), phase: "ns", chunks, i: 0, d1: names, d1i: 0, d1off: 0, files: {}, lock: 0 };
+  await bkJobSave(env, job);
+  await bkSetStatus(env, { ok: true, running: true, step: "start \u2014 " + chunks.length + " cz\u0119\u015Bci kursant\xF3w, " + names.length + " tabel panelu" });
+  return job;
+}
+__name(bkJobStart, "bkJobStart");
+async function bkPart(env, job, tab, table) {
+  if (!table || table.length < 2) return;
+  const slug = bkSlug(tab), f = job.files[slug] = job.files[slug] || { tab, cols: [], keys: [], rows: 0, bytes: 0 };
+  const head = table[0].map(String);
+  head.forEach((h) => {
+    if (f.cols.indexOf(h) < 0) f.cols.push(h);
+  });
+  const idx = f.cols.map((c) => head.indexOf(c));
+  const body = table.slice(1).map((r) => idx.map((i) => i < 0 ? "" : r[i]));
+  const key = "backups/" + job.day + "/" + slug + "/" + String(f.keys.length).padStart(4, "0") + ".csv.gz";
+  const gz = await bkGzip(bkCsv(body).replace(/^﻿/, ""));
+  await env.RECORDINGS.put(key, gz, { httpMetadata: { contentType: "application/gzip" } });
+  f.keys.push(key);
+  f.rows += body.length;
+  f.bytes += gz.length;
+}
+__name(bkPart, "bkPart");
+var bkTabName = /* @__PURE__ */ __name((n) => BK_TAB_PL[n] ? BK_TAB_PL[n] + " (" + n + ")" : n, "bkTabName");
+async function bkJobStep(env) {
+  const job = await bkJobGet(env);
+  if (!job || job.phase === "done") return null;
+  const now = Date.now();
+  if (job.lock && job.lock > now) return "busy";
+  job.lock = now + 4 * 6e4;
+  await bkJobSave(env, job);
+  const t0 = Date.now();
+  try {
+    while (Date.now() - t0 < BK_STEP_MS && job.phase !== "done") {
+      if (job.phase === "ns") {
+        if (job.i >= job.chunks.length) {
+          job.phase = "global";
+          continue;
+        }
+        await bkSetStatus(env, { ok: true, running: true, step: "kursanci: cz\u0119\u015B\u0107 " + (job.i + 1) + " z " + job.chunks.length + " (nagrania, dni treningowe, dzienniki)" });
+        const tabs = await bkCollect(env, null, { uids: job.chunks[job.i], nsOnly: true });
+        for (const t of tabs) if (t[0] !== "Kursanci") await bkPart(env, job, t[0], t[1]);
+        job.i++;
+      } else if (job.phase === "global") {
+        await bkSetStatus(env, { ok: true, running: true, step: "lista kursant\xF3w i harmonogramy" });
+        const tabs = await bkCollect(env, null, { global: true, noD1: true });
+        for (const t of tabs) if (t[1].length > 1) await bkPart(env, job, t[0], t[1]);
+        job.phase = "d1";
+      } else if (job.phase === "d1") {
+        if (job.d1i >= job.d1.length) {
+          job.phase = "sheets";
+          continue;
+        }
+        const n = job.d1[job.d1i], page = 3e3;
+        await bkSetStatus(env, { ok: true, running: true, step: "dane panelu: " + bkTabName(n) + " (" + (job.d1i + 1) + "/" + job.d1.length + ")" });
+        const sel = /^record_transcript$/i.test(n) ? "ns_record_id, ns_student_id, status, lang, dur, json_array_length(words) AS slowa, model, error, created_at" : "*";
+        let rows = [];
+        try {
+          rows = (await env.DB.prepare("SELECT " + sel + ' FROM "' + n.replace(/"/g, "") + '" LIMIT ' + page + " OFFSET " + job.d1off).all()).results || [];
+        } catch (e) {
+          rows = [];
+        }
+        if (rows.length) await bkPart(env, job, bkTabName(n), bkTable(rows));
+        if (rows.length < page) {
+          job.d1i++;
+          job.d1off = 0;
+        } else job.d1off += page;
+      } else if (job.phase === "sheets") {
+        await bkSetStatus(env, { ok: true, running: true, step: "arkusz Google (ostatnie 90 dni nagra\u0144)" });
+        try {
+          job.sheet = await bkSheetsWrite(env, job);
+        } catch (e) {
+          job.sheet = { error: String(e && e.message || e) };
+        }
+        job.phase = "done";
+      }
+      await bkJobSave(env, job);
+    }
+    if (job.phase === "done") await bkJobFinish(env, job);
+  } catch (e) {
+    job.errors = (job.errors || 0) + 1;
+    job.last_error = String(e && e.message || e);
+    if (job.errors >= 5) {
+      job.phase = "done";
+      await bkSetStatus(env, { ok: false, error: "backup zatrzymany: " + job.last_error });
+    } else await bkSetStatus(env, { ok: true, running: true, step: "b\u0142\u0105d, ponawiam (" + job.errors + "/5): " + job.last_error });
+  }
+  job.lock = 0;
+  await bkJobSave(env, job);
+  return job.phase;
+}
+__name(bkJobStep, "bkJobStep");
+async function bkSheetsWrite(env, job) {
+  const token = await googleOAuthAccessToken(env);
+  if (!token) throw new Error("Konto Google nie jest po\u0142\u0105czone \u2014 \u2699\uFE0F Admin \u2192 Kalendarz Google \u2192 Po\u0142\u0105cz");
+  const since = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
+  let tabs = await bkCollect(env, null, { since, d1Light: true });
+  tabs = tabs.map((t) => [t[0] === "Nagrania" || t[0] === "\u{1F4C5} Dni treningowe" || t[0] === "Dzienniki (NS)" ? t[0] + " \u2014 od " + since : t[0], t[1].map((r) => r.map((c) => typeof c === "string" && c.length > 49e3 ? c.slice(0, 49e3) + "\u2026" : c))]);
+  const Fit = bkFit(tabs), info = [["Zak\u0142adka", "Uwaga"], ["Nagrania, dni treningowe, dzienniki", "tylko ostatnie 90 dni \u2014 wszystko od pocz\u0105tku jest w pe\u0142nej kopii plikowej (panel \u2192 Admin \u2192 Backup)"]].concat(Fit.notes);
+  const gt = [["\u26A0\uFE0F Zakres", info]].concat(Fit.tabs);
+  let sid = await appSettingGet(env, "backup_sheet_id");
+  if (sid) {
+    try {
+      await bkSheets(token, "/" + sid + "?fields=spreadsheetId");
+    } catch (e) {
+      sid = null;
+    }
+  }
+  if (!sid) {
+    sid = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup kursant\xF3w");
+    await appSettingSet(env, "backup_sheet_id", sid);
+  }
+  const n = await bkWrite(token, sid, gt, job.pl);
+  if (job.day.slice(8, 10) === "01" || job.snapshot) {
+    const ym = job.day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
+    if (!done || job.snapshot) {
+      const s2 = await bkNewSheet(token, "\u{1F4E6} Nowa Mowa \u2014 backup " + (job.snapshot ? job.day : ym));
+      await bkWrite(token, s2, gt, job.pl);
+      await appSettingSet(env, "backup_snapshot_" + ym, s2);
+    }
+  }
+  return { id: sid, rows: n, tabs: gt.length };
+}
+__name(bkSheetsWrite, "bkSheetsWrite");
+async function bkJobFinish(env, job) {
+  const files = Object.entries(job.files).map(([slug, f]) => ({ slug, tab: f.tab, cols: f.cols, keys: f.keys, rows: f.rows, bytes: f.bytes }));
+  await env.RECORDINGS.put("backups/" + job.day + "/manifest.json", JSON.stringify({ day: job.day, at: Math.floor(Date.now() / 1e3), files }), { httpMetadata: { contentType: "application/json" } });
+  try {
+    const cut = new Date(Date.now() - 35 * 864e5).toISOString().slice(0, 10);
+    let cursor;
+    do {
+      const L = await env.RECORDINGS.list({ prefix: "backups/", cursor, limit: 1e3 });
+      const old = L.objects.map((o) => o.key).filter((k) => {
+        const d = k.split("/")[1] || "";
+        return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < cut && d.slice(8, 10) !== "01";
+      });
+      if (old.length) await env.RECORDINGS.delete(old);
+      cursor = L.truncated ? L.cursor : null;
+    } while (cursor);
+  } catch (e) {
+  }
+  const sh = job.sheet || {};
+  await bkSetStatus(env, {
+    ok: true,
+    when: job.pl,
+    rows: files.reduce((a, f) => a + f.rows, 0),
+    tabs: files.length,
+    sheet_id: sh.id || null,
+    sheet_error: sh.error || null,
+    r2: { day: job.day, files: files.length, rows: files.reduce((a, f) => a + f.rows, 0), bytes: files.reduce((a, f) => a + f.bytes, 0) },
+    minutes: Math.round((Date.now() / 1e3 - job.started) / 60)
+  });
+  await appSettingSet(env, "backup_last_ok", job.day);
+}
+__name(bkJobFinish, "bkJobFinish");
+async function bkFileResponse(env, day, slug) {
+  const m = await env.RECORDINGS.get("backups/" + day + "/manifest.json");
+  if (!m) return null;
+  const man = await m.json(), f = (man.files || []).find((x) => x.slug === slug);
+  if (!f) return null;
+  const esc = /* @__PURE__ */ __name((v) => {
+    const s = String(v);
+    return /[",;\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }, "esc");
+  const { readable, writable } = new TransformStream(), w = writable.getWriter(), enc = new TextEncoder();
+  (async () => {
+    try {
+      await w.write(enc.encode("\uFEFF" + f.cols.map(esc).join(",") + "\n"));
+      for (const k of f.keys) {
+        const o = await env.RECORDINGS.get(k);
+        if (!o) continue;
+        await w.write(enc.encode(await new Response(o.body.pipeThrough(new DecompressionStream("gzip"))).text()));
+      }
+      await w.close();
+    } catch (e) {
+      try {
+        await w.abort(e);
+      } catch (x) {
+      }
+    }
+  })();
+  return new Response(readable, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="nowa-mowa-backup_' + day + "_" + slug + '.csv"', "Access-Control-Allow-Origin": "*" } });
+}
+__name(bkFileResponse, "bkFileResponse");
 async function backupTick(env) {
   const pl = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit" }).format(/* @__PURE__ */ new Date());
   const day = pl.slice(0, 10), hour = parseInt(pl.slice(11, 13), 10);
+  await ensureGoogleTables(env);
   const req = await appSettingGet(env, "backup_req");
   if (req) {
     await appSettingSet(env, "backup_req", "");
@@ -8535,21 +8695,14 @@ async function backupTick(env) {
       o = JSON.parse(req);
     } catch (e) {
     }
-    try {
-      await backupRun(env, { snapshot: !!o.snapshot });
-    } catch (e) {
-      await appSettingSet(env, "backup_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
-    }
-    return;
+    await bkJobStart(env, !!o.snapshot);
+  } else if (hour === 3 && await appSettingGet(env, "backup_last_day") !== day) {
+    await appSettingSet(env, "backup_last_day", day);
+    await bkJobStart(env, false);
   }
-  if (hour !== 3) return;
-  if (await appSettingGet(env, "backup_last_day") === day) return;
-  await ensureGoogleTables(env);
-  await appSettingSet(env, "backup_last_day", day);
   try {
-    await backupRun(env);
+    await bkJobStep(env);
   } catch (e) {
-    await appSettingSet(env, "backup_status", JSON.stringify({ ok: false, at: Math.floor(Date.now() / 1e3), error: String(e && e.message || e) }));
   }
 }
 __name(backupTick, "backupTick");
@@ -11938,6 +12091,42 @@ async function rsExport(env, url) {
 }
 __name(rsExport, "rsExport");
 __name2(rsExport, "rsExport");
+async function techniqueStats(env, sid, from, to) {
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  try {
+    const W = `r.deleted_at IS NULL AND r.reviewed_at IS NOT NULL AND COALESCE(r.review_details,'') NOT LIKE '\u{1F6AB}%' AND COALESCE(r.date, r.created_at::date) BETWEEN $1::date AND $2::date` + (sid ? " AND r.user_id::text = $3" : "");
+    const P = sid ? [from, to, String(sid)] : [from, to];
+    const rv = (await pg.query(`SELECT COUNT(*)::int AS reviewed, COUNT(*) FILTER (WHERE r.is_correct = true)::int AS correct FROM records r WHERE ${W}`, P)).rows[0] || {};
+    const rows = (await pg.query(`SELECT COALESCE(rrc_t.name, rrc.name) AS name, COUNT(DISTINCT rr.record_id)::int AS rated,
+        COUNT(DISTINCT rr.record_id) FILTER (WHERE ru.percent_mark < 100)::int AS weak, ROUND(AVG(ru.percent_mark))::int AS avg
+      FROM record_rates rr JOIN records r ON r.id = rr.record_id
+      LEFT JOIN record_rate_categories rrc ON rrc.id = rr.record_rate_category_id
+      LEFT JOIN record_rate_category_translations rrc_t ON rrc_t.record_rate_category_id = rrc.id AND rrc_t.locale = 'pl'
+      LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id
+      WHERE ${W} AND ru.percent_mark IS NOT NULL GROUP BY 1`, P)).rows;
+    const items = rows.filter((x) => x.name && x.rated).map((x) => ({ name: x.name, rated: x.rated, weak: x.weak, weakPct: Math.round(x.weak * 100 / x.rated), avgPct: x.avg })).sort((a, b) => b.weak - a.weak || a.avgPct - b.avgPct);
+    const errTotal = items.reduce((a, x) => a + x.weak, 0);
+    items.forEach((x) => {
+      x.sharePct = errTotal ? Math.round(x.weak * 100 / errTotal) : 0;
+    });
+    let years = null;
+    if (!sid) years = (await pg.query(`SELECT EXTRACT(YEAR FROM COALESCE(r.date, r.created_at::date))::int AS y, COALESCE(rrc_t.name, rrc.name) AS name,
+        COUNT(DISTINCT rr.record_id)::int AS rated, COUNT(DISTINCT rr.record_id) FILTER (WHERE ru.percent_mark < 100)::int AS weak
+      FROM record_rates rr JOIN records r ON r.id = rr.record_id
+      LEFT JOIN record_rate_categories rrc ON rrc.id = rr.record_rate_category_id
+      LEFT JOIN record_rate_category_translations rrc_t ON rrc_t.record_rate_category_id = rrc.id AND rrc_t.locale = 'pl'
+      LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id
+      WHERE ${W} AND ru.percent_mark IS NOT NULL GROUP BY 1, 2`, P)).rows;
+    return { ok: true, from, to, reviewed: Number(rv.reviewed) || 0, correct: Number(rv.correct) || 0, items, years };
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+}
+__name(techniqueStats, "techniqueStats");
 function csDay(t) {
   return t ? new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t)) : "";
 }
