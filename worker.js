@@ -10564,9 +10564,14 @@ function srMeasure(words, dur, minDur) {
   }
   const ok = W.filter((w) => isFinite(w[1]) && isFinite(w[2]) && w[2] >= w[1]);
   if (ok.length < 10) return null;
-  let syl = 0, speech = 0, nPause = 0;
+  let syl = 0, speech = 0, nPause = 0, longN = 0, longS = 0;
   for (let i = 0; i < ok.length; i++) {
     syl += srSyl(ok[i][0]);
+    const wd = ok[i][2] - ok[i][1];
+    if (wd > 2) {
+      longN++;
+      longS += wd;
+    }
     speech += ok[i][2] - ok[i][1];
     if (i > 0) {
       const g = ok[i][1] - ok[i - 1][2];
@@ -10588,7 +10593,9 @@ function srMeasure(words, dur, minDur) {
     syl_min: Math.round(syl / total * 60),
     syl_min_speech: Math.round(syl / speech * 60),
     wpm: Math.round(ok.length / total * 60),
-    wpm_speech: Math.round(ok.length / speech * 60)
+    wpm_speech: Math.round(ok.length / speech * 60),
+    long_words: longN,
+    long_pct: Math.round(longS / total * 100)
   };
 }
 __name(srMeasure, "srMeasure");
@@ -10599,7 +10606,7 @@ async function txSpeechRate(env, sid) {
   await pg.connect();
   let recs = [];
   try {
-    recs = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.review_details, COALESCE(rct.name, rc.name) AS category
+    recs = (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date) AS d, r.review_details, r.record_file, COALESCE(rct.name, rc.name) AS category
       FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
       LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
       WHERE r.user_id::text = $1 AND r.deleted_at IS NULL AND r.record_file IS NOT NULL ORDER BY r.created_at DESC LIMIT 3000`, [String(sid)])).rows;
@@ -10643,7 +10650,7 @@ async function txSpeechRate(env, sid) {
     if (sp && sp.length === words.length && new Set(sp).size > 1) continue;
     const m = srMeasure(words, t.dur);
     if (!m) continue;
-    items.push(Object.assign({ record_id: r.id, date: ymd(r.d), category: r.category || "" }, m));
+    items.push(Object.assign({ record_id: r.id, date: ymd(r.d), category: r.category || "", path: r.record_file || "" }, m));
   }
   items.sort((a, b) => b.date.localeCompare(a.date));
   const med = /* @__PURE__ */ __name((arr) => {
