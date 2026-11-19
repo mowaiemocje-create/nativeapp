@@ -10556,6 +10556,26 @@ function srSyl(w) {
 }
 __name(srSyl, "srSyl");
 __name2(srSyl, "srSyl");
+function srMinutes(ok, total) {
+  const n = Math.floor(total / 60);
+  if (n < 1) return { wpm_1min: null, syl_1min: null, min_clean: 0, min_total: 0 };
+  const win = [];
+  for (let i = 0; i < n; i++) win.push({ w: 0, s: 0, bad: false });
+  for (const w of ok) {
+    const i = Math.floor(w[1] / 60);
+    if (i < 0 || i >= n) continue;
+    win[i].w++;
+    win[i].s += srSyl(w[0]);
+    if (w[2] - w[1] > 2) win[i].bad = true;
+  }
+  const clean = win.filter((x) => !x.bad && x.w > 0), use = clean.length ? clean : win.slice(0, 1);
+  const med = /* @__PURE__ */ __name((a) => {
+    const v = a.slice().sort((x, y) => x - y), k = v.length >> 1;
+    return v.length % 2 ? v[k] : Math.round((v[k - 1] + v[k]) / 2);
+  }, "med");
+  return { wpm_1min: med(use.map((x) => x.w)), syl_1min: med(use.map((x) => x.s)), min_clean: clean.length, min_total: n };
+}
+__name(srMinutes, "srMinutes");
 function srMeasure(words, dur, minDur) {
   const W = [];
   for (const w of words || []) {
@@ -10595,7 +10615,8 @@ function srMeasure(words, dur, minDur) {
     wpm: Math.round(ok.length / total * 60),
     wpm_speech: Math.round(ok.length / speech * 60),
     long_words: longN,
-    long_pct: Math.round(longS / total * 100)
+    long_pct: Math.round(longS / total * 100),
+    ...srMinutes(ok, total)
   };
 }
 __name(srMeasure, "srMeasure");
@@ -10658,7 +10679,7 @@ async function txSpeechRate(env, sid) {
     const a = arr.slice().sort((x, y) => x - y), k = a.length >> 1;
     return a.length % 2 ? a[k] : Math.round((a[k - 1] + a[k]) / 2);
   }, "med");
-  const sum = /* @__PURE__ */ __name((l) => l.length ? { n: l.length, syl_min: med(l.map((x) => x.syl_min)), syl_min_speech: med(l.map((x) => x.syl_min_speech)), wpm: med(l.map((x) => x.wpm)), wpm_speech: med(l.map((x) => x.wpm_speech)), pause_pct: med(l.map((x) => x.pause_pct)) } : { n: 0 }, "sum");
+  const sum = /* @__PURE__ */ __name((l) => l.length ? { n: l.length, syl_min: med(l.map((x) => x.syl_min)), syl_min_speech: med(l.map((x) => x.syl_min_speech)), wpm: med(l.map((x) => x.wpm)), wpm_speech: med(l.map((x) => x.wpm_speech)), pause_pct: med(l.map((x) => x.pause_pct)), wpm_1min: med(l.map((x) => x.wpm_1min).filter((v) => v != null)), syl_1min: med(l.map((x) => x.syl_1min).filter((v) => v != null)) } : { n: 0 }, "sum");
   const now = Date.now(), dd = /* @__PURE__ */ __name((n) => new Date(now - n * 864e5).toISOString().slice(0, 10), "dd");
   const weeks = {};
   for (const x of items) {
@@ -15686,6 +15707,7 @@ async function svfSheetAppend(env, id, test, row, ext, H, check) {
       });
       for (let i = 1; i < out.length; i++) out[i] = svfNum(out[i]);
       for (let i = 1; i < out.length; i++) if (/^\s*wiek/i.test(head[i] || "")) out[i] = svfAge(out[i]);
+      for (let i = 1; i < out.length; i++) if (/data urodzenia/i.test(head[i] || "")) out[i] = svfDate(out[i]);
       const ti = await svfTableInfo(env, sid, tab);
       let rowIdx = null;
       if (ti && ti.table) {
@@ -15695,6 +15717,14 @@ async function svfSheetAppend(env, id, test, row, ext, H, check) {
           const up = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A" + (r0 + 1)) + "?valueInputOption=RAW", { method: "PUT", body: { values: [out] } });
           if (!up.ok) throw new Error(up.error);
           rowIdx = r0;
+        }
+      }
+      if (rowIdx === null && ti && ti.sheetId != null) {
+        const ins = await svGoogle(env, encodeURIComponent(sid) + ":batchUpdate", { method: "POST", body: { requests: [{ insertDimension: { range: { sheetId: ti.sheetId, dimension: "ROWS", startIndex: 1, endIndex: 2 }, inheritFromBefore: false } }] } });
+        if (ins.ok) {
+          const up = await svGoogle(env, encodeURIComponent(sid) + "/values/" + q("A2") + "?valueInputOption=RAW", { method: "PUT", body: { values: [out] } });
+          if (!up.ok) throw new Error(up.error);
+          rowIdx = 1;
         }
       }
       if (rowIdx === null) {
@@ -15729,9 +15759,30 @@ __name2(svfSheetAppend, "svfSheetAppend");
 function svfNum(v) {
   if (typeof v !== "string") return v;
   const t = v.trim();
-  return /^-?(0|[1-9]\d{0,5})([.,]\d{1,4})?$/.test(t) ? Number(t.replace(",", ".")) : v;
+  if (/^-?(0|[1-9]\d{0,5})([.,]\d{1,4})?$/.test(t)) return Number(t.replace(",", "."));
+  if (/^\d{4}-\d{1,2}-\d{1,2}$|^\d{1,2}-\d{1,2}-\d{4}$/.test(t)) return v;
+  const d = t.replace(/[\s-]/g, "");
+  if (/^[1-9]\d{6,14}$/.test(d) && /^[\d\s-]+$/.test(t)) return Number(d);
+  return v;
 }
 __name(svfNum, "svfNum");
+function svfDate(v) {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  let m = t.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/), y, mo, d;
+  if (m) {
+    d = +m[1];
+    mo = +m[2];
+    y = +m[3];
+  } else if (m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)) {
+    y = +m[1];
+    mo = +m[2];
+    d = +m[3];
+  } else return v;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 1900 || y > 2100) return v;
+  return Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(1899, 11, 30)) / 864e5);
+}
+__name(svfDate, "svfDate");
 function svfAge(v) {
   if (typeof v !== "string") return v;
   const m = v.trim().match(/^(\d{1,3})\s*(lat|lata|latka|rok|roku|l\.|r\.|rokov|roky|let|year|years|yrs|y\.?o\.?)?\.?$/i);
@@ -15739,7 +15790,7 @@ function svfAge(v) {
 }
 __name(svfAge, "svfAge");
 async function svfNumFix(env, force) {
-  if (!force && await appSettingGet(env, "svf_num_fixed_v1")) return { ok: true, skipped: true };
+  if (!force && await appSettingGet(env, "svf_num_fixed_v2")) return { ok: true, skipped: true };
   const sid = await svSheetId(env);
   const meta = await svGoogle(env, encodeURIComponent(sid) + "?fields=sheets.properties(title)");
   if (!meta.ok) return meta;
@@ -15759,10 +15810,13 @@ async function svfNumFix(env, force) {
     const data = [];
     vals.forEach((r, i) => {
       if (!i || !r || !String(r[li] || "").trim()) return;
+      const hd = vals[0] || [];
       let ch = false;
       const nr = r.map((c, j) => {
         if (j === 0) return c;
-        const n = svfNum(c);
+        let n = svfNum(c);
+        if (/^\s*wiek/i.test(String(hd[j] || ""))) n = svfAge(n);
+        if (/data urodzenia/i.test(String(hd[j] || ""))) n = svfDate(n);
         if (n !== c) ch = true;
         return n;
       });
@@ -15776,7 +15830,7 @@ async function svfNumFix(env, force) {
       if (!u.ok) return u;
     }
   }
-  await appSettingSet(env, "svf_num_fixed_v1", String(Math.floor(Date.now() / 1e3)));
+  await appSettingSet(env, "svf_num_fixed_v2", String(Math.floor(Date.now() / 1e3)));
   return { ok: true, fixed };
 }
 __name(svfNumFix, "svfNumFix");
