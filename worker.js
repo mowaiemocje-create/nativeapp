@@ -7477,6 +7477,8 @@ var worker_default = {
     }));
     ctx.waitUntil(rdTick(env).catch(() => {
     }));
+    ctx.waitUntil(gcalAllDayFix(env).catch(() => {
+    }));
   }
 };
 async function handleSetStudentSetup(request, env) {
@@ -18664,15 +18666,10 @@ async function gcalCourseInsert(env, r, days, trainerEmail) {
     location: "Szko\u0142a Nowej Mowy, Rynek 3/1A, Miko\u0142\xF3w",
     reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 24 * 60 }, { method: "popup", minutes: 60 }] }
   };
-  if (r.start_time && /^\d{1,2}:\d{2}$/.test(r.start_time)) {
-    const [h, m] = r.start_time.split(":").map(Number), e = h * 60 + m + 6 * 60;
-    body.start = { dateTime: `${r.start_date}T${pad(h)}:${pad(m)}:00`, timeZone: tz };
-    body.end = { dateTime: `${r.start_date}T${pad(Math.floor(e / 60) % 24)}:${pad(e % 60)}:00`, timeZone: tz };
-    if (days > 1) body.recurrence = [`RRULE:FREQ=DAILY;COUNT=${days}`];
-  } else {
-    body.start = { date: r.start_date };
-    body.end = { date: ofAddDays(r.start_date, days) };
-  }
+  if (r.start_time && /^\d{1,2}:\d{2}$/.test(r.start_time)) body.summary += ` (start ${r.start_time})`;
+  body.start = { date: r.start_date };
+  body.end = { date: ofAddDays(r.start_date, Math.max(1, days || 1)) };
+  body.reminders = { useDefault: false, overrides: [{ method: "popup", minutes: 15 * 60 }] };
   let qs = "";
   if (auth.mode === "oauth") {
     const g = [trainerEmail].concat(callDaysCc(env)).map((e) => String(e || "").trim().toLowerCase()).filter((e) => /@/.test(e));
@@ -18689,6 +18686,29 @@ async function gcalCourseInsert(env, r, days, trainerEmail) {
 }
 __name(gcalCourseInsert, "gcalCourseInsert");
 __name2(gcalCourseInsert, "gcalCourseInsert");
+async function gcalAllDayFix(env) {
+  await ensureGoogleTables(env);
+  if (await appSettingGet(env, "gcal_allday_v1")) return;
+  await appSettingSet(env, "gcal_allday_v1", String(Math.floor(Date.now() / 1e3)));
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare("SELECT * FROM course_reminders WHERE gcal_event_id IS NOT NULL AND start_date IS NOT NULL AND start_date >= ?").bind(new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)).all()).results || [];
+  } catch (e) {
+    return;
+  }
+  for (const r of rows.slice(0, 40)) {
+    try {
+      const days = r.gcal_days || r.days || 5;
+      const g = await gcalCourseInsert(env, r, days, r.gcal_by || r.created_by);
+      if (g.status === "ok") {
+        await gcalDelete(env, r.gcal_event_id);
+        await env.DB.prepare("UPDATE course_reminders SET gcal_event_id = ? WHERE id = ?").bind(g.id, r.id).run();
+      }
+    } catch (e) {
+    }
+  }
+}
+__name(gcalAllDayFix, "gcalAllDayFix");
 async function gcalDelete(env, eventId) {
   if (!eventId) return;
   const auth = await gcalAuth(env);
