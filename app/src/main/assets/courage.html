@@ -14,6 +14,7 @@ var FX_TR={
   consentQ:'🗺 Trener chce pokazać Twoje nagranie innym kursantom jako przykład: <b>{0}</b>{1}. Podpis: <b>{2}</b>. Zgadzasz się?',consentName:'Jak Cię podpisać',yes:'Tak, pokaż',no:'Nie',later:'Później',
   mineTitle:'🗺 MOJE NAGRANIA NA MAPIE',st_yes:'widoczne dla innych',st_no:'ukryte',st_pending:'czeka na Twoją zgodę',st_off:'wyłączone przez trenera',hide:'Ukryj',show:'Pokaż',openMap:'Otwórz mapę odwagi',
   rmMap:'🗑 Usuń z mapy',rmSure:'Na pewno usunąć to nagranie z mapy odwagi? Pinezka i kopia nagrania znikną na stałe.',rmDone:'Usunięto z mapy ✓',
+  vMap:'🗺 Mapa',vList:'📋 Lista',noTown:'Bez miejscowości',
   recHint:'Nagraj swoje — kategoria {0} wybierze się sama przy zapisie. Naciśnij REC.'},
  en:{saQ:'How do you rate your technique in this recording?',ok:'✅ Good',part:'⚠️ Partly',bad:'❌ Needs work',what:'What went wrong? (optional)',skip:'Skip',send:'Save',saved:'Your rating is saved ✓',
   el_int:'intonation',el_prz:'prolongations',el_tem:'tempo',el_odd:'breathing',el_sta:'voice onset',
@@ -25,6 +26,7 @@ var FX_TR={
   consentQ:'🗺 Your trainer would like to show your recording to other students as an example: <b>{0}</b>{1}. Signed as: <b>{2}</b>. Do you agree?',consentName:'How to sign you',yes:'Yes, show it',no:'No',later:'Later',
   mineTitle:'🗺 MY RECORDINGS ON THE MAP',st_yes:'visible to others',st_no:'hidden',st_pending:'waiting for your consent',st_off:'turned off by the trainer',hide:'Hide',show:'Show',openMap:'Open the courage map',
   rmMap:'🗑 Remove from map',rmSure:'Remove this recording from the courage map? The pin and the copy of the recording will be deleted permanently.',rmDone:'Removed from the map ✓',
+  vMap:'🗺 Map',vList:'📋 List',noTown:'No town',
   recHint:'Record yours — category {0} will be selected when you save. Press REC.'},
  cs:{saQ:'Jak hodnotíš svou techniku v této nahrávce?',ok:'✅ Dobře',part:'⚠️ Částečně',bad:'❌ K opravě',what:'Co nevyšlo? (volitelné)',skip:'Přeskočit',send:'Uložit',saved:'Tvé hodnocení je uloženo ✓',
   el_int:'intonace',el_prz:'prodlužování',el_tem:'tempo',el_odd:'dech',el_sta:'nasazení hlasu',
@@ -36,6 +38,7 @@ var FX_TR={
   consentQ:'🗺 Trenér chce ukázat tvou nahrávku ostatním kurzistům jako příklad: <b>{0}</b>{1}. Podpis: <b>{2}</b>. Souhlasíš?',consentName:'Jak tě podepsat',yes:'Ano, ukázat',no:'Ne',later:'Později',
   mineTitle:'🗺 MOJE NAHRÁVKY NA MAPĚ',st_yes:'viditelné pro ostatní',st_no:'skryté',st_pending:'čeká na tvůj souhlas',st_off:'vypnuto trenérem',hide:'Skrýt',show:'Ukázat',openMap:'Otevřít mapu odvahy',
   rmMap:'🗑 Odebrat z mapy',rmSure:'Opravdu odebrat tuto nahrávku z mapy odvahy? Špendlík i kopie nahrávky budou trvale smazány.',rmDone:'Odebráno z mapy ✓',
+  vMap:'🗺 Mapa',vList:'📋 Seznam',noTown:'Bez obce',
   recHint:'Nahraj svoje — kategorie {0} se vybere sama při uložení. Stiskni REC.'},
  sk:{saQ:'Ako hodnotíš svoju techniku v tejto nahrávke?',ok:'✅ Dobre',part:'⚠️ Čiastočne',bad:'❌ Na opravu',what:'Čo nevyšlo? (voliteľné)',skip:'Preskočiť',send:'Uložiť',saved:'Tvoje hodnotenie je uložené ✓',
   el_int:'intonácia',el_prz:'predlžovanie',el_tem:'tempo',el_odd:'dych',el_sta:'nasadenie hlasu',
@@ -47,6 +50,7 @@ var FX_TR={
   consentQ:'🗺 Tréner chce ukázať tvoju nahrávku ostatným kurzistom ako príklad: <b>{0}</b>{1}. Podpis: <b>{2}</b>. Súhlasíš?',consentName:'Ako ťa podpísať',yes:'Áno, ukázať',no:'Nie',later:'Neskôr',
   mineTitle:'🗺 MOJE NAHRÁVKY NA MAPE',st_yes:'viditeľné pre ostatných',st_no:'skryté',st_pending:'čaká na tvoj súhlas',st_off:'vypnuté trénerom',hide:'Skryť',show:'Ukázať',openMap:'Otvoriť mapu odvahy',
   rmMap:'🗑 Odstrániť z mapy',rmSure:'Naozaj odstrániť túto nahrávku z mapy odvahy? Špendlík aj kópia nahrávky budú natrvalo zmazané.',rmDone:'Odstránené z mapy ✓',
+  vMap:'🗺 Mapa',vList:'📋 Zoznam',noTown:'Bez obce',
   recHint:'Nahraj svoje — kategória {0} sa vyberie sama pri uložení. Stlač REC.'}
 };
 
@@ -63,25 +67,57 @@ function scAudioUrl(a){return a?VOICE_REVIEW_BASE+a+(a.indexOf('?')>=0?'&':'?')+
 function scBare(t){return String(t||'').replace(/^[^\p{L}\p{N}]+/u,'');}
 function scIcon(it){return SC_ICON[it.kind]||(String(it.kind_label||'').split(' ')[0])||'🎧';}
 function scLoadLeaflet(cb){
-  if(window.L&&window.L.map)return cb();
-  if(!document.getElementById('leafletCss')){var l=document.createElement('link');l.id='leafletCss';l.rel='stylesheet';l.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';document.head.appendChild(l);}
-  var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';s.onload=function(){cb();};s.onerror=function(){cb(new Error('leaflet'));};document.head.appendChild(s);
+  if(window.L&&window.L.map&&(window.L.markerClusterGroup||window._scNoCluster))return cb();
+  var CDN='https://cdnjs.cloudflare.com/ajax/libs/';
+  var css=function(id,href){if(!document.getElementById(id)){var l=document.createElement('link');l.id=id;l.rel='stylesheet';l.href=href;document.head.appendChild(l);}};
+  var js=function(src,ok,bad){var s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=bad;document.head.appendChild(s);};
+  css('leafletCss',CDN+'leaflet/1.9.4/leaflet.min.css');
+  css('mcCss',CDN+'leaflet.markercluster/1.5.3/MarkerCluster.min.css');
+  css('mcCss2',CDN+'leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css');
+  var withCluster=function(){
+    if(window.L.markerClusterGroup)return cb();
+    js(CDN+'leaflet.markercluster/1.5.3/leaflet.markercluster.min.js',function(){cb();},function(){window._scNoCluster=true;cb();}); // bez grupowania też działa
+  };
+  if(window.L&&window.L.map)return withCluster();
+  js(CDN+'leaflet/1.9.4/leaflet.min.js',withCluster,function(){cb(new Error('leaflet'));});
 }
+var scMarkers={},scView='map';
+var SC_SCROLL='display:flex;align-items:flex-start;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px';
 function scOpenMap(){
   var el=document.getElementById('scOv');
   if(!el){el=document.createElement('div');el.id='scOv';document.body.appendChild(el);}
   el.style.cssText='position:fixed;inset:0;z-index:8500;background:#fff;display:flex;flex-direction:column';
   el.innerHTML='<div style="padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px;border-bottom:1px solid var(--bd,#eee);display:flex;align-items:center;gap:8px"><div style="flex:1"><div style="font-weight:900;font-size:17px">'+fxT('scTitle')+'</div><div style="font-size:12px;color:var(--acc,#E8820C);font-weight:700">'+fxT('slogan')+'</div></div><button onclick="scCloseMap()" style="background:none;border:none;font-size:24px;color:var(--mu);cursor:pointer;padding:4px 8px">✕</button></div>'
+    +'<div style="display:flex;gap:6px;padding:8px 12px 0;flex-shrink:0"><button id="scVMap" class="scV" data-v="map"></button><button id="scVList" class="scV" data-v="list"></button></div>'
     +'<div id="scFilters" style="display:flex;gap:6px;overflow-x:auto;padding:8px 12px;flex-shrink:0"></div>'
-    +'<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"><div id="scNew"></div><div id="scMapDiv" style="height:46vh;min-height:240px;background:#e8eef2"></div><div id="scDetail"></div><div id="scList" style="padding:4px 12px 30px"></div></div>';
+    +'<div id="scScroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch"><div id="scNew"></div><div id="scMapDiv" style="height:46vh;min-height:240px;background:#e8eef2"></div><div id="scDetail"></div><div id="scList" style="padding:4px 12px 30px"></div></div>';
   document.getElementById('scList').innerHTML='<div style="padding:16px;color:var(--mu)">'+fxT('loading')+'</div>';
-  scMap=null;
+  scMap=null;scMarkers={};scView='map';
+  el.querySelectorAll('.scV').forEach(function(b){b.onclick=function(){scView=b.dataset.v;scApplyView();};});
+  scApplyView();
   fxGet('/showcase/feed').then(function(d){
     if(!d||!d.ok){document.getElementById('scList').innerHTML='<div style="padding:16px;color:var(--mu)">'+fxT('loadErr')+'</div>';return;}
     scFeed=d;scKind='';scRender();
   }).catch(function(){var l=document.getElementById('scList');if(l)l.innerHTML='<div style="padding:16px;color:var(--mu)">'+fxT('loadErr')+'</div>';});
 }
+// przełącznik 🗺 Mapa / 📋 Lista
+function scApplyView(){
+  var on=function(id,yes,label){var b=document.getElementById(id);if(!b)return;b.textContent=label;b.style.cssText='flex:1;border:1.5px solid var(--acc,#E8820C);border-radius:10px;padding:7px;font-size:13px;font-weight:800;cursor:pointer;background:'+(yes?'var(--acc,#E8820C)':'#fff')+';color:'+(yes?'#fff':'var(--acc,#E8820C)');};
+  on('scVMap',scView==='map',fxT('vMap'));on('scVList',scView==='list',fxT('vList'));
+  var md=document.getElementById('scMapDiv');if(md)md.style.display=scView==='map'?'block':'none';
+  if(scView==='map'&&scMap)setTimeout(function(){try{scMap.invalidateSize();}catch(e){}},50);
+}
 function scCloseMap(){var el=document.getElementById('scOv');if(el){el.querySelectorAll('audio').forEach(function(a){try{a.pause();}catch(e){}});el.remove();}scMap=null;}
+function scYtThumb(it,size){return 'https://img.youtube.com/vi/'+encodeURIComponent(it.youtube_id)+'/'+(size||'default')+'.jpg';}
+// kafelek: film = miniatura z ▶, nagranie = ikona rodzaju
+function scTile(it){
+  var pic=it.youtube_id
+    ?'<div style="position:relative;width:120px;height:68px;border-radius:8px;overflow:hidden;background:#000"><img src="'+scYtThumb(it,'mqdefault')+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span style="background:#e53935;color:#fff;border-radius:8px;padding:2px 9px;font-size:14px">▶</span></div>'+(it.audio?'<span style="position:absolute;right:3px;bottom:3px;background:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:13px">'+scIcon(it)+'</span>':'')+'</div>'
+    :'<div style="width:120px;height:68px;border-radius:8px;background:#fff4e6;display:flex;align-items:center;justify-content:center;font-size:34px">'+scIcon(it)+'</div>';
+  return '<button data-id="'+it.id+'" class="scPick" style="flex-shrink:0;width:124px;text-align:left;border:none;background:none;padding:2px;cursor:pointer">'+pic
+    +'<div style="font-size:12px;font-weight:700;line-height:1.25;margin-top:4px;max-height:30px;overflow:hidden">'+escH(scBare(it.title||it.kind_label||''))+'</div>'
+    +'<div style="font-size:10px;color:var(--mu)">'+escH(it.display_name||'')+(it.mine?' · '+fxT('mine'):'')+'</div></button>';
+}
 function scRender(){
   var items=(scFeed&&scFeed.items)||[];
   var kinds={};items.forEach(function(it){kinds[it.kind]=1;});
@@ -93,20 +129,34 @@ function scRender(){
   var weekAgo=Date.now()/1000-7*86400;
   var nw=vis.filter(function(it){return it.created_at>weekAgo;});
   var ne=document.getElementById('scNew');
-  ne.innerHTML=nw.length?'<div style="padding:4px 12px 8px"><div style="font-size:12px;font-weight:800;margin-bottom:6px">'+fxT('newWeek')+'</div><div style="display:flex;gap:8px;overflow-x:auto">'+nw.map(function(it){return '<button data-id="'+it.id+'" class="scPick" style="flex-shrink:0;max-width:200px;text-align:left;border:1px solid var(--bd,#ddd);background:#fff;border-radius:10px;padding:8px 10px;cursor:pointer"><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+scIcon(it)+' '+escH(scBare(it.title||it.kind_label||''))+'</div><div style="font-size:11px;color:var(--mu)">'+escH(it.display_name||'')+(it.place?' · '+escH(it.place):'')+'</div></button>';}).join('')+'</div></div>':'';
+  ne.innerHTML=nw.length?'<div style="padding:8px 12px"><div style="font-size:12px;font-weight:800;margin-bottom:6px">'+fxT('newWeek')+'</div><div style="'+SC_SCROLL+'">'+nw.map(scTile).join('')+'</div></div>':'';
   var list=document.getElementById('scList');
   if(!items.length){list.innerHTML='<div style="padding:16px;color:var(--mu)">'+fxT('empty')+'</div>';}
   else{
-    var noPos=vis.filter(function(it){return it.lat==null||it.lng==null;});
-    var row=function(it){return '<button data-id="'+it.id+'" class="scPick" style="display:flex;width:100%;gap:10px;align-items:center;text-align:left;border:none;border-bottom:1px solid var(--bd,#eee);background:#fff;padding:10px 2px;cursor:pointer"><div style="font-size:22px">'+scIcon(it)+(it.youtube_id?'🎬':'')+'</div><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700">'+escH(scBare(it.title||it.kind_label||''))+'</div><div style="font-size:11px;color:var(--mu)">'+escH(it.display_name||'')+(it.place?' · '+escH(it.place):'')+(it.system?' · '+fxT('system')+' '+escH(it.system):'')+(it.mine?' · '+fxT('mine'):'')+'</div></div></button>';};
-    var h='';
-    if(noPos.length)h+='<div style="font-size:12px;font-weight:800;margin:10px 0 2px">'+fxT('noPlace')+'</div>'+noPos.map(row).join('');
-    var pos=vis.filter(function(it){return it.lat!=null&&it.lng!=null;});
-    if(pos.length)h+='<div style="font-size:12px;font-weight:800;margin:12px 0 2px">📍</div>'+pos.map(row).join('');
-    list.innerHTML=h;
+    // kafelki pogrupowane wg miejscowości: „📍 Mikołów (4)”
+    var groups={},order=[];
+    vis.forEach(function(it){var k=(it.place||'').trim()||'—';if(!groups[k]){groups[k]=[];order.push(k);}groups[k].push(it);});
+    order.sort(function(a,b){if(a==='—')return 1;if(b==='—')return -1;return groups[b].length-groups[a].length||a.localeCompare(b);});
+    list.innerHTML=order.map(function(k){
+      return '<div style="margin-top:12px"><div style="font-size:13px;font-weight:800;margin-bottom:6px">📍 '+(k==='—'?escH(fxT('noTown')):escH(k))+' ('+groups[k].length+')</div><div style="'+SC_SCROLL+'">'+groups[k].map(scTile).join('')+'</div></div>';
+    }).join('');
   }
-  document.querySelectorAll('#scOv .scPick').forEach(function(b){b.onclick=function(){scShow(Number(b.dataset.id));};});
+  document.querySelectorAll('#scOv .scPick').forEach(function(b){b.onclick=function(){scFocus(Number(b.dataset.id));};});
   scDrawMap(vis);
+}
+// znacznik: film = miniatura YouTube z czerwonym ▶, nagranie = okrągła ikona rodzaju
+function scMarkerIcon(it){
+  if(it.youtube_id)return L.divIcon({className:'',iconSize:[52,40],iconAnchor:[26,20],
+    html:'<div style="position:relative;width:52px;height:40px;border-radius:7px;overflow:hidden;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);background:#000"><img src="'+scYtThumb(it,'default')+'" alt="" style="width:100%;height:100%;object-fit:cover"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span style="background:#e53935;color:#fff;border-radius:5px;padding:0 5px;font-size:11px;line-height:15px">▶</span></div></div>'});
+  return L.divIcon({className:'',iconSize:[36,36],iconAnchor:[18,18],
+    html:'<div style="width:32px;height:32px;border-radius:50%;background:#fff;border:2px solid var(--acc,#E8820C);box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:18px">'+scIcon(it)+'</div>'});
+}
+// grupa pinezek: „5 · 🍔🎬🚶”
+function scClusterIcon(cl){
+  var ms=cl.getAllChildMarkers(),seen=[],n=ms.length;
+  ms.forEach(function(m){var ic=m.options._sc?(m.options._sc.youtube_id?'🎬':scIcon(m.options._sc)):'';if(ic&&seen.indexOf(ic)<0&&seen.length<3)seen.push(ic);});
+  return L.divIcon({className:'',iconSize:[74,34],iconAnchor:[37,17],
+    html:'<div style="display:inline-flex;align-items:center;gap:3px;background:var(--acc,#E8820C);color:#fff;border:2px solid #fff;border-radius:17px;padding:3px 9px;font-weight:900;font-size:13px;white-space:nowrap;box-shadow:0 1px 5px rgba(0,0,0,.45)">'+n+' · <span style="font-size:14px">'+seen.join('')+'</span></div>'});
 }
 function scDrawMap(vis){
   var pos=vis.filter(function(it){return it.lat!=null&&it.lng!=null;});
@@ -115,19 +165,32 @@ function scDrawMap(vis){
     if(err||!document.getElementById('scMapDiv')){if(md)md.style.display='none';return;}
     if(!scMap){
       scMap=L.map(md,{zoomControl:true,attributionControl:true}).setView([50.17,18.9],6);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:17,attribution:'© OpenStreetMap'}).addTo(scMap);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(scMap);
     }
     if(scLayer)scLayer.remove();
-    scLayer=L.layerGroup().addTo(scMap);
+    scLayer=L.markerClusterGroup?L.markerClusterGroup({maxClusterRadius:45,showCoverageOnHover:false,spiderfyOnMaxZoom:true,iconCreateFunction:scClusterIcon}):L.layerGroup();
+    scLayer.addTo(scMap);
+    scMarkers={};
     var pts=[];
     pos.forEach(function(it){
-      var ic=L.divIcon({className:'',html:'<div style="font-size:26px;line-height:26px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))">'+scIcon(it)+(it.youtube_id?'<span style="font-size:13px">🎬</span>':'')+'</div>',iconSize:[34,30],iconAnchor:[14,26]});
-      L.marker([it.lat,it.lng],{icon:ic}).addTo(scLayer).on('click',function(){scShow(it.id);});
+      var m=L.marker([it.lat,it.lng],{icon:scMarkerIcon(it),_sc:it,title:scBare(it.title||'')});
+      m.on('click',function(){scShow(it.id);});
+      scLayer.addLayer(m);scMarkers[it.id]=m;
       pts.push([it.lat,it.lng]);
     });
     if(pts.length===1)scMap.setView(pts[0],11);else if(pts.length>1)scMap.fitBounds(pts,{padding:[30,30],maxZoom:12});
     setTimeout(function(){try{scMap.invalidateSize();}catch(e){}},200);
   });
+}
+// dotknięcie kafelka: przybliż mapę do pinezki i otwórz odtwarzacz
+function scFocus(id){
+  var m=scMarkers[id];
+  if(m&&scMap&&scView==='map'){
+    var md=document.getElementById('scMapDiv');if(md)md.scrollIntoView({behavior:'smooth',block:'start'});
+    var go=function(){try{scMap.setView(m.getLatLng(),Math.max(scMap.getZoom(),14));}catch(e){}};
+    if(scLayer&&scLayer.zoomToShowLayer)scLayer.zoomToShowLayer(m,go);else go();
+  }
+  setTimeout(function(){scShow(id);},m&&scView==='map'?450:0);
 }
 function scShow(id){
   var it=((scFeed&&scFeed.items)||[]).filter(function(x){return x.id===id;})[0];if(!it)return;
