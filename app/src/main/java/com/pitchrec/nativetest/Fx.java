@@ -88,6 +88,9 @@ public final class Fx {
         t("st_off", "wyłączone przez trenera", "turned off by the trainer", "vypnuto trenérem", "vypnuté trénerom");
         t("hide", "Ukryj", "Hide", "Skrýt", "Skryť");
         t("show", "Pokaż", "Show", "Ukázat", "Ukázať");
+        t("rmMap", "🗑 Usuń z mapy", "🗑 Remove from map", "🗑 Odebrat z mapy", "🗑 Odstrániť z mapy");
+        t("rmSure", "Na pewno usunąć to nagranie z mapy odwagi? Pinezka i kopia nagrania znikną na stałe.", "Remove this recording from the courage map? The pin and the copy of the recording will be deleted permanently.", "Opravdu odebrat tuto nahrávku z mapy odvahy? Špendlík i kopie nahrávky budou trvale smazány.", "Naozaj odstrániť túto nahrávku z mapy odvahy? Špendlík aj kópia nahrávky budú natrvalo zmazané.");
+        t("rmDone", "Usunięto z mapy ✓", "Removed from the map ✓", "Odebráno z mapy ✓", "Odstránené z mapy ✓");
         t("recHint", "Nagraj swoje — kategoria {0} wybierze się sama przy zapisie. Naciśnij REC.", "Record yours — category {0} will be selected when you save. Press REC.", "Nahraj svoje — kategorie {0} se vybere sama při uložení. Stiskni REC.", "Nahraj svoje — kategória {0} sa vyberie sama pri uložení. Stlač REC.");
     }
 
@@ -448,6 +451,19 @@ public final class Fx {
         } catch (Exception e) { }
     }
 
+    static void scRemove(Activity a, int id, Runnable done) {
+        try {
+            JSONObject o = authBody(a);
+            o.put("id", id);
+            final Context ac = a.getApplicationContext();
+            NsClient.backend("POST", "/showcase/remove", o.toString(), r -> {
+                mineAt = 0;
+                Toast.makeText(ac, r.ok ? tr("rmDone") : "❌ " + r.err, Toast.LENGTH_SHORT).show();
+                if (done != null) done.run();
+            });
+        } catch (Exception e) { }
+    }
+
     /** ustawienia: „Moje nagrania na mapie” — karta pokazuje się tylko, gdy są wpisy */
     public static void scFillMine(Activity a, LinearLayout card, java.util.function.BooleanSupplier isCurrent) {
         card.setVisibility(View.GONE);
@@ -481,6 +497,15 @@ public final class Fx {
             final int id = it.optInt("id");
             b.setOnClickListener(v -> { b.setEnabled(false); sendConsent(a, id, !yes, null, () -> scCheckMine(a, true, () -> { if (isCurrent.getAsBoolean()) renderMine(a, card, isCurrent); })); });
             row.addView(b, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            // 🗑 usuń z mapy na stałe (pinezka + kopia nagrania)
+            Button rm = Ui.button(a, "🗑", R.color.pr_warn, false);
+            rm.setOnClickListener(v -> new AlertDialog.Builder(a).setTitle(tr("rmMap")).setMessage(tr("rmSure"))
+                    .setNegativeButton(tr("no"), null)
+                    .setPositiveButton(tr("rmMap"), (di, w) -> scRemove(a, id, () -> scCheckMine(a, true, () -> { if (isCurrent.getAsBoolean()) renderMine(a, card, isCurrent); })))
+                    .show());
+            LinearLayout.LayoutParams rml = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rml.leftMargin = (int) (6 * d);
+            row.addView(rm, rml);
             LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             rl.topMargin = (int) (8 * d);
             card.addView(row, rl);

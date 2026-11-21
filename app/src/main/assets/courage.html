@@ -13,6 +13,7 @@ var FX_TR={
   recYours:'🎙 Nagraj swoje',ytOpen:'▶ Zobacz na YouTube',system:'system',plays:'odsłuchań',mine:'Twoje',
   consentQ:'🗺 Trener chce pokazać Twoje nagranie innym kursantom jako przykład: <b>{0}</b>{1}. Podpis: <b>{2}</b>. Zgadzasz się?',consentName:'Jak Cię podpisać',yes:'Tak, pokaż',no:'Nie',later:'Później',
   mineTitle:'🗺 MOJE NAGRANIA NA MAPIE',st_yes:'widoczne dla innych',st_no:'ukryte',st_pending:'czeka na Twoją zgodę',st_off:'wyłączone przez trenera',hide:'Ukryj',show:'Pokaż',openMap:'Otwórz mapę odwagi',
+  rmMap:'🗑 Usuń z mapy',rmSure:'Na pewno usunąć to nagranie z mapy odwagi? Pinezka i kopia nagrania znikną na stałe.',rmDone:'Usunięto z mapy ✓',
   recHint:'Nagraj swoje — kategoria {0} wybierze się sama przy zapisie. Naciśnij REC.'},
  en:{saQ:'How do you rate your technique in this recording?',ok:'✅ Good',part:'⚠️ Partly',bad:'❌ Needs work',what:'What went wrong? (optional)',skip:'Skip',send:'Save',saved:'Your rating is saved ✓',
   el_int:'intonation',el_prz:'prolongations',el_tem:'tempo',el_odd:'breathing',el_sta:'voice onset',
@@ -23,6 +24,7 @@ var FX_TR={
   recYours:'🎙 Record yours',ytOpen:'▶ Watch on YouTube',system:'system',plays:'plays',mine:'Yours',
   consentQ:'🗺 Your trainer would like to show your recording to other students as an example: <b>{0}</b>{1}. Signed as: <b>{2}</b>. Do you agree?',consentName:'How to sign you',yes:'Yes, show it',no:'No',later:'Later',
   mineTitle:'🗺 MY RECORDINGS ON THE MAP',st_yes:'visible to others',st_no:'hidden',st_pending:'waiting for your consent',st_off:'turned off by the trainer',hide:'Hide',show:'Show',openMap:'Open the courage map',
+  rmMap:'🗑 Remove from map',rmSure:'Remove this recording from the courage map? The pin and the copy of the recording will be deleted permanently.',rmDone:'Removed from the map ✓',
   recHint:'Record yours — category {0} will be selected when you save. Press REC.'},
  cs:{saQ:'Jak hodnotíš svou techniku v této nahrávce?',ok:'✅ Dobře',part:'⚠️ Částečně',bad:'❌ K opravě',what:'Co nevyšlo? (volitelné)',skip:'Přeskočit',send:'Uložit',saved:'Tvé hodnocení je uloženo ✓',
   el_int:'intonace',el_prz:'prodlužování',el_tem:'tempo',el_odd:'dech',el_sta:'nasazení hlasu',
@@ -33,6 +35,7 @@ var FX_TR={
   recYours:'🎙 Nahraj svoje',ytOpen:'▶ Zobrazit na YouTube',system:'systém',plays:'poslechů',mine:'Tvoje',
   consentQ:'🗺 Trenér chce ukázat tvou nahrávku ostatním kurzistům jako příklad: <b>{0}</b>{1}. Podpis: <b>{2}</b>. Souhlasíš?',consentName:'Jak tě podepsat',yes:'Ano, ukázat',no:'Ne',later:'Později',
   mineTitle:'🗺 MOJE NAHRÁVKY NA MAPĚ',st_yes:'viditelné pro ostatní',st_no:'skryté',st_pending:'čeká na tvůj souhlas',st_off:'vypnuto trenérem',hide:'Skrýt',show:'Ukázat',openMap:'Otevřít mapu odvahy',
+  rmMap:'🗑 Odebrat z mapy',rmSure:'Opravdu odebrat tuto nahrávku z mapy odvahy? Špendlík i kopie nahrávky budou trvale smazány.',rmDone:'Odebráno z mapy ✓',
   recHint:'Nahraj svoje — kategorie {0} se vybere sama při uložení. Stiskni REC.'},
  sk:{saQ:'Ako hodnotíš svoju techniku v tejto nahrávke?',ok:'✅ Dobre',part:'⚠️ Čiastočne',bad:'❌ Na opravu',what:'Čo nevyšlo? (voliteľné)',skip:'Preskočiť',send:'Uložiť',saved:'Tvoje hodnotenie je uložené ✓',
   el_int:'intonácia',el_prz:'predlžovanie',el_tem:'tempo',el_odd:'dych',el_sta:'nasadenie hlasu',
@@ -43,6 +46,7 @@ var FX_TR={
   recYours:'🎙 Nahraj svoje',ytOpen:'▶ Pozrieť na YouTube',system:'systém',plays:'vypočutí',mine:'Tvoje',
   consentQ:'🗺 Tréner chce ukázať tvoju nahrávku ostatným kurzistom ako príklad: <b>{0}</b>{1}. Podpis: <b>{2}</b>. Súhlasíš?',consentName:'Ako ťa podpísať',yes:'Áno, ukázať',no:'Nie',later:'Neskôr',
   mineTitle:'🗺 MOJE NAHRÁVKY NA MAPE',st_yes:'viditeľné pre ostatných',st_no:'skryté',st_pending:'čaká na tvoj súhlas',st_off:'vypnuté trénerom',hide:'Skryť',show:'Ukázať',openMap:'Otvoriť mapu odvahy',
+  rmMap:'🗑 Odstrániť z mapy',rmSure:'Naozaj odstrániť túto nahrávku z mapy odvahy? Špendlík aj kópia nahrávky budú natrvalo zmazané.',rmDone:'Odstránené z mapy ✓',
   recHint:'Nahraj svoje — kategória {0} sa vyberie sama pri uložení. Stlač REC.'}
 };
 
@@ -50,6 +54,8 @@ function fxT(k,a){var l=FX_TR[curLang]?curLang:'en';var s=(FX_TR[l]&&FX_TR[l][k]
 function escH(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function fxQS(){return CFG.auth;}
 function fxGet(path){return fetch(path+(path.indexOf('?')>=0?'&':'?')+fxQS(),{cache:'no-store'}).then(function(r){return r.json();});}
+function fxPost(path,body){var b={};CFG.auth.split('&').forEach(function(kv){var i=kv.indexOf('=');b[kv.slice(0,i)]=decodeURIComponent(kv.slice(i+1));});return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(b,body||{}))}).then(function(r){return r.json();});}
+function scRemove(id,after){if(!confirm(fxT('rmSure')))return;fxPost('/showcase/remove',{id:Number(id)}).then(function(r){if(r&&r.ok){if(scFeed&&scFeed.items)scFeed.items=scFeed.items.filter(function(x){return x.id!==Number(id);});if(after)after();}else alert('❌ '+((r&&(r.error||r.message))||'Błąd'));}).catch(function(){alert('❌ '+fxT('loadErr'));});}
 var FX_BTN='border:none;border-radius:10px;padding:11px 12px;font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation';
 var SC_ICON={mcdrive:'🍔',restauracja:'🍽',wystapienie:'🎤',szkola:'🏫',przechodzien:'🚶',sklep:'🛒',przychodnia:'🏥',urzad:'🏛',praca:'💼',telefon:'📞',inne:'🎧'};
 var scFeed=null,scKind='',scMap=null,scLayer=null,_scMineAt=0,_scAsked={};
@@ -137,6 +143,7 @@ function scShow(id){
     h+='<div id="scYt" style="position:relative;margin-top:8px;border-radius:10px;overflow:hidden;cursor:pointer;aspect-ratio:16/9;background:#000"><img src="https://img.youtube.com/vi/'+encodeURIComponent(it.youtube_id)+'/hqdefault.jpg" alt="" style="width:100%;height:100%;object-fit:cover;opacity:.85"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:52px">▶️</div></div>';
     if(it.youtube)h+='<a href="'+escH(it.youtube)+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;font-size:13px;font-weight:700;color:#c4302b">'+fxT('ytOpen')+'</a>';
   }
+  if(it.mine)h+='<button id="scRmMine" style="'+FX_BTN+';width:100%;margin-top:8px;background:#fdecea;color:#c62828">'+fxT('rmMap')+'</button>';
   h+='<button id="scRecMine" style="'+FX_BTN+';width:100%;margin-top:10px;background:var(--acc,#E8820C);color:#fff;'+(it.audio?'display:none':'')+'">'+fxT('recYours')+'</button></div>';
   dt.innerHTML=h;
   var yt=document.getElementById('scYt');
@@ -144,6 +151,7 @@ function scShow(id){
   var au=document.getElementById('scAud');
   if(au){au.addEventListener('play',function(){var rb=document.getElementById('scRecMine');if(rb)rb.style.display='block';});au.addEventListener('ended',function(){var rb=document.getElementById('scRecMine');if(rb)rb.style.display='block';});}
   document.getElementById('scRecMine').onclick=function(){scRecordMine(it);};
+  var _rm=document.getElementById('scRmMine');if(_rm)_rm.onclick=function(){scRemove(it.id,function(){var d2=document.getElementById('scDetail');if(d2)d2.innerHTML='';scRender();});};
   dt.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
