@@ -25,6 +25,9 @@ import java.util.Locale;
 // (gwiazdki 1-5), notatka + ZAPISZ ✓. Pelnoekranowa nakladka na android.R.id.content.
 public class DescribeSheet {
 
+    /** kategoria do wybrania przy następnym opisie nowego nagrania (z mapy odwagi) */
+    public static String preCat = null;
+
     public interface OnSave { void onSave(RecMeta meta); }
 
     private static final int CAT_BG = 0xFFFF9500, CAT_BORDER = 0xFFE07800;
@@ -109,6 +112,15 @@ public class DescribeSheet {
         // KATEGORIA
         body.addView(Ui.label(a, L.t("KATEGORIA")));
         final String[] selCat = {m.cat == null ? "" : m.cat};
+        // 🗺 „Nagraj swoje” z mapy odwagi — kategoria przykładu wybrana od razu (tylko nowe nagranie, nie poprawka)
+        if (preCat != null) {
+            String pc = preCat;
+            preCat = null;
+            if (newRecording && selCat[0].isEmpty() && m.fixRecordId.isEmpty()) {
+                String want = NsClient.categoryId(pc);
+                for (String c : NsClient.CATEGORIES) if (c.equalsIgnoreCase(pc) || (want != null && want.equals(NsClient.categoryId(c)))) { selCat[0] = c; break; }
+            }
+        }
         LinearLayout catGrid = new LinearLayout(a);
         catGrid.setOrientation(LinearLayout.VERTICAL);
         List<Button> catBtns = new ArrayList<>();

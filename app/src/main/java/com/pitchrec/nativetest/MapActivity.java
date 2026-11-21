@@ -85,6 +85,42 @@ public class MapActivity extends Activity {
             showMap(web, loading);
             return;
         }
+        // 🗺 MAPA ODWAGI — przykłady innych kursantów (worker /showcase/feed); strona z assets, adres bazowy = worker
+        if (getIntent().getBooleanExtra("courage", false)) {
+            closeBtn.setVisibility(android.view.View.GONE); // strona ma własny ✕ u góry
+            s.setMediaPlaybackRequiresUserGesture(false);
+            web.setWebChromeClient(new WebChromeClient());
+            web.addJavascriptInterface(new Object() {
+                @android.webkit.JavascriptInterface public void close() { runOnUiThread(() -> finish()); }
+                // „Nagraj swoje” — wracamy do aplikacji z kategorią przykładu
+                @android.webkit.JavascriptInterface public void recordMine(String cat) {
+                    runOnUiThread(() -> { setResult(RESULT_OK, new android.content.Intent().putExtra("scCat", cat == null ? "" : cat)); finish(); });
+                }
+            }, "PitchRecApp");
+            web.setWebViewClient(new WebViewClient() {
+                @Override
+                public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                    if (url != null && (url.contains("youtube.com/watch") || url.contains("youtu.be/") || url.startsWith("intent:"))) {
+                        try { startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))); } catch (Exception e) { }
+                        return true;
+                    }
+                    return false;
+                }
+            });
+            String html;
+            try (java.io.InputStream in = getAssets().open("courage.html")) {
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192]; int n;
+                while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+                html = bo.toString("UTF-8");
+            } catch (Exception e) { finish(); return; }
+            String auth = "ns_token=" + android.net.Uri.encode(token == null ? "" : token) + "&ns_email=" + android.net.Uri.encode(email == null ? "" : email) + "&ns_server=new";
+            String lang = getIntent().getStringExtra("lang");
+            html = html.replace("/*CFG*/", "var CFG={auth:" + q(auth) + ",lang:" + q(lang == null ? "pl" : lang) + "};");
+            web.loadDataWithBaseURL(Fx.WORKER + "/", html, "text/html", "UTF-8", null);
+            showMap(web, loading);
+            return;
+        }
         web.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {

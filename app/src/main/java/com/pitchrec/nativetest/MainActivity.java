@@ -1170,6 +1170,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
                 TrainerWatch.check(this, null); // pierwsze sprawdzenie tylko zapamietuje stan (bez powiadomien)
                 updateNavForLogin();
                 refreshLock(); CatLimits.fetch(MainActivity.this, null); // 🚦 limity kategorii
+                Fx.saCheck(MainActivity.this, true, null); Fx.scCheckMine(MainActivity.this, true, null); // 🪞 samoocena · 🗺 zgoda na mapę odwagi
                 refreshAccountSection();
                 refreshCoach();
                 Toast.makeText(this, L.t("✓ Zalogowano do NewSpeech"), Toast.LENGTH_SHORT).show();
@@ -1310,6 +1311,14 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         } catch (Exception e) { }
     }
 
+    private static String nsIdOf(String body) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(body);
+            if (o.optJSONObject("record") != null) o = o.optJSONObject("record");
+            return o.optString("id", "");
+        } catch (Exception e) { return ""; }
+    }
+
     private void markNs(File f, String status) {
         RecMeta m = RecMeta.load(this, f.getName());
         m.ns = status;
@@ -1427,6 +1436,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
             if (r.ok) {
                 markNs(file, "sent");
                 if (!isFix) { rememberNsId(file, r.body); getSharedPreferences("app_settings", MODE_PRIVATE).edit().remove("ns_limit_day").apply(); CatLimits.sent(catId); }
+                Fx.saAsk(this, isFix ? meta.fixRecordId : nsIdOf(r.body)); // 🪞 samoocena techniki (gdy trener włączył)
                 ContactList.logCall(this, file.getName()); // 📞 do kogo dzwonił — trener widzi
                 LocalTempo.announce(this, file.getName()); // serwer poczeka na tekst z telefonu
                 LocalTempo.sync(this, file.getName()); // 📱 tekst z telefonu → baza tekstów
@@ -2100,6 +2110,17 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         android.widget.LinearLayout.LayoutParams tlp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
         tlp.bottomMargin = (int) (8 * d);
         c.addView(tiles, tlp);
+        if (logged) { // 🗺 mapa odwagi + „Moje nagrania na mapie”
+            Button scBtn = Ui.button(this, Fx.tr("scTitle"), R.color.pr_accent, false);
+            scBtn.setAllCaps(false);
+            scBtn.setOnClickListener(v -> Fx.openCourageMap(this));
+            android.widget.LinearLayout.LayoutParams slp = new android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            slp.bottomMargin = (int) (8 * d);
+            c.addView(scBtn, slp);
+            android.widget.LinearLayout scMine = Ui.card(this);
+            c.addView(scMine);
+            Fx.scFillMine(this, scMine, () -> "set".equals(currentPage));
+        }
 
         // 3) Nagrywanie — ZWIJANE grupy (dotkniecie naglowka rozwija/zwija)
         android.widget.LinearLayout rec = section(c, "rec", "🎙  " + L.t("NAGRYWANIE") + "  ·  " + L.t("format i folder"));
@@ -4032,6 +4053,7 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
         LiveAudioData.loggedIn = isLoggedIn();
         LiveAudioData.full = Access.full(this);
         Translator.ensureRunning(this); // 📥 tryb tłumacza (konto trenera)
+        if (isLoggedIn()) { Fx.saCheck(this, false, null); Fx.scCheckMine(this, false, null); } // 🪞 samoocena · 🗺 zgoda na mapę odwagi
         refreshLock(); CatLimits.fetch(MainActivity.this, null); // 🚦 limity kategorii · 🔒 przerwa w treningu (trener wstrzymał aplikację)
         if (!badges.isEmpty()) { updateBadges(); TrainerWatch.check(this, null); }
         // nagrana rozmowa telefoniczna czeka na opis
@@ -4488,6 +4510,15 @@ public class MainActivity extends AppCompatActivity implements RecordingResultHo
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == Fx.REQ_COURAGE) { // 🗺 „Nagraj swoje” z mapy odwagi
+            if (resultCode == RESULT_OK && data != null && data.hasExtra("scCat")) {
+                String sc = data.getStringExtra("scCat");
+                DescribeSheet.preCat = sc == null || sc.isEmpty() ? null : sc;
+                showPage("daw");
+                Toast.makeText(this, "🎙 " + Fx.tr("recHint", sc == null ? "" : L.cat(sc)), Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode == REQ_MAP && data != null && data.hasExtra("availUntil")) {
             // "Chcę porozmawiać" przelaczone na mapie — ten sam stan w aplikacji
             long until = data.getLongExtra("availUntil", 0L);

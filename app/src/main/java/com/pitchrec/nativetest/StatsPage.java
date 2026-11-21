@@ -94,6 +94,10 @@ public class StatsPage {
             LinearLayout harm = Ui.card(a);
             root.addView(harm);
             loadHarmonogram(harm);
+            LinearLayout sa = Ui.card(a); // 🪞 samoocena techniki (gdy trener włączył)
+            root.addView(sa);
+            Fx.saFillCard(a, sa, host::isCurrent);
+            root.addView(Fx.mapCard(a)); // 🗺 mapa odwagi
             LinearLayout calls = Ui.card(a);
             calls.setVisibility(View.GONE);
             root.addView(calls);
@@ -118,6 +122,9 @@ public class StatsPage {
         LinearLayout rate = Ui.card(a); // 🗣 Tempo mowy w monologach — z tekstu AI, całe nagranie
         root.addView(rate);
         SpeechRate.fill(a, rate, host::isCurrent);
+        LinearLayout saCard = Ui.card(a); // 🪞 samoocena techniki — zgodność z trenerem
+        root.addView(saCard);
+        Fx.saFillCard(a, saCard, host::isCurrent);
         LinearLayout improve = Ui.card(a);
         improve.setVisibility(View.GONE);
         root.addView(improve);
