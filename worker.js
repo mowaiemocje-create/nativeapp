@@ -6694,6 +6694,22 @@ var worker_default = {
         const ex = await rsExport(env, url);
         return new Response(ex.csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "X-Rows": String(ex.n), "X-Survey": encodeURIComponent(String(ex.survey == null ? "" : ex.survey)), "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Rows, X-Survey" } });
       }
+      if (url.pathname.startsWith("/self-assess/")) return await handleSelfAssess(request, env, url);
+      if (url.pathname === "/showcase" || url.pathname.startsWith("/showcase/")) return await handleShowcase(request, env, url);
+      if (url.pathname === "/field-activity" && request.method === "GET" || url.pathname === "/field-sessions") {
+        const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+        const g = /* @__PURE__ */ __name((k) => q[k] != null ? q[k] : url.searchParams.get(k), "g");
+        const who = await contactAuth(env, g("ns_token"), g("ns_email"), g("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden) return json({ error: "Tylko trener" }, 403);
+        try {
+          if (url.pathname === "/field-activity") return json(await fieldActivity(env));
+          if (request.method === "POST") return json(await fieldSessionCreate(env, q, who.email));
+          return json(await fieldSessionsList(env));
+        } catch (e) {
+          return json({ error: String(e && e.message || e) }, 500);
+        }
+      }
       if (url.pathname === "/technique-stats" && request.method === "GET") {
         const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
         if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
@@ -12121,6 +12137,622 @@ async function rsExport(env, url) {
 }
 __name(rsExport, "rsExport");
 __name2(rsExport, "rsExport");
+var saWeek = /* @__PURE__ */ __name((s) => {
+  const d = /* @__PURE__ */ new Date(s + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+  return d.toISOString().slice(0, 10);
+}, "saWeek");
+var SA_RATINGS = { ok: "dobrze", part: "cz\u0119\u015Bciowo", bad: "do poprawy" };
+async function saTables(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS self_assess (ns_student_id TEXT PRIMARY KEY, enabled INTEGER DEFAULT 0, enabled_at INTEGER, enabled_by TEXT, note TEXT)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS record_self_rating (ns_record_id TEXT PRIMARY KEY, ns_student_id TEXT, rating TEXT, element TEXT, created_at INTEGER)").run();
+}
+__name(saTables, "saTables");
+async function saWho(env, token, email, server) {
+  const valid = await validateNsToken(token, email, server);
+  if (!valid) return null;
+  const u = await nsUserByEmail(env, email);
+  if (!u) return null;
+  const role = String(u.role || "").toLowerCase();
+  return { id: String(u.id), email: String(email).toLowerCase(), trainer: !(/student|client|kursant/.test(role) || role === ""), admin: role === "admin" };
+}
+__name(saWho, "saWho");
+async function saCompare(env, sid, limit) {
+  await saTables(env);
+  const self = (await env.DB.prepare("SELECT * FROM record_self_rating WHERE ns_student_id = ? ORDER BY created_at DESC LIMIT ?").bind(String(sid), limit || 200).all()).results || [];
+  const ids = self.map((x) => x.ns_record_id);
+  const rec = {};
+  if (ids.length) {
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    await pg.connect();
+    try {
+      for (const r of (await pg.query(`SELECT r.id::text AS id, COALESCE(r.date, r.created_at::date)::text AS d, r.is_correct, r.reviewed_at, r.review_details, COALESCE(rct.name, rc.name) AS category,
+          (SELECT string_agg(DISTINCT COALESCE(rrc_t.name, rrc.name), ', ') FROM record_rates rr LEFT JOIN record_rate_units ru ON ru.id = rr.record_rate_unit_id
+             LEFT JOIN record_rate_categories rrc ON rrc.id = rr.record_rate_category_id
+             LEFT JOIN record_rate_category_translations rrc_t ON rrc_t.record_rate_category_id = rrc.id AND rrc_t.locale = 'pl'
+           WHERE rr.record_id = r.id AND ru.percent_mark < 100) AS weak
+        FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+        LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+        WHERE r.id::text = ANY($1::text[]) AND r.user_id::text = $2`, [ids, String(sid)])).rows) rec[r.id] = r;
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+  }
+  const items = self.filter((x) => rec[x.ns_record_id]).map((x) => {
+    const r = rec[x.ns_record_id], reviewed = !!r.reviewed_at && !isNotCountedReview(r.review_details);
+    const trainer = reviewed ? r.is_correct === true ? "ok" : r.is_correct === false ? "bad" : null : null;
+    const agree = trainer ? x.rating === "ok" === (trainer === "ok") : null;
+    return {
+      record_id: x.ns_record_id,
+      date: String(r.d || "").slice(0, 10),
+      category: r.category || "",
+      self: x.rating,
+      self_element: x.element || "",
+      trainer,
+      trainer_weak: r.weak || "",
+      agree,
+      kind: agree === false ? x.rating === "ok" ? "overrated" : "underrated" : null
+    };
+  });
+  const cmp = items.filter((x) => x.agree !== null), now = Date.now(), d14 = new Date(now - 14 * 864e5).toISOString().slice(0, 10);
+  const pct = /* @__PURE__ */ __name((l) => l.length ? Math.round(l.filter((x) => x.agree).length * 100 / l.length) : null, "pct");
+  const weeks = {};
+  cmp.forEach((x) => {
+    const k = saWeek(x.date);
+    (weeks[k] = weeks[k] || []).push(x);
+  });
+  return {
+    ok: true,
+    items: items.slice(0, 60),
+    compared: cmp.length,
+    agree_pct: pct(cmp),
+    agree_14d: pct(cmp.filter((x) => x.date >= d14)),
+    overrated: cmp.filter((x) => x.kind === "overrated").length,
+    underrated: cmp.filter((x) => x.kind === "underrated").length,
+    pending: items.filter((x) => x.trainer === null).length,
+    weeks: Object.keys(weeks).sort().slice(-10).map((k) => ({ week: k, n: weeks[k].length, agree_pct: pct(weeks[k]) }))
+  };
+}
+__name(saCompare, "saCompare");
+async function saReadiness(env, sid) {
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  try {
+    const r = (await pg.query(`SELECT COUNT(*)::int AS rev, COUNT(*) FILTER (WHERE is_correct = true)::int AS ok FROM records
+      WHERE user_id::text = $1 AND deleted_at IS NULL AND reviewed_at IS NOT NULL AND COALESCE(review_details,'') NOT LIKE '\u{1F6AB}%' AND COALESCE(date, created_at::date) >= (CURRENT_DATE - 14)`, [String(sid)])).rows[0] || {};
+    const pct = r.rev ? Math.round(r.ok * 100 / r.rev) : null;
+    return { reviewed_14d: r.rev || 0, correct_14d: r.ok || 0, correct_pct_14d: pct, ready: (r.rev || 0) >= 15 && pct >= 85 };
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+}
+__name(saReadiness, "saReadiness");
+async function handleSelfAssess(request, env, url) {
+  const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+  const g = /* @__PURE__ */ __name((k) => q[k] != null ? q[k] : url.searchParams.get(k), "g");
+  const who = await saWho(env, g("ns_token"), g("ns_email"), g("ns_server"));
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  await saTables(env);
+  const p = url.pathname;
+  if (p === "/self-assess/me" && request.method === "GET") {
+    const s = await env.DB.prepare("SELECT enabled, enabled_at FROM self_assess WHERE ns_student_id = ?").bind(who.id).first();
+    return json({ ok: true, enabled: !!(s && s.enabled), enabled_at: s && s.enabled_at || null, ratings: SA_RATINGS });
+  }
+  if (p === "/self-assess/rate" && request.method === "POST") {
+    const rid = String(g("ns_record_id") || ""), rating = String(g("rating") || "");
+    if (!rid || !SA_RATINGS[rating]) return json({ error: "Brak nagrania albo z\u0142a ocena (ok / part / bad)" }, 400);
+    const s = await env.DB.prepare("SELECT enabled FROM self_assess WHERE ns_student_id = ?").bind(who.id).first();
+    if (!who.trainer && !(s && s.enabled)) return json({ error: "Samoocena techniki nie jest jeszcze w\u0142\u0105czona \u2014 w\u0142\u0105cza j\u0105 trener" }, 403);
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    await pg.connect();
+    let own = null;
+    try {
+      own = (await pg.query(`SELECT user_id::text AS uid FROM records WHERE id::text = $1`, [rid])).rows[0];
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+    if (!own || !who.trainer && own.uid !== who.id) return json({ error: "To nie Twoje nagranie" }, 403);
+    await env.DB.prepare("INSERT OR REPLACE INTO record_self_rating (ns_record_id, ns_student_id, rating, element, created_at) VALUES (?, ?, ?, ?, ?)").bind(rid, own.uid, rating, String(g("element") || "").slice(0, 120), Math.floor(Date.now() / 1e3)).run();
+    return json({ ok: true });
+  }
+  if (p === "/self-assess/compare" && request.method === "GET") {
+    const sid2 = who.trainer ? String(g("ns_student_id") || "") : who.id;
+    if (!sid2) return json({ error: "Brak kursanta" }, 400);
+    return json(await saCompare(env, sid2));
+  }
+  if (!who.trainer) return json({ error: "Tylko trener" }, 403);
+  const sid = String(g("ns_student_id") || "");
+  if (!sid) return json({ error: "Brak kursanta" }, 400);
+  if (p === "/self-assess/enable" && request.method === "POST") {
+    const on = !!g("on");
+    await env.DB.prepare("INSERT INTO self_assess (ns_student_id, enabled, enabled_at, enabled_by) VALUES (?, ?, ?, ?) ON CONFLICT(ns_student_id) DO UPDATE SET enabled = excluded.enabled, enabled_at = excluded.enabled_at, enabled_by = excluded.enabled_by").bind(sid, on ? 1 : 0, Math.floor(Date.now() / 1e3), who.email).run();
+    return json({ ok: true, enabled: on });
+  }
+  if (p === "/self-assess/status" && request.method === "GET") {
+    const s = await env.DB.prepare("SELECT * FROM self_assess WHERE ns_student_id = ?").bind(sid).first();
+    const [rd, cmp] = await Promise.all([saReadiness(env, sid).catch((e) => ({ error: String(e.message || e) })), saCompare(env, sid).catch(() => null)]);
+    return json({ ok: true, enabled: !!(s && s.enabled), enabled_at: s && s.enabled_at || null, enabled_by: s && s.enabled_by || null, readiness: rd, compare: cmp });
+  }
+  return json({ error: "Nieznana akcja" }, 404);
+}
+__name(handleSelfAssess, "handleSelfAssess");
+var FA_FIELD_RE = /przechodz|sklep|urz[aą]d|ulic|kiosk|aptek|poczt|bank|kawiar|restaur|praca|pracy|szko[lł]|uczel|autobus|tramwaj|dworz|miast|teren|obcy|nieznajom|sprzedaw|kasjer|stacj|market|galeri|lekarz|recepcj/i;
+function faIsField(cat, f) {
+  const c = String(cat || "");
+  if (txIsMonolog(c) || /telefon|dzwon|rozmowa tel/i.test(c) || f.dom) return false;
+  return FA_FIELD_RE.test(c) || f.teren_km != null && f.teren_km >= 0.3;
+}
+__name(faIsField, "faIsField");
+async function fieldActivity(env) {
+  const today = rdDay(), d30 = rdAddDays(today, -30), d14 = rdAddDays(today, -14);
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let vis, users, recs, reqs;
+  try {
+    vis = (await pg.query(`SELECT id::text AS id, student_id::text AS uid, date, created_at FROM visit_dates vd WHERE (to_jsonb(vd) ->> 'deleted_at') IS NULL AND student_id IN
+        (SELECT student_id FROM visit_dates WHERE date >= (CURRENT_DATE - 45)) ORDER BY student_id, date`)).rows;
+    const uids = [...new Set(vis.map((v) => v.uid))];
+    if (!uids.length) return { ok: true, items: [] };
+    users = (await pg.query(`SELECT id::text AS id, first_name, last_name, email, (to_jsonb(u) ->> 'deleted_at') AS del FROM users u WHERE id::text = ANY($1::text[])`, [uids])).rows;
+    recs = (await pg.query(`SELECT r.user_id::text AS uid, COALESCE(r.date, r.created_at::date)::text AS d, r.record_file, r.review_details, COALESCE(rct.name, rc.name) AS category, rc.id::text AS cat_id
+      FROM records r LEFT JOIN record_categories rc ON rc.id = r.record_category_id LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+      WHERE r.deleted_at IS NULL AND r.record_file IS NOT NULL AND r.user_id::text = ANY($1::text[]) AND COALESCE(r.date, r.created_at::date) >= $2::date`, [uids, rdAddDays(today, -120)])).rows;
+    reqs = (await pg.query(`SELECT r.visit_date_id::text AS vid, r.record_category_id::text AS cat_id, r.records_count AS n, MAX(CASE WHEN t.locale = 'pl' THEN t.name END) AS name
+      FROM visit_record_requirements r LEFT JOIN record_category_translations t ON t.record_category_id = r.record_category_id
+      WHERE r.visit_date_id::text = ANY($1::text[]) GROUP BY 1, 2, 3`, [vis.map((v) => v.id)])).rows;
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  const U = {};
+  users.forEach((u) => {
+    U[u.id] = u;
+  });
+  const byV = {};
+  vis.forEach((v) => {
+    (byV[v.uid] = byV[v.uid] || []).push(v);
+  });
+  const byR = {};
+  recs.forEach((r) => {
+    if (!isNotCountedReview(r.review_details)) (byR[r.uid] = byR[r.uid] || []).push(r);
+  });
+  const rq = {};
+  reqs.forEach((r) => {
+    (rq[r.vid] = rq[r.vid] || []).push(r);
+  });
+  const items = [];
+  for (const [uid, vs] of Object.entries(byV)) {
+    const u = U[uid] || {};
+    if (u.del) continue;
+    const dates = vs.map((v) => ({ id: v.id, d: csDay(v.date), c: csDay(v.created_at) })).sort((a, b) => a.d.localeCompare(b.d));
+    const cur = dates.find((x) => x.d >= today) || dates[dates.length - 1];
+    const ci = dates.indexOf(cur), pStart = ci > 0 ? dates[ci - 1].d : dates[0].c;
+    const courseStart = dates.filter((x) => Math.abs(csDiff(x.c, cur.c)) <= 2).map((x) => x.c).sort()[0] || pStart;
+    const rr = (byR[uid] || []).map((r) => {
+      const f = rsFile(r.record_file);
+      return { d: r.d, cat: r.category || "", cat_id: r.cat_id, field: faIsField(r.category, f), home: !!f.dom || txIsMonolog(r.category) };
+    });
+    const fieldDates = rr.filter((r) => r.field).map((r) => r.d).sort(), lastField = fieldDates[fieldDates.length - 1] || null;
+    const lastRec = rr.map((r) => r.d).sort().pop() || null;
+    const r14 = rr.filter((r) => r.d >= d14), f14 = r14.filter((r) => r.field).length;
+    const sinceCourse = rr.filter((r) => r.d > courseStart), fieldSinceCourse = sinceCourse.filter((r) => r.field).length;
+    const inPer = rr.filter((r) => r.d >= pStart && r.d <= cur.d);
+    const miss = (rq[cur.id] || []).filter((q) => q.n > 0).map((q) => ({ name: q.name || "?", need: q.n, have: inPer.filter((r) => r.cat_id === q.cat_id).length, field: FA_FIELD_RE.test(q.name || "") })).filter((q) => q.have < q.need);
+    const flags = [], dCourse = csDiff(courseStart, today), dField = lastField ? csDiff(lastField, today) : null;
+    if (dCourse >= 3 && fieldSinceCourse === 0) flags.push({ k: "no_field", t: "od kursu (" + dCourse + " dni) brak nagrania w terenie", w: 3 });
+    else if (dField != null && dField >= 4) flags.push({ k: "stale", t: dField + " dni bez nagrania w terenie", w: dField >= 7 ? 3 : 2 });
+    if (r14.length >= 5 && f14 / r14.length < 0.2) flags.push({ k: "home", t: "w 14 dniach tylko " + Math.round(f14 * 100 / r14.length) + "% nagra\u0144 w terenie", w: 2 });
+    const missField = miss.filter((q) => q.field);
+    if (missField.length && cur.d >= today) {
+      const left = csDiff(today, cur.d);
+      flags.push({ k: "missing", t: "brakuje w terenie: " + missField.map((q) => q.name + " " + q.have + "/" + q.need).join(", ") + (left <= 7 ? " \xB7 zosta\u0142o " + left + " dni" : ""), w: left <= 5 ? 2 : 1 });
+    }
+    if (lastRec && csDiff(lastRec, today) >= 5) flags.push({ k: "silent", t: csDiff(lastRec, today) + " dni bez \u017Cadnego nagrania", w: 3 });
+    items.push({
+      id: uid,
+      name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.email || uid,
+      email: u.email || "",
+      course_start: courseStart,
+      days_since_course: dCourse,
+      period: [pStart, cur.d],
+      last_field: lastField,
+      days_since_field: dField,
+      last_rec: lastRec,
+      rec_14d: r14.length,
+      field_14d: f14,
+      field_pct_14d: r14.length ? Math.round(f14 * 100 / r14.length) : null,
+      field_since_course: fieldSinceCourse,
+      missing: miss,
+      flags,
+      score: flags.reduce((a, f) => a + f.w, 0)
+    });
+  }
+  items.sort((a, b) => b.score - a.score || (b.days_since_field || 99) - (a.days_since_field || 99));
+  return { ok: true, at: Math.floor(Date.now() / 1e3), items };
+}
+__name(fieldActivity, "fieldActivity");
+async function fsTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS field_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, start_at INTEGER, minutes INTEGER, title TEXT, students TEXT, meet TEXT, gcal_event_id TEXT, created_by TEXT, created_at INTEGER)").run();
+}
+__name(fsTable, "fsTable");
+async function fieldSessionCreate(env, b, by) {
+  await fsTable(env);
+  const start = Date.parse(String(b.start || ""));
+  if (!isFinite(start)) throw new Error("Z\u0142a data i godzina");
+  const minutes = Math.max(15, Math.min(240, parseInt(b.minutes, 10) || 45)), students = (b.students || []).filter((x) => x && x.id);
+  const title = String(b.title || "\u{1F30D} Wsp\xF3lne wyj\u015Bcie \u2014 \u0107wiczenia w swoim mie\u015Bcie").slice(0, 150);
+  let meet = String(b.meet || "").trim() || null, evId = null, gerr = null;
+  const auth = await gcalAuth(env);
+  if (auth && b.invite !== false) {
+    const iso = /* @__PURE__ */ __name((t) => new Date(t).toISOString(), "iso");
+    const body = {
+      summary: title,
+      start: { dateTime: iso(start) },
+      end: { dateTime: iso(start + minutes * 6e4) },
+      description: [
+        "Ka\u017Cdy \u0107wiczy w swoim mie\u015Bcie, w tym samym czasie. Na pocz\u0105tku kr\xF3tkie po\u0142\u0105czenie: plan \u2014 kto, gdzie, jakie sytuacje.",
+        "Potem wychodzisz i nagrywasz rozmowy z technik\u0105 Nowej Mowy (sklep, przechodzie\u0144, urz\u0105d\u2026). Na koniec wracamy na po\u0142\u0105czenie: jak posz\u0142o?",
+        meet ? "Link do po\u0142\u0105czenia: " + meet : "",
+        "Szko\u0142a Nowej Mowy"
+      ].filter(Boolean).join("\n\n"),
+      reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 60 }, { method: "popup", minutes: 10 }] }
+    };
+    let qs = "";
+    if (auth.mode === "oauth") {
+      body.attendees = [...new Set([by].concat(students.map((s) => s.email)).map((e) => String(e || "").trim().toLowerCase()).filter((e) => /@/.test(e)))].map((email) => ({ email }));
+      body.guestsCanModify = false;
+      if (!meet) body.conferenceData = { createRequest: { requestId: "ns-fs-" + Date.now(), conferenceSolutionKey: { type: "hangoutsMeet" } } };
+      qs = "?sendUpdates=all&conferenceDataVersion=1";
+    }
+    const rr = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(gcalCalendarId(env, auth.mode))}/events${qs}`, { method: "POST", headers: { "Authorization": "Bearer " + auth.token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await rr.json().catch(() => null);
+    if (rr.ok && d && d.id) {
+      evId = d.id;
+      meet = meet || d.hangoutLink || null;
+    } else gerr = d && d.error && d.error.message || "HTTP " + rr.status;
+  }
+  const r = await env.DB.prepare("INSERT INTO field_sessions (start_at, minutes, title, students, meet, gcal_event_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(Math.floor(start / 1e3), minutes, title, JSON.stringify(students), meet, evId, by, Math.floor(Date.now() / 1e3)).run();
+  return { ok: true, id: r.meta && r.meta.last_row_id, meet, gcal: evId ? "ok" : auth ? gerr : "Kalendarz Google nie jest po\u0142\u0105czony \u2014 zaproszenia nie wys\u0142ano", invited: evId ? students.length : 0 };
+}
+__name(fieldSessionCreate, "fieldSessionCreate");
+async function fieldSessionsList(env) {
+  await fsTable(env);
+  const rows = (await env.DB.prepare("SELECT * FROM field_sessions WHERE start_at >= ? ORDER BY start_at DESC LIMIT 30").bind(Math.floor(Date.now() / 1e3) - 60 * 86400).all()).results || [];
+  const all = [...new Set(rows.flatMap((r) => {
+    try {
+      return JSON.parse(r.students || "[]").map((s) => String(s.id));
+    } catch (e) {
+      return [];
+    }
+  }))];
+  let recs = [];
+  if (all.length) {
+    const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+    await pg.connect();
+    try {
+      recs = (await pg.query(`SELECT r.user_id::text AS uid, r.created_at, r.record_file, COALESCE(rct.name, rc.name) AS category FROM records r
+        LEFT JOIN record_categories rc ON rc.id = r.record_category_id LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl'
+        WHERE r.deleted_at IS NULL AND r.user_id::text = ANY($1::text[]) AND r.created_at >= to_timestamp($2)`, [all, Math.min(...rows.map((r) => r.start_at)) - 3600])).rows;
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+  }
+  return { ok: true, items: rows.map((r) => {
+    let st = [];
+    try {
+      st = JSON.parse(r.students || "[]");
+    } catch (e) {
+    }
+    const a = (r.start_at - 15 * 60) * 1e3, b = (r.start_at + r.minutes * 60 + 3 * 3600) * 1e3;
+    return {
+      id: r.id,
+      start_at: r.start_at,
+      minutes: r.minutes,
+      title: r.title,
+      meet: r.meet,
+      gcal: !!r.gcal_event_id,
+      students: st.map((s) => {
+        const mine = recs.filter((x) => x.uid === String(s.id) && new Date(x.created_at).getTime() >= a && new Date(x.created_at).getTime() <= b);
+        return { id: s.id, name: s.name || s.email || s.id, n: mine.length, field: mine.filter((x) => faIsField(x.category, rsFile(x.record_file))).length, cats: [...new Set(mine.map((x) => x.category).filter(Boolean))] };
+      })
+    };
+  }) };
+}
+__name(fieldSessionsList, "fieldSessionsList");
+var SC_KINDS_VIDEO = {
+  przechodzien: "\u{1F6B6} Zobacz rozmow\u0119 z przechodniem",
+  sklep: "\u{1F6D2} Zobacz zakupy",
+  mcdrive: "\u{1F354} Zobacz zam\xF3wienie w McDrive",
+  restauracja: "\u{1F37D} Zobacz zam\xF3wienie w restauracji",
+  wystapienie: "\u{1F3A4} Zobacz wyst\u0105pienie",
+  szkola: "\u{1F3EB} Zobacz w szkole",
+  praca: "\u{1F4BC} Zobacz w pracy",
+  przychodnia: "\u{1F3E5} Zobacz w przychodni",
+  urzad: "\u{1F3DB} Zobacz w urz\u0119dzie",
+  telefon: "\u{1F4DE} Zobacz rozmow\u0119 telefoniczn\u0105",
+  inne: "\u{1F3AC} Zobacz"
+};
+var SC_KINDS = {
+  przechodzien: "\u{1F6B6} Pos\u0142uchaj przechodnia",
+  sklep: "\u{1F6D2} Pos\u0142uchaj zakup\xF3w",
+  mcdrive: "\u{1F354} Pos\u0142uchaj zam\xF3wienia w McDrive",
+  wystapienie: "\u{1F3A4} Pos\u0142uchaj wyst\u0105pienia",
+  restauracja: "\u{1F37D} Pos\u0142uchaj zam\xF3wienia w restauracji",
+  szkola: "\u{1F3EB} Pos\u0142uchaj w szkole",
+  praca: "\u{1F4BC} Pos\u0142uchaj w pracy",
+  przychodnia: "\u{1F3E5} Pos\u0142uchaj w przychodni",
+  urzad: "\u{1F3DB} Pos\u0142uchaj w urz\u0119dzie",
+  telefon: "\u{1F4DE} Pos\u0142uchaj telefonu",
+  inne: "\u{1F3A7} Pos\u0142uchaj"
+};
+async function scTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS showcase (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_record_id TEXT, author_id TEXT, display_name TEXT, title TEXT, kind TEXT, note TEXT, place TEXT, lat REAL, lng REAL, category TEXT, system TEXT, dur REAL, r2_key TEXT, consent TEXT DEFAULT 'pending', consent_at INTEGER, consent_by TEXT, active INTEGER DEFAULT 1, plays INTEGER DEFAULT 0, created_by TEXT, created_at INTEGER)").run();
+  try {
+    await env.DB.prepare("ALTER TABLE showcase ADD COLUMN youtube TEXT").run();
+  } catch (e) {
+  }
+}
+__name(scTable, "scTable");
+function scYtId(u) {
+  const m = String(u || "").match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+__name(scYtId, "scYtId");
+async function scGeocode(env, place) {
+  const k = "geoq:" + String(place).toLowerCase().trim();
+  try {
+    const c = await env.DB.prepare("SELECT v FROM tx_kv WHERE k = ?").bind(k).first();
+    if (c && c.v) return JSON.parse(c.v);
+  } catch (e) {
+  }
+  try {
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=pl,sk,cz,de,gb,ie,nl,at&q=" + encodeURIComponent(place), { headers: { "User-Agent": "newspeech-backend/1.0 (nowamowa@gmail.com)", "Accept-Language": "pl" } });
+    const d = await r.json();
+    if (d && d[0]) {
+      const o = { lat: Math.round(Number(d[0].lat) * 100) / 100, lng: Math.round(Number(d[0].lon) * 100) / 100 };
+      try {
+        await env.DB.prepare("INSERT OR REPLACE INTO tx_kv (k, v) VALUES (?, ?)").bind(k, JSON.stringify(o)).run();
+      } catch (e) {
+      }
+      return o;
+    }
+  } catch (e) {
+  }
+  return null;
+}
+__name(scGeocode, "scGeocode");
+function scOut(r, withAuthor) {
+  const o = { id: r.id, title: r.title, kind: r.kind, kind_label: !r.r2_key && r.youtube ? SC_KINDS_VIDEO[r.kind] || SC_KINDS_VIDEO.inne : SC_KINDS[r.kind] || SC_KINDS.inne, note: r.note || "", youtube: r.youtube || null, youtube_id: scYtId(r.youtube), has_audio: !!r.r2_key, place: r.place || "", lat: r.lat, lng: r.lng, display_name: r.display_name || "", category: r.category || "", system: r.system || "", dur: r.dur || null, plays: r.plays || 0, created_at: r.created_at };
+  if (withAuthor) Object.assign(o, { ns_record_id: r.ns_record_id, author_id: r.author_id, consent: r.consent, consent_at: r.consent_at, consent_by: r.consent_by, active: !!r.active, created_by: r.created_by });
+  return o;
+}
+__name(scOut, "scOut");
+async function scCreate(env, b, who, nsToken, nsEmail, nsServer) {
+  await scTable(env);
+  const rid = String(b.ns_record_id || ""), yt = String(b.youtube || "").trim();
+  if (yt && !scYtId(yt)) throw new Error("To nie wygl\u0105da na link do YouTube");
+  if (!rid) {
+    if (!yt) throw new Error("Brak nagrania albo linku do filmu");
+    const place2 = String(b.place || "").trim(), hasPt = isFinite(parseFloat(b.lat)) && isFinite(parseFloat(b.lng));
+    if (!place2 && !hasPt) throw new Error("Wpisz miejscowo\u015B\u0107 albo wska\u017C miejsce na mapie");
+    const geo = hasPt ? { lat: parseFloat(b.lat), lng: parseFloat(b.lng) } : await scGeocode(env, place2), kind2 = SC_KINDS[b.kind] ? b.kind : "inne", now2 = Math.floor(Date.now() / 1e3);
+    const title2 = String(b.title || "").trim() || SC_KINDS_VIDEO[kind2];
+    const ins2 = await env.DB.prepare("INSERT INTO showcase (ns_record_id, author_id, display_name, title, kind, note, place, lat, lng, category, system, consent, consent_at, consent_by, active, created_by, created_at, youtube) VALUES (NULL, NULL, ?, ?, ?, ?, ?, ?, ?, '', ?, 'yes', ?, ?, 1, ?, ?, ?)").bind(String(b.display_name || "").slice(0, 60), title2.slice(0, 120), kind2, String(b.note || "").slice(0, 300), place2.slice(0, 80), geo ? geo.lat : null, geo ? geo.lng : null, String(b.system || "").slice(0, 20), now2, "trener: " + who.email, who.email, now2, yt).run();
+    return { ok: true, id: ins2.meta && ins2.meta.last_row_id, consent: "yes", place: place2, geocoded: !!geo };
+  }
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  let r;
+  try {
+    r = (await pg.query(`SELECT r.id::text AS id, r.user_id::text AS uid, r.record_file, COALESCE(rct.name, rc.name) AS category, u.first_name, u.city, ${TX_PATH_SQL_COLS}
+      FROM records r LEFT JOIN users u ON u.id = r.user_id LEFT JOIN record_categories rc ON rc.id = r.record_category_id
+      LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl' WHERE r.id::text = $1`, [rid])).rows[0];
+  } catch (e) {
+    r = (await pg.query(`SELECT r.id::text AS id, r.user_id::text AS uid, r.record_file, COALESCE(rct.name, rc.name) AS category, u.first_name, ${TX_PATH_SQL_COLS} FROM records r LEFT JOIN users u ON u.id = r.user_id
+      LEFT JOIN record_categories rc ON rc.id = r.record_category_id LEFT JOIN record_category_translations rct ON rct.record_category_id = rc.id AND rct.locale = 'pl' WHERE r.id::text = $1`, [rid])).rows[0];
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  if (!r || !r.record_file) throw new Error("Nie ma takiego nagrania");
+  const f = rsFile(r.record_file), gps = txFileGps(r.record_file), sm = txFileSysMood(r.record_file);
+  let place = String(b.place || "").trim();
+  if (!place && gps) {
+    try {
+      place = await txGeoPlace(env, gps[0], gps[1]) || "";
+    } catch (e) {
+    }
+  }
+  if (!place && r.city) place = r.city;
+  const bl = parseFloat(b.lat), bg = parseFloat(b.lng);
+  const lat = gps ? gps[0] : isFinite(bl) ? bl : null, lng = gps ? gps[1] : isFinite(bg) ? bg : null;
+  if (!place && lat != null) {
+    try {
+      place = await txGeoPlace(env, lat, lng) || "";
+    } catch (e) {
+    }
+  }
+  const cands = [];
+  let cp = String(b.path || "");
+  try {
+    if (/^https?:/i.test(cp)) cp = new URL(cp).pathname;
+  } catch (e) {
+  }
+  if (cp.startsWith("/public/")) cp = cp.slice(7);
+  if (cp.startsWith("/uploads/")) cands.push(cp);
+  try {
+    cands.push(txPathFill(await txPathTpl(env), txPathVars(r, r.id, r.uid, r.record_file)));
+  } catch (e) {
+  }
+  if (String(r.record_file).startsWith("/uploads/")) cands.push(r.record_file);
+  let resp = null, last = 0;
+  for (const path of [...new Set(cands)]) {
+    const x = await fetch(nsServerBase(nsServer) + path, { headers: { "Authorization": "Token token=" + nsToken, "Email": nsEmail } });
+    if (x.ok) {
+      resp = x;
+      break;
+    }
+    last = x.status;
+  }
+  if (!resp) throw new Error("Nie uda\u0142o si\u0119 pobra\u0107 nagrania z NS (" + (last || "brak \u015Bcie\u017Cki") + ")");
+  const buf = await resp.arrayBuffer();
+  const disp = String(b.display_name || "").trim() || (r.first_name ? String(r.first_name).trim() : "") || "Kursant" + (place ? " z " + place : "");
+  const kind = SC_KINDS[b.kind] ? b.kind : "inne", title = String(b.title || "").trim() || SC_KINDS[kind] + (r.category ? " \u2014 " + r.category : "");
+  const consent = b.consent_offline ? "yes" : "pending", now = Math.floor(Date.now() / 1e3);
+  const ins = await env.DB.prepare("INSERT INTO showcase (ns_record_id, author_id, display_name, title, kind, note, place, lat, lng, category, system, dur, consent, consent_at, consent_by, active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)").bind(rid, r.uid, disp.slice(0, 60), title.slice(0, 120), kind, String(b.note || "").slice(0, 300), place.slice(0, 80), lat, lng, r.category || "", sm ? sm.system : "", null, consent, consent === "yes" ? now : null, consent === "yes" ? "trener: " + who.email : null, who.email, now).run();
+  const id = ins.meta && ins.meta.last_row_id, key = "showcase/" + id + ".mp3";
+  await env.RECORDINGS.put(key, buf, { httpMetadata: { contentType: resp.headers.get("Content-Type") || "audio/mpeg" } });
+  await env.DB.prepare("UPDATE showcase SET r2_key = ?, youtube = ? WHERE id = ?").bind(key, yt || null, id).run();
+  return { ok: true, id, consent, place, display_name: disp };
+}
+__name(scCreate, "scCreate");
+async function scGpsFix(env) {
+  if (await appSettingGet(env, "sc_gps_exact_v1")) return;
+  await appSettingSet(env, "sc_gps_exact_v1", String(Math.floor(Date.now() / 1e3)));
+  const rows = (await env.DB.prepare("SELECT id, ns_record_id FROM showcase WHERE ns_record_id IS NOT NULL").all()).results || [];
+  if (!rows.length) return;
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  await pg.connect();
+  try {
+    for (const r of (await pg.query(`SELECT id::text AS id, record_file FROM records WHERE id::text = ANY($1::text[])`, [rows.map((x) => x.ns_record_id)])).rows) {
+      const g = txFileGps(r.record_file);
+      if (!g) continue;
+      for (const x of rows.filter((y) => y.ns_record_id === r.id)) await env.DB.prepare("UPDATE showcase SET lat = ?, lng = ? WHERE id = ?").bind(g[0], g[1], x.id).run();
+    }
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+}
+__name(scGpsFix, "scGpsFix");
+async function handleShowcase(request, env, url) {
+  const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+  const g = /* @__PURE__ */ __name((k) => q[k] != null ? q[k] : url.searchParams.get(k), "g");
+  const who = await saWho(env, g("ns_token"), g("ns_email"), g("ns_server"));
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  await scTable(env);
+  try {
+    await ensureGoogleTables(env);
+    await scGpsFix(env);
+  } catch (e) {
+  }
+  const p = url.pathname, now = Math.floor(Date.now() / 1e3);
+  if (p === "/showcase/feed" && request.method === "GET") {
+    const rows = (await env.DB.prepare("SELECT * FROM showcase WHERE active = 1 AND consent = 'yes' AND (r2_key IS NOT NULL OR youtube IS NOT NULL) ORDER BY created_at DESC LIMIT 200").all()).results || [];
+    return json({ ok: true, kinds: SC_KINDS, items: rows.map((r) => Object.assign(scOut(r, false), { mine: !!r.author_id && r.author_id === who.id, audio: r.r2_key ? "/showcase/audio?id=" + r.id : null })) });
+  }
+  if (p === "/showcase/audio" && request.method === "GET") {
+    const r = await env.DB.prepare("SELECT * FROM showcase WHERE id = ?").bind(Number(g("id")) || 0).first();
+    if (!r || !r.r2_key) return json({ error: "Nie ma takiego nagrania" }, 404);
+    if (!who.trainer && r.author_id !== who.id && !(r.active && r.consent === "yes")) return json({ error: "Nagranie niedost\u0119pne" }, 403);
+    const o = await env.RECORDINGS.get(r.r2_key);
+    if (!o) return json({ error: "Brak pliku" }, 404);
+    if (!who.trainer && r.author_id !== who.id) {
+      try {
+        await env.DB.prepare("UPDATE showcase SET plays = plays + 1 WHERE id = ?").bind(r.id).run();
+      } catch (e) {
+      }
+    }
+    return new Response(o.body, { headers: { ...CORS, "Content-Type": o.httpMetadata && o.httpMetadata.contentType || "audio/mpeg", "Cache-Control": "private, max-age=3600" } });
+  }
+  if (p === "/showcase/mine" && request.method === "GET") {
+    const rows = (await env.DB.prepare("SELECT * FROM showcase WHERE author_id = ? ORDER BY created_at DESC").bind(who.id).all()).results || [];
+    return json({ ok: true, items: rows.map((r) => Object.assign(scOut(r, false), { consent: r.consent, active: !!r.active, audio: "/showcase/audio?id=" + r.id })) });
+  }
+  if (p === "/showcase/consent" && request.method === "POST") {
+    const r = await env.DB.prepare("SELECT * FROM showcase WHERE id = ?").bind(Number(g("id")) || 0).first();
+    if (!r || r.author_id !== who.id) return json({ error: "To nie Twoje nagranie" }, 403);
+    const yes = !!g("yes"), name = g("display_name");
+    await env.DB.prepare("UPDATE showcase SET consent = ?, consent_at = ?, consent_by = ?, display_name = COALESCE(?, display_name) WHERE id = ?").bind(yes ? "yes" : "no", now, "kursant", name ? String(name).slice(0, 60) : null, r.id).run();
+    return json({ ok: true, consent: yes ? "yes" : "no" });
+  }
+  if (p === "/showcase/remove" && request.method === "POST") {
+    const r = await env.DB.prepare("SELECT * FROM showcase WHERE id = ?").bind(Number(g("id")) || 0).first();
+    if (!r || r.author_id !== who.id && !who.trainer) return json({ error: "To nie Twoje nagranie" }, 403);
+    try {
+      if (r.r2_key) await env.RECORDINGS.delete(r.r2_key);
+    } catch (e) {
+    }
+    await env.DB.prepare("DELETE FROM showcase WHERE id = ?").bind(r.id).run();
+    return json({ ok: true, deleted: true });
+  }
+  if (!who.trainer) return json({ error: "Tylko trener" }, 403);
+  if (p === "/showcase" && request.method === "POST") {
+    try {
+      return json(await scCreate(env, q, who, g("ns_token"), g("ns_email"), g("ns_server")));
+    } catch (e) {
+      return json({ error: String(e && e.message || e) }, 400);
+    }
+  }
+  if (p === "/showcase/list" && request.method === "GET") {
+    const rows = (await env.DB.prepare("SELECT * FROM showcase ORDER BY created_at DESC LIMIT 300").all()).results || [];
+    return json({ ok: true, kinds: SC_KINDS, items: rows.map((r) => scOut(r, true)) });
+  }
+  if (p === "/showcase/update" && request.method === "POST") {
+    const id = Number(g("id")) || 0, r = await env.DB.prepare("SELECT * FROM showcase WHERE id = ?").bind(id).first();
+    if (!r) return json({ error: "Nie ma takiego wpisu" }, 404);
+    if (g("delete")) {
+      try {
+        if (r.r2_key) await env.RECORDINGS.delete(r.r2_key);
+      } catch (e) {
+      }
+      await env.DB.prepare("DELETE FROM showcase WHERE id = ?").bind(id).run();
+      return json({ ok: true, deleted: true });
+    }
+    const set = [], val = [];
+    if (q.active != null) {
+      set.push("active = ?");
+      val.push(q.active ? 1 : 0);
+    }
+    for (const k of ["title", "display_name", "note", "place"]) if (q[k] != null) {
+      set.push(k + " = ?");
+      val.push(String(q[k]).slice(0, 300));
+    }
+    if (q.youtube != null) {
+      const y = String(q.youtube).trim();
+      if (y && !scYtId(y)) return json({ error: "To nie wygl\u0105da na link do YouTube" }, 400);
+      set.push("youtube = ?");
+      val.push(y || null);
+    }
+    if (q.place != null && String(q.place).trim() && r.lat == null) {
+      const geo = await scGeocode(env, String(q.place).trim());
+      if (geo) {
+        set.push("lat = ?", "lng = ?");
+        val.push(geo.lat, geo.lng);
+      }
+    }
+    if (q.kind != null && SC_KINDS[q.kind]) {
+      set.push("kind = ?");
+      val.push(q.kind);
+    }
+    if (q.consent_offline) {
+      set.push("consent = 'yes'", "consent_at = ?", "consent_by = ?");
+      val.push(now, "trener: " + who.email);
+    }
+    if (set.length) await env.DB.prepare("UPDATE showcase SET " + set.join(", ") + " WHERE id = ?").bind(...val, id).run();
+    return json({ ok: true });
+  }
+  return json({ error: "Nieznana akcja" }, 404);
+}
+__name(handleShowcase, "handleShowcase");
 async function techniqueStats(env, sid, from, to) {
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
@@ -19758,15 +20390,19 @@ async function handleFavoriteToggle(request, env) {
   const valid = await validateNsToken(ns_token, ns_email, ns_server);
   if (!valid) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
   const existing = await env.DB.prepare(
-    "SELECT id FROM favorite_records WHERE record_id = ? AND created_by = ?"
+    "SELECT id FROM favorite_records WHERE CAST(record_id AS TEXT) = CAST(? AS TEXT) AND lower(created_by) = lower(?)"
   ).bind(record_id, ns_email).first();
   if (existing) {
     await env.DB.prepare("DELETE FROM favorite_records WHERE id = ?").bind(existing.id).run();
     return json({ ok: true, favorited: false });
   } else {
-    await env.DB.prepare(
-      "INSERT INTO favorite_records (record_id, student_id, student_name, category_name, record_date, ns_path, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(record_id, student_id || "", student_name || "", category_name || "", record_date || "", ns_path || "", ns_email, Math.floor(Date.now() / 1e3)).run();
+    try {
+      await env.DB.prepare(
+        "INSERT INTO favorite_records (record_id, student_id, student_name, category_name, record_date, ns_path, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      ).bind(record_id, student_id || "", student_name || "", category_name || "", record_date || "", ns_path || "", ns_email, Math.floor(Date.now() / 1e3)).run();
+    } catch (e) {
+      if (!/UNIQUE/i.test(String(e && e.message || e))) throw e;
+    }
     return json({ ok: true, favorited: true });
   }
 }
