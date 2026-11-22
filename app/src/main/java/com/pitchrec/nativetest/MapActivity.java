@@ -233,19 +233,29 @@ public class MapActivity extends Activity {
     // onBackPressed() nie jest juz wolane, dlatego rejestrujemy tez OnBackInvokedCallback.
     @Override
     public void onBackPressed() {
+        goBack();
+    }
+
+    // mapa audio video: Wstecz najpierw zamyka odtwarzacz filmu, dopiero potem wraca do aplikacji
+    private void goBack() {
+        if (web != null && getIntent().getBooleanExtra("courage", false)) {
+            web.evaluateJavascript("(function(){var p=document.getElementById('scPlayer');if(p){p.remove();return 1;}return 0;})()",
+                    r -> { if (!"1".equals(r)) finish(); });
+            return;
+        }
         finish();
     }
 
     @Override
     public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
-        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) { finish(); return true; }
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) { goBack(); return true; }
         return super.onKeyDown(keyCode, event);
     }
 
     private void registerBack() {
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, this::finish);
+                    android.window.OnBackInvokedDispatcher.PRIORITY_OVERLAY, this::goBack);
         }
     }
 
