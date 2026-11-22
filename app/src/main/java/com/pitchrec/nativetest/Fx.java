@@ -72,7 +72,7 @@ public final class Fx {
         t("close", "Zamknij", "Close", "Zavřít", "Zavrieť");
         t("loading", "Wczytywanie…", "Loading…", "Načítám…", "Načítavam…");
         t("loadErr", "Nie udało się wczytać — sprawdź internet.", "Could not load — check your internet.", "Nepodařilo se načíst — zkontroluj internet.", "Nepodarilo sa načítať — skontroluj internet.");
-        t("scTitle", "🗺 Mapa odwagi", "🗺 Courage map", "🗺 Mapa odvahy", "🗺 Mapa odvahy");
+        t("scTitle", "🗺 Mapa audio video", "🗺 Audio video map", "🗺 Mapa audio video", "🗺 Mapa audio video");
         t("slogan", "Inni już to zrobili, Ty też dasz radę", "Others have done it — you can do it too", "Jiní už to dokázali, ty to zvládneš taky", "Iní to už dokázali, ty to zvládneš tiež");
         t("consentQ", "🗺 Trener chce pokazać Twoje nagranie innym kursantom jako przykład: {0}{1}. Podpis: {2}. Zgadzasz się?", "🗺 Your trainer would like to show your recording to other students as an example: {0}{1}. Signed as: {2}. Do you agree?", "🗺 Trenér chce ukázat tvou nahrávku ostatním kurzistům jako příklad: {0}{1}. Podpis: {2}. Souhlasíš?", "🗺 Tréner chce ukázať tvoju nahrávku ostatným kurzistom ako príklad: {0}{1}. Podpis: {2}. Súhlasíš?");
         t("consentName", "Jak Cię podpisać", "How to sign you", "Jak tě podepsat", "Ako ťa podpísať");
@@ -89,7 +89,7 @@ public final class Fx {
         t("hide", "Ukryj", "Hide", "Skrýt", "Skryť");
         t("show", "Pokaż", "Show", "Ukázat", "Ukázať");
         t("rmMap", "🗑 Usuń z mapy", "🗑 Remove from map", "🗑 Odebrat z mapy", "🗑 Odstrániť z mapy");
-        t("rmSure", "Na pewno usunąć to nagranie z mapy odwagi? Pinezka i kopia nagrania znikną na stałe.", "Remove this recording from the courage map? The pin and the copy of the recording will be deleted permanently.", "Opravdu odebrat tuto nahrávku z mapy odvahy? Špendlík i kopie nahrávky budou trvale smazány.", "Naozaj odstrániť túto nahrávku z mapy odvahy? Špendlík aj kópia nahrávky budú natrvalo zmazané.");
+        t("rmSure", "Na pewno usunąć to nagranie z mapy audio video? Pinezka i kopia nagrania znikną na stałe.", "Remove this recording from the audio video map? The pin and the copy of the recording will be deleted permanently.", "Opravdu odebrat tuto nahrávku z mapy audio video? Špendlík i kopie nahrávky budou trvale smazány.", "Naozaj odstrániť túto nahrávku z mapy audio video? Špendlík aj kópia nahrávky budú natrvalo zmazané.");
         t("rmDone", "Usunięto z mapy ✓", "Removed from the map ✓", "Odebráno z mapy ✓", "Odstránené z mapy ✓");
         t("recHint", "Nagraj swoje — kategoria {0} wybierze się sama przy zapisie. Naciśnij REC.", "Record yours — category {0} will be selected when you save. Press REC.", "Nahraj svoje — kategorie {0} se vybere sama při uložení. Stiskni REC.", "Nahraj svoje — kategória {0} sa vyberie sama pri uložení. Stlač REC.");
     }

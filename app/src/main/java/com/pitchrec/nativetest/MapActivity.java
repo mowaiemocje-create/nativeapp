@@ -100,7 +100,7 @@ public class MapActivity extends Activity {
             web.setWebViewClient(new WebViewClient() {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                    if (url != null && (url.contains("youtube.com/watch") || url.contains("youtu.be/") || url.startsWith("intent:"))) {
+                    if (url != null && !url.contains("/embed/") && (url.contains("youtube.com/") || url.contains("youtu.be/") || url.contains("tiktok.com/") || url.startsWith("intent:"))) { // link do filmu → aplikacja YouTube / TikTok
                         try { startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))); } catch (Exception e) { }
                         return true;
                     }
