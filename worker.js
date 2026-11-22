@@ -12505,6 +12505,18 @@ async function scTable(env) {
     await env.DB.prepare("ALTER TABLE showcase ADD COLUMN youtube TEXT").run();
   } catch (e) {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE showcase ADD COLUMN thumb_key TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE showcase ADD COLUMN tt_id TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE showcase ADD COLUMN thumb_err TEXT").run();
+  } catch (e) {
+  }
 }
 __name(scTable, "scTable");
 function scYtId(u) {
@@ -12512,6 +12524,70 @@ function scYtId(u) {
   return m ? m[1] : null;
 }
 __name(scYtId, "scYtId");
+function scVid(u) {
+  const t = String(u || "").trim();
+  if (!t) return null;
+  const y = scYtId(t);
+  if (y) return { src: "youtube", id: y };
+  if (/^https?:\/\/(www\.|m\.|vm\.|vt\.)?tiktok\.com\//i.test(t)) {
+    const m = t.match(/\/video\/(\d{8,25})/);
+    return { src: "tiktok", id: m ? m[1] : null };
+  }
+  return null;
+}
+__name(scVid, "scVid");
+async function scTikTok(env, url, id) {
+  const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept-Language": "pl,en;q=0.8" };
+  let vid = (scVid(url) || {}).id || null, full = url, title = "", thumb = null, err = "";
+  if (!vid) {
+    try {
+      const r = await fetch(url, { redirect: "follow", headers: UA });
+      full = r.url || url;
+      vid = (String(full).match(/\/video\/(\d{8,25})/) || [])[1] || null;
+    } catch (e) {
+      err = "link: " + e.message;
+    }
+  }
+  let tu = null;
+  for (const u of [full, url]) {
+    try {
+      const r = await fetch("https://www.tiktok.com/oembed?url=" + encodeURIComponent(u), { headers: UA });
+      const o = r.ok ? await r.json() : null;
+      if (o) {
+        title = o.title || "";
+        if (!vid && o.embed_product_id) vid = String(o.embed_product_id);
+        tu = o.thumbnail_url || null;
+        if (tu) break;
+      } else err = "oembed " + r.status;
+    } catch (e) {
+      err = "oembed: " + e.message;
+    }
+  }
+  if (!tu) {
+    try {
+      const r = await fetch(full, { headers: UA });
+      const h = r.ok ? await r.text() : "";
+      const m = h.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+      if (m) tu = m[1].replace(/&amp;/g, "&");
+      else if (!err) err = "strona " + r.status;
+    } catch (e) {
+    }
+  }
+  if (tu) {
+    try {
+      const im = await fetch(tu, { headers: Object.assign({ "Referer": "https://www.tiktok.com/" }, UA) });
+      if (im.ok) {
+        const key = "showcase/" + id + "-thumb.jpg";
+        await env.RECORDINGS.put(key, await im.arrayBuffer(), { httpMetadata: { contentType: im.headers.get("Content-Type") || "image/jpeg" } });
+        thumb = key;
+      } else err = "miniatura " + im.status;
+    } catch (e) {
+      err = "miniatura: " + e.message;
+    }
+  }
+  return { vid, title, thumb, err };
+}
+__name(scTikTok, "scTikTok");
 async function scGeocode(env, place) {
   const k = "geoq:" + String(place).toLowerCase().trim();
   try {
@@ -12535,16 +12611,39 @@ async function scGeocode(env, place) {
   return null;
 }
 __name(scGeocode, "scGeocode");
+function scVidOut(r) {
+  const v = scVid(r.youtube);
+  if (!v) return { video_url: null, video_src: null };
+  if (v.src === "youtube") return { video_url: r.youtube, video_src: "youtube", video_id: v.id, thumb: "https://img.youtube.com/vi/" + v.id + "/mqdefault.jpg", embed: "https://www.youtube-nocookie.com/embed/" + v.id };
+  const id = r.tt_id || v.id || null;
+  return { video_url: r.youtube, video_src: "tiktok", video_id: id, thumb: r.thumb_key ? "/showcase/thumb?id=" + r.id + (/-manual/.test(r.thumb_key) ? "&m=1" : "") : null, embed: id ? "https://www.tiktok.com/embed/v2/" + id : null };
+}
+__name(scVidOut, "scVidOut");
 function scOut(r, withAuthor) {
-  const o = { id: r.id, title: r.title, kind: r.kind, kind_label: !r.r2_key && r.youtube ? SC_KINDS_VIDEO[r.kind] || SC_KINDS_VIDEO.inne : SC_KINDS[r.kind] || SC_KINDS.inne, note: r.note || "", youtube: r.youtube || null, youtube_id: scYtId(r.youtube), has_audio: !!r.r2_key, place: r.place || "", lat: r.lat, lng: r.lng, display_name: r.display_name || "", category: r.category || "", system: r.system || "", dur: r.dur || null, plays: r.plays || 0, created_at: r.created_at };
-  if (withAuthor) Object.assign(o, { ns_record_id: r.ns_record_id, author_id: r.author_id, consent: r.consent, consent_at: r.consent_at, consent_by: r.consent_by, active: !!r.active, created_by: r.created_by });
+  const o = { id: r.id, title: r.title, kind: r.kind, kind_label: !r.r2_key && r.youtube ? SC_KINDS_VIDEO[r.kind] || SC_KINDS_VIDEO.inne : SC_KINDS[r.kind] || SC_KINDS.inne, note: r.note || "", youtube: r.youtube || null, youtube_id: scYtId(r.youtube), has_audio: !!r.r2_key, ...scVidOut(r), place: r.place || "", lat: r.lat, lng: r.lng, display_name: r.display_name || "", category: r.category || "", system: r.system || "", dur: r.dur || null, plays: r.plays || 0, created_at: r.created_at };
+  if (withAuthor) Object.assign(o, { thumb_err: r.thumb_err || null, ns_record_id: r.ns_record_id, author_id: r.author_id, consent: r.consent, consent_at: r.consent_at, consent_by: r.consent_by, active: !!r.active, created_by: r.created_by });
   return o;
 }
 __name(scOut, "scOut");
+async function scVidMeta(env, id, url) {
+  const v = scVid(url);
+  if (!v || v.src !== "tiktok") {
+    try {
+      await env.DB.prepare("UPDATE showcase SET tt_id = NULL, thumb_key = NULL WHERE id = ?").bind(id).run();
+    } catch (e) {
+    }
+    return;
+  }
+  const m = await scTikTok(env, url, id);
+  const cur = await env.DB.prepare("SELECT thumb_key FROM showcase WHERE id = ?").bind(id).first();
+  const keep = cur && cur.thumb_key && /-thumb-manual/.test(cur.thumb_key);
+  await env.DB.prepare("UPDATE showcase SET tt_id = ?, thumb_key = ?, thumb_err = ? WHERE id = ?").bind(m.vid, keep ? cur.thumb_key : m.thumb, m.thumb || keep ? null : m.err || "brak miniatury", id).run();
+}
+__name(scVidMeta, "scVidMeta");
 async function scCreate(env, b, who, nsToken, nsEmail, nsServer) {
   await scTable(env);
   const rid = String(b.ns_record_id || ""), yt = String(b.youtube || "").trim();
-  if (yt && !scYtId(yt)) throw new Error("To nie wygl\u0105da na link do YouTube");
+  if (yt && !scVid(yt)) throw new Error("To nie wygl\u0105da na link do filmu z YouTube ani TikToka");
   if (!rid) {
     if (!yt) throw new Error("Brak nagrania albo linku do filmu");
     const place2 = String(b.place || "").trim(), hasPt = isFinite(parseFloat(b.lat)) && isFinite(parseFloat(b.lng));
@@ -12552,7 +12651,12 @@ async function scCreate(env, b, who, nsToken, nsEmail, nsServer) {
     const geo = hasPt ? { lat: parseFloat(b.lat), lng: parseFloat(b.lng) } : await scGeocode(env, place2), kind2 = SC_KINDS[b.kind] ? b.kind : "inne", now2 = Math.floor(Date.now() / 1e3);
     const title2 = String(b.title || "").trim() || SC_KINDS_VIDEO[kind2];
     const ins2 = await env.DB.prepare("INSERT INTO showcase (ns_record_id, author_id, display_name, title, kind, note, place, lat, lng, category, system, consent, consent_at, consent_by, active, created_by, created_at, youtube) VALUES (NULL, NULL, ?, ?, ?, ?, ?, ?, ?, '', ?, 'yes', ?, ?, 1, ?, ?, ?)").bind(String(b.display_name || "").slice(0, 60), title2.slice(0, 120), kind2, String(b.note || "").slice(0, 300), place2.slice(0, 80), geo ? geo.lat : null, geo ? geo.lng : null, String(b.system || "").slice(0, 20), now2, "trener: " + who.email, who.email, now2, yt).run();
-    return { ok: true, id: ins2.meta && ins2.meta.last_row_id, consent: "yes", place: place2, geocoded: !!geo };
+    const nid = ins2.meta && ins2.meta.last_row_id;
+    try {
+      await scVidMeta(env, nid, yt);
+    } catch (e) {
+    }
+    return { ok: true, id: nid, consent: "yes", place: place2, geocoded: !!geo };
   }
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
@@ -12619,6 +12723,12 @@ async function scCreate(env, b, who, nsToken, nsEmail, nsServer) {
   const id = ins.meta && ins.meta.last_row_id, key = "showcase/" + id + ".mp3";
   await env.RECORDINGS.put(key, buf, { httpMetadata: { contentType: resp.headers.get("Content-Type") || "audio/mpeg" } });
   await env.DB.prepare("UPDATE showcase SET r2_key = ?, youtube = ? WHERE id = ?").bind(key, yt || null, id).run();
+  if (yt) {
+    try {
+      await scVidMeta(env, id, yt);
+    } catch (e) {
+    }
+  }
   return { ok: true, id, consent, place, display_name: disp };
 }
 __name(scCreate, "scCreate");
@@ -12644,6 +12754,13 @@ async function scGpsFix(env) {
 }
 __name(scGpsFix, "scGpsFix");
 async function handleShowcase(request, env, url) {
+  if (url.pathname === "/showcase/thumb" && request.method === "GET") {
+    await scTable(env);
+    const r = await env.DB.prepare("SELECT thumb_key FROM showcase WHERE id = ?").bind(Number(url.searchParams.get("id")) || 0).first();
+    const o = r && r.thumb_key ? await env.RECORDINGS.get(r.thumb_key) : null;
+    if (!o) return new Response("", { status: 404, headers: CORS });
+    return new Response(o.body, { headers: { ...CORS, "Content-Type": o.httpMetadata && o.httpMetadata.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
+  }
   const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
   const g = /* @__PURE__ */ __name((k) => q[k] != null ? q[k] : url.searchParams.get(k), "g");
   const who = await saWho(env, g("ns_token"), g("ns_email"), g("ns_server"));
@@ -12689,6 +12806,7 @@ async function handleShowcase(request, env, url) {
     if (!r || r.author_id !== who.id && !who.trainer) return json({ error: "To nie Twoje nagranie" }, 403);
     try {
       if (r.r2_key) await env.RECORDINGS.delete(r.r2_key);
+      if (r.thumb_key) await env.RECORDINGS.delete(r.thumb_key);
     } catch (e) {
     }
     await env.DB.prepare("DELETE FROM showcase WHERE id = ?").bind(r.id).run();
@@ -12702,7 +12820,22 @@ async function handleShowcase(request, env, url) {
       return json({ error: String(e && e.message || e) }, 400);
     }
   }
+  if (p === "/showcase/thumb-upload" && request.method === "POST") {
+    const id = Number(g("id")) || 0, b64 = String(g("image") || "").replace(/^data:[^,]+,/, "");
+    if (!id || !b64) return json({ error: "Brak obrazka" }, 400);
+    const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    if (bin.length > 3e6) return json({ error: "Obrazek za du\u017Cy (max 3 MB)" }, 400);
+    const key = "showcase/" + id + "-thumb-manual.jpg";
+    await env.RECORDINGS.put(key, bin, { httpMetadata: { contentType: String(g("type") || "image/jpeg") } });
+    await env.DB.prepare("UPDATE showcase SET thumb_key = ?, thumb_err = NULL WHERE id = ?").bind(key, id).run();
+    return json({ ok: true });
+  }
   if (p === "/showcase/list" && request.method === "GET") {
+    try {
+      const miss = (await env.DB.prepare("SELECT id, youtube FROM showcase WHERE youtube LIKE '%tiktok.com%' AND thumb_key IS NULL ORDER BY created_at DESC LIMIT 3").all()).results || [];
+      for (const m of miss) await scVidMeta(env, m.id, m.youtube);
+    } catch (e) {
+    }
     const rows = (await env.DB.prepare("SELECT * FROM showcase ORDER BY created_at DESC LIMIT 300").all()).results || [];
     return json({ ok: true, kinds: SC_KINDS, items: rows.map((r) => scOut(r, true)) });
   }
@@ -12712,6 +12845,7 @@ async function handleShowcase(request, env, url) {
     if (g("delete")) {
       try {
         if (r.r2_key) await env.RECORDINGS.delete(r.r2_key);
+        if (r.thumb_key) await env.RECORDINGS.delete(r.thumb_key);
       } catch (e) {
       }
       await env.DB.prepare("DELETE FROM showcase WHERE id = ?").bind(id).run();
@@ -12728,7 +12862,7 @@ async function handleShowcase(request, env, url) {
     }
     if (q.youtube != null) {
       const y = String(q.youtube).trim();
-      if (y && !scYtId(y)) return json({ error: "To nie wygl\u0105da na link do YouTube" }, 400);
+      if (y && !scVid(y)) return json({ error: "To nie wygl\u0105da na link do filmu z YouTube ani TikToka" }, 400);
       set.push("youtube = ?");
       val.push(y || null);
     }
@@ -12748,6 +12882,12 @@ async function handleShowcase(request, env, url) {
       val.push(now, "trener: " + who.email);
     }
     if (set.length) await env.DB.prepare("UPDATE showcase SET " + set.join(", ") + " WHERE id = ?").bind(...val, id).run();
+    if (q.youtube != null) {
+      try {
+        await scVidMeta(env, id, String(q.youtube).trim());
+      } catch (e) {
+      }
+    }
     return json({ ok: true });
   }
   return json({ error: "Nieznana akcja" }, 404);
