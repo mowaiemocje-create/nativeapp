@@ -5833,7 +5833,9 @@ var worker_default = {
         return await handleDiaryReplyDeleteAudio(request, env, url);
       }
       if (url.pathname === "/trainer/visit-dates" && request.method === "GET") {
-        return await handleTrainerVisitDates(request, env, url);
+        const _t0 = Date.now(), _r = await handleTrainerVisitDates(request, env, url), _ms = Date.now() - _t0;
+        if (_ms > 3e3) await speedReqLog(env, "panel /trainer/visit-dates", _ms, _r.status, url.searchParams.get("ns_email"));
+        return _r;
       }
       if (url.pathname === "/documents" && request.method === "GET") {
         return await handleDocumentsList(request, env, url);
@@ -6382,6 +6384,21 @@ var worker_default = {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[a-z0-9-]+$/.test(fs)) return json({ error: "Z\u0142y plik" }, 400);
         const resp = await bkFileResponse(env, day, fs);
         return resp || json({ error: "Nie ma takiego pliku" }, 404);
+      }
+      if (url.pathname === "/backup/xlsx" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        const day = String(url.searchParams.get("day") || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ error: "Z\u0142y dzie\u0144" }, 400);
+        const resp = await bkXlsxResponse(env, day);
+        return resp || json({ error: "Nie ma kopii z tego dnia" }, 404);
+      }
+      if (url.pathname === "/admin/speed" && request.method === "GET") {
+        const who = await contactAuth(env, url.searchParams.get("ns_token"), url.searchParams.get("ns_email"), url.searchParams.get("ns_server"));
+        if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+        if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
+        return json(await speedDiag(env, url.searchParams.get("student_id")));
       }
       if (url.pathname === "/backup/status" && request.method === "GET" || url.pathname === "/backup/run" && request.method === "POST") {
         const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
@@ -7490,6 +7507,8 @@ var worker_default = {
     }));
     ctx.waitUntil(backupTick(env).catch(() => {
     }));
+    ctx.waitUntil(speedMonTick(env).catch(() => {
+    }));
     ctx.waitUntil(svfRetryTick(env).catch(() => {
     }));
     ctx.waitUntil(rdTick(env).catch(() => {
@@ -7581,8 +7600,11 @@ async function handleNsProxy(request, url, env) {
   if (!["GET", "HEAD"].includes(request.method)) {
     init.body = await request.text();
   }
+  const _t0 = Date.now();
   const nsResp = await fetch(targetUrl, init);
   const bodyText = await nsResp.text();
+  const _ms = Date.now() - _t0;
+  if (_ms > 3e3) await speedReqLog(env, "ns " + request.method + " " + nsPath.replace(/\/\d+|\/[0-9a-f-]{36}/g, "/:id"), _ms, nsResp.status, emailHeader);
   const respHeaders = new Headers(CORS);
   respHeaders.set("Content-Type", nsResp.headers.get("Content-Type") || "application/json");
   return new Response(bodyText, { status: nsResp.status, headers: respHeaders });
@@ -8547,6 +8569,34 @@ async function bkJobStep(env) {
   if (!job || job.phase === "done") return null;
   const now = Date.now();
   if (job.lock && job.lock > now) return "busy";
+  if (job.started && now / 1e3 - job.started > 8 * 3600) {
+    const stuck = job.attKey || job.phase;
+    job.phase = "done";
+    job.lock = 0;
+    await bkJobSave(env, job);
+    await bkSetStatus(env, { ok: false, error: "backup zatrzymany \u2014 trwa\u0142 ponad 8 godzin (utkn\u0105\u0142 na: " + stuck + ")" });
+    return "done";
+  }
+  const key = job.phase + (job.phase === "ns" ? ":" + job.i : job.phase === "d1" ? ":" + job.d1i + "/" + job.d1off : "");
+  if (job.attKey === key) job.att = (job.att || 0) + 1;
+  else {
+    job.attKey = key;
+    job.att = 1;
+  }
+  if (job.att > 3) {
+    job.skipped = (job.skipped || []).concat(key).slice(-20);
+    if (job.phase === "ns") job.i++;
+    else if (job.phase === "global") job.phase = "d1";
+    else if (job.phase === "d1") {
+      job.d1i++;
+      job.d1off = 0;
+    } else if (job.phase === "sheets") {
+      job.sheet = { error: "arkusz Google pomini\u0119ty \u2014 3 razy przerwany limitem czasu" };
+      job.phase = "students";
+    } else job.phase = "done";
+    job.attKey = null;
+    job.att = 0;
+  }
   job.lock = now + 4 * 6e4;
   await bkJobSave(env, job);
   const t0 = Date.now();
@@ -8592,6 +8642,16 @@ async function bkJobStep(env) {
         } catch (e) {
           job.sheet = { error: String(e && e.message || e) };
         }
+        job.phase = "students";
+        break;
+      } else if (job.phase === "students") {
+        await bkSetStatus(env, { ok: true, running: true, step: "arkusz kursant\xF3w (dzie\u0144 po dniu)" });
+        try {
+          const st = await svExportSheet(env);
+          job.students = st && st.ok ? "ok" : st && st.error || "b\u0142\u0105d";
+        } catch (e) {
+          job.students = String(e && e.message || e);
+        }
         job.phase = "done";
       }
       await bkJobSave(env, job);
@@ -8631,12 +8691,6 @@ async function bkSheetsWrite(env, job) {
     await appSettingSet(env, "backup_sheet_id", sid);
   }
   const n = await bkWrite(token, sid, gt, job.pl);
-  try {
-    const st = await svExportSheet(env, tabs.map((t) => [t[0].replace(/ — od \d{4}-\d{2}-\d{2}$/, ""), t[1]]));
-    job.students = st && st.ok ? "ok" : st && st.error || "b\u0142\u0105d";
-  } catch (e) {
-    job.students = String(e && e.message || e);
-  }
   if (job.day.slice(8, 10) === "01" || job.snapshot) {
     const ym = job.day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
     if (!done || job.snapshot) {
@@ -8681,6 +8735,195 @@ async function bkJobFinish(env, job) {
   await appSettingSet(env, "backup_last_ok", job.day);
 }
 __name(bkJobFinish, "bkJobFinish");
+var BKX_CRC = (() => {
+  const t = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+    t[n] = c;
+  }
+  return t;
+})();
+function bkxCrc(crc, b) {
+  let c = crc ^ -1;
+  for (let i = 0; i < b.length; i++) c = BKX_CRC[(c ^ b[i]) & 255] ^ c >>> 8;
+  return (c ^ -1) >>> 0;
+}
+__name(bkxCrc, "bkxCrc");
+function bkxCsvRows(text) {
+  const rows = [];
+  let row = [], f = "", q = false, i = 0;
+  const n = text.length;
+  if (text.charCodeAt(0) === 65279) i = 1;
+  for (; i < n; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          f += '"';
+          i++;
+        } else q = false;
+      } else f += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ",") {
+      row.push(f);
+      f = "";
+    } else if (ch === "\n") {
+      row.push(f);
+      rows.push(row);
+      row = [];
+      f = "";
+    } else if (ch !== "\r") f += ch;
+  }
+  if (f !== "" || row.length) {
+    row.push(f);
+    rows.push(row);
+  }
+  return rows;
+}
+__name(bkxCsvRows, "bkxCsvRows");
+var bkxEsc = /* @__PURE__ */ __name((v) => {
+  let t = String(v);
+  if (t.length > 32e3) t = t.slice(0, 32e3) + "\u2026";
+  return t.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}, "bkxEsc");
+function bkxCell(v) {
+  if (v === "" || v === null || v === void 0) return "<c/>";
+  if (/^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/.test(v)) return "<c><v>" + v + "</v></c>";
+  return '<c t="inlineStr"><is><t xml:space="preserve">' + bkxEsc(v) + "</t></is></c>";
+}
+__name(bkxCell, "bkxCell");
+function bkxRow(r) {
+  let o = "<row>";
+  for (let i = 0; i < r.length; i++) o += bkxCell(r[i]);
+  return o + "</row>";
+}
+__name(bkxRow, "bkxRow");
+async function bkXlsxResponse(env, day) {
+  const m = await env.RECORDINGS.get("backups/" + day + "/manifest.json");
+  if (!m) return null;
+  const man = await m.json(), files = (man.files || []).filter((f) => f.rows > 0);
+  const MAXR = 1048575;
+  const used = {}, nm = /* @__PURE__ */ __name((b) => {
+    b = String(b).replace(/[\[\]:*?\/\\]/g, "-").replace(/^'+|'+$/g, "").slice(0, 31) || "Arkusz";
+    let n = b, k = 2;
+    while (used[n.toLowerCase()]) n = b.slice(0, 26) + " (" + k++ + ")";
+    used[n.toLowerCase()] = 1;
+    return n;
+  }, "nm");
+  const sheets = [{ name: nm("Spis"), info: true }];
+  for (const f of files) {
+    const parts = Math.max(1, Math.ceil(f.rows / MAXR));
+    for (let p = 0; p < parts; p++) sheets.push({ name: nm(parts > 1 ? f.tab.slice(0, 26) + " (" + (p + 1) + ")" : f.tab), f, from: p * MAXR, to: (p + 1) * MAXR });
+  }
+  const { readable, writable } = new TransformStream(), out = writable.getWriter(), enc = new TextEncoder();
+  const cd = [];
+  let off = 0;
+  const u16 = /* @__PURE__ */ __name((v) => [v & 255, v >>> 8 & 255], "u16"), u32 = /* @__PURE__ */ __name((v) => [v & 255, v >>> 8 & 255, v >>> 16 & 255, v >>> 24 & 255], "u32");
+  const dt = /* @__PURE__ */ new Date(), dosT = dt.getUTCHours() << 11 | dt.getUTCMinutes() << 5 | dt.getUTCSeconds() >> 1, dosD = dt.getUTCFullYear() - 1980 << 9 | dt.getUTCMonth() + 1 << 5 | dt.getUTCDate();
+  const put = /* @__PURE__ */ __name(async (b) => {
+    off += b.length;
+    await out.write(b);
+  }, "put");
+  async function entry(name, produce) {
+    const nb = enc.encode(name), start = off;
+    await put(new Uint8Array([...u32(67324752), ...u16(20), ...u16(8 | 2048), ...u16(8), ...u16(dosT), ...u16(dosD), ...u32(0), ...u32(0), ...u32(0), ...u16(nb.length), ...u16(0), ...nb]));
+    const cs = new CompressionStream("deflate-raw"), cw = cs.writable.getWriter(), rd = cs.readable.getReader();
+    let crc = 0, us = 0, csz = 0, buf = "";
+    const pump = (async () => {
+      for (; ; ) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        csz += value.length;
+        await put(value);
+      }
+    })();
+    const flush = /* @__PURE__ */ __name(async () => {
+      if (!buf) return;
+      const b = enc.encode(buf);
+      buf = "";
+      crc = bkxCrc(crc, b);
+      us += b.length;
+      await cw.write(b);
+    }, "flush");
+    const w = /* @__PURE__ */ __name(async (t) => {
+      buf += t;
+      if (buf.length > 65536) await flush();
+    }, "w");
+    await produce(w);
+    await flush();
+    await cw.close();
+    await pump;
+    await put(new Uint8Array([...u32(134695760), ...u32(crc), ...u32(csz), ...u32(us)]));
+    cd.push({ nb, crc, csz, us, start });
+  }
+  __name(entry, "entry");
+  (async () => {
+    try {
+      const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+      await entry("[Content_Types].xml", (w) => w(X + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + sheets.map((s, i) => '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("") + "</Types>"));
+      await entry("_rels/.rels", (w) => w(X + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'));
+      await entry("xl/workbook.xml", (w) => w(X + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + sheets.map((s, i) => '<sheet name="' + bkxEsc(s.name).replace(/"/g, "&quot;") + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>').join("") + "</sheets></workbook>"));
+      await entry("xl/_rels/workbook.xml.rels", (w) => w(X + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map((s, i) => '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join("") + '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'));
+      await entry("xl/styles.xml", (w) => w(X + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'));
+      const head = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetData>';
+      const hdr = /* @__PURE__ */ __name((cols) => '<row s="1" customFormat="1">' + cols.map(bkxCell).join("") + "</row>", "hdr");
+      for (let si = 0; si < sheets.length; si++) {
+        const sh = sheets[si];
+        await entry("xl/worksheets/sheet" + (si + 1) + ".xml", async (w) => {
+          await w(X + head);
+          if (sh.info) {
+            await w(hdr(["Karta", "Tabela", "Wiersze", "Uwagi"]));
+            await w(bkxRow(["Kopia z dnia", day, "", "Nowa Mowa \u2014 pe\u0142na kopia danych (wszystkie wiersze)"]));
+            for (const s of sheets.slice(1)) await w(bkxRow([s.name, s.f.tab, String(Math.min(s.f.rows, s.to) - s.from), s.f.rows > MAXR ? "tabela podzielona \u2014 Excel mie\u015Bci max 1 048 576 wierszy na kart\u0119" : ""]));
+          } else {
+            await w(hdr(sh.f.cols));
+            let n = 0;
+            for (const k of sh.f.keys) {
+              if (n >= sh.to) break;
+              const o = await env.RECORDINGS.get(k);
+              if (!o) continue;
+              const rows = bkxCsvRows(await new Response(o.body.pipeThrough(new DecompressionStream("gzip"))).text());
+              if (n + rows.length <= sh.from) {
+                n += rows.length;
+                continue;
+              }
+              let chunk = "";
+              for (const r of rows) {
+                if (n >= sh.from && n < sh.to) {
+                  chunk += bkxRow(r);
+                  if (chunk.length > 65536) {
+                    await w(chunk);
+                    chunk = "";
+                  }
+                }
+                n++;
+              }
+              if (chunk) await w(chunk);
+            }
+          }
+          await w("</sheetData></worksheet>");
+        });
+      }
+      const cdStart = off;
+      let cdLen = 0;
+      for (const e of cd) {
+        const b = new Uint8Array([...u32(33639248), ...u16(20), ...u16(20), ...u16(8 | 2048), ...u16(8), ...u16(dosT), ...u16(dosD), ...u32(e.crc), ...u32(e.csz), ...u32(e.us), ...u16(e.nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(e.start), ...e.nb]);
+        cdLen += b.length;
+        await put(b);
+      }
+      await put(new Uint8Array([...u32(101010256), ...u16(0), ...u16(0), ...u16(cd.length), ...u16(cd.length), ...u32(cdLen), ...u32(cdStart), ...u16(0)]));
+      await out.close();
+    } catch (e) {
+      try {
+        await out.abort(e);
+      } catch (x) {
+      }
+    }
+  })();
+  return new Response(readable, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": 'attachment; filename="nowa-mowa-backup_' + day + '.xlsx"', "Access-Control-Allow-Origin": "*" } });
+}
+__name(bkXlsxResponse, "bkXlsxResponse");
 async function bkFileResponse(env, day, slug) {
   const m = await env.RECORDINGS.get("backups/" + day + "/manifest.json");
   if (!m) return null;
@@ -8733,6 +8976,157 @@ async function backupTick(env) {
   }
 }
 __name(backupTick, "backupTick");
+async function speedMonTable(env) {
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS speed_mon (at INTEGER PRIMARY KEY, ns_ms INTEGER, ns_status INTEGER, pg_ms INTEGER, pg_active INTEGER, slow TEXT)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS speed_req (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, what TEXT, ms INTEGER, status INTEGER, who TEXT)")
+  ]);
+}
+__name(speedMonTable, "speedMonTable");
+async function speedReqLog(env, what, ms, status, who) {
+  try {
+    await speedMonTable(env);
+    await env.DB.prepare("INSERT INTO speed_req (at, what, ms, status, who) VALUES (?, ?, ?, ?, ?)").bind(Math.floor(Date.now() / 1e3), String(what).slice(0, 120), ms, status || 0, String(who || "").slice(0, 80)).run();
+  } catch (e) {
+  }
+}
+__name(speedReqLog, "speedReqLog");
+async function speedMonTick(env) {
+  await speedMonTable(env);
+  const at = Math.floor(Date.now() / 6e4) * 60;
+  let nsMs = null, nsSt = 0;
+  {
+    const a = Date.now(), ac = new AbortController(), tm = setTimeout(() => ac.abort(), 45e3);
+    try {
+      const r = await fetch("https://ns.nowamowa.com/api/v1/record_categories", { headers: { "Accept": "application/json" }, signal: ac.signal });
+      nsSt = r.status;
+      await r.arrayBuffer().catch(() => null);
+    } catch (e) {
+      nsSt = -1;
+    } finally {
+      clearTimeout(tm);
+    }
+    nsMs = Date.now() - a;
+  }
+  let pgMs = null, act = null, slow = null;
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  try {
+    const a = Date.now();
+    await pg.connect();
+    await pg.query("SELECT 1, now() AS _fresh");
+    pgMs = Date.now() - a;
+    const rs = (await pg.query(`SELECT state, application_name AS app, wait_event_type AS wait, EXTRACT(EPOCH FROM (now() - query_start))::int AS sec, LEFT(regexp_replace(query, '\\s+', ' ', 'g'), 200) AS q
+        FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND state IS NOT NULL AND state <> 'idle' ORDER BY query_start LIMIT 30`)).rows;
+    act = rs.length;
+    const long = rs.filter((r) => r.sec >= 3).slice(0, 6);
+    if (long.length || nsMs > 3e3 || pgMs > 1500) slow = JSON.stringify(long);
+  } catch (e) {
+    pgMs = -1;
+    slow = JSON.stringify([{ q: "b\u0142\u0105d bazy: " + String(e && e.message || e).slice(0, 150) }]);
+  } finally {
+    try {
+      await pg.end();
+    } catch (e) {
+    }
+  }
+  await env.DB.prepare("INSERT OR REPLACE INTO speed_mon (at, ns_ms, ns_status, pg_ms, pg_active, slow) VALUES (?, ?, ?, ?, ?, ?)").bind(at, nsMs, nsSt, pgMs, act, slow).run();
+  if ((/* @__PURE__ */ new Date()).getUTCMinutes() === 7) {
+    const cut = at - 14 * 86400;
+    await env.DB.prepare("DELETE FROM speed_mon WHERE at < ?").bind(cut).run();
+    await env.DB.prepare("DELETE FROM speed_req WHERE at < ?").bind(cut).run();
+  }
+}
+__name(speedMonTick, "speedMonTick");
+async function speedHistory(env, hours) {
+  await speedMonTable(env);
+  const since = Math.floor(Date.now() / 1e3) - hours * 3600;
+  const rows = (await env.DB.prepare("SELECT * FROM speed_mon WHERE at >= ? ORDER BY at").bind(since).all()).results || [];
+  const b = {};
+  rows.forEach((r) => {
+    const k = Math.floor(r.at / 900) * 900, x = b[k] || (b[k] = { at: k, ns: 0, pg: 0, n: 0, act: 0 });
+    x.ns = Math.max(x.ns, r.ns_ms || 0);
+    x.pg = Math.max(x.pg, r.pg_ms || 0);
+    x.act = Math.max(x.act, r.pg_active || 0);
+    x.n++;
+  });
+  const slow = rows.filter((r) => r.slow).slice(-60).map((r) => ({ at: r.at, ns_ms: r.ns_ms, ns_status: r.ns_status, pg_ms: r.pg_ms, pg_active: r.pg_active, q: (() => {
+    try {
+      return JSON.parse(r.slow);
+    } catch (e) {
+      return [];
+    }
+  })() }));
+  const req = (await env.DB.prepare("SELECT at, what, ms, status, who FROM speed_req WHERE at >= ? ORDER BY at DESC LIMIT 60").bind(since).all()).results || [];
+  return { buckets: Object.values(b), slow, req, samples: rows.length };
+}
+__name(speedHistory, "speedHistory");
+async function speedDiag(env, sid) {
+  const out = { ok: true, at: Math.floor(Date.now() / 1e3), t: {} }, T = /* @__PURE__ */ __name(async (k, f) => {
+    const a = Date.now();
+    try {
+      const v = await f();
+      out.t[k] = Date.now() - a;
+      return v;
+    } catch (e) {
+      out.t[k] = Date.now() - a;
+      out[k + "_error"] = String(e && e.message || e);
+      return null;
+    }
+  }, "T");
+  await T("d1_ms", () => env.DB.prepare("SELECT 1").first());
+  await T("ns_api_ms", async () => {
+    const r = await fetch("https://ns.nowamowa.com/api/v1/record_categories", { headers: { "Accept": "application/json" } });
+    out.ns_api_status = r.status;
+    await r.arrayBuffer();
+  });
+  await T("ns_http_ms", async () => {
+    const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 2e4);
+    try {
+      const r = await fetch("https://ns.nowamowa.com/", { signal: ac.signal, redirect: "manual" });
+      out.ns_http_status = r.status;
+    } finally {
+      clearTimeout(tm);
+    }
+  });
+  const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
+  if (await T("pg_connect_ms", () => pg.connect()) !== null || !out.pg_connect_ms_error) {
+    try {
+      await T("pg_select1_ms", () => pg.query("SELECT 1, now() AS _fresh"));
+      const st = sid && /^[A-Za-z0-9-]{1,64}$/.test(sid) ? sid : ((await pg.query("SELECT user_id::text AS u FROM records WHERE deleted_at IS NULL GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1")).rows[0] || {}).u;
+      out.student_id = st || null;
+      if (st) {
+        await T("pg_visit_dates_ms", () => pg.query("SELECT id, date, now() AS _fresh FROM visit_dates WHERE student_id = $1 ORDER BY date", [st]));
+        const rr = await T("pg_records_ms", () => pg.query("SELECT r.id::text, r.record_category_id, r.date, r.is_correct, now() AS _fresh FROM records r WHERE r.user_id = $1 AND r.deleted_at IS NULL", [st]));
+        out.student_records = rr ? rr.rows.length : null;
+      }
+      const act = await T("pg_activity_ms", () => pg.query(`SELECT pid, state, wait_event_type AS wait, application_name AS app, EXTRACT(EPOCH FROM (now() - query_start))::int AS sec, LEFT(regexp_replace(query, '\\s+', ' ', 'g'), 220) AS query
+          FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() ORDER BY query_start NULLS LAST`));
+      if (act) {
+        const rows = act.rows;
+        out.pg_connections = rows.length;
+        out.pg_active = rows.filter((r) => r.state && r.state !== "idle").length;
+        out.pg_slow = rows.filter((r) => r.state && r.state !== "idle" && r.sec >= 3).sort((a, b) => b.sec - a.sec).slice(0, 15);
+      }
+    } finally {
+      try {
+        await pg.end();
+      } catch (e) {
+      }
+    }
+  }
+  try {
+    out.history = await speedHistory(env, 36);
+  } catch (e) {
+    out.history_error = String(e && e.message || e);
+  }
+  try {
+    const j = await bkJobGet(env);
+    out.backup = j ? { phase: j.phase, started: j.started, step_key: j.attKey || null, tries: j.att || 0, skipped: j.skipped || [], locked: !!(j.lock && j.lock > Date.now()) } : null;
+  } catch (e) {
+  }
+  return out;
+}
+__name(speedDiag, "speedDiag");
 async function backupStatus(env) {
   let st = {};
   try {
