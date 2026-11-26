@@ -6583,7 +6583,7 @@ var worker_default = {
           await env.DB.prepare("UPDATE course_reminders SET cancelled = 1 WHERE id = ?").bind(Number(body.id) || 0).run();
           return json({ ok: true });
         }
-        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events, gcal_event_id, gcal_days, kind, sys, days, pay_account, pay_due, pay_by, extra, pay_mode, cash_on, variants, pick_token, picked, picked_at, payee FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date DESC LIMIT 150").all();
+        const rs = await env.DB.prepare("SELECT id, to_email, auto_armed, student_name, start_date, created_by, created_at, sent_at, error, deposit_at, deposit_by, lang, child, start_time, price, deposit, currency, paid_total, paid_at, paid_by, paid_amount, paid_method, paid_rest, status, status_at, status_note, orig_start, events, gcal_event_id, gcal_days, kind, sys, days, pay_account, pay_due, pay_by, extra, pay_mode, cash_on, variants, pick_token, picked, picked_at, payee FROM course_reminders WHERE COALESCE(cancelled, 0) = 0 ORDER BY start_date IS NULL DESC, start_date DESC LIMIT 600").all();
         try {
           const ra = (await env.DB.prepare("SELECT id, remind_at FROM course_reminders WHERE remind_at IS NOT NULL").all()).results || [];
           const m = {};
@@ -6695,6 +6695,7 @@ var worker_default = {
         return new Response(ex.csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "X-Rows": String(ex.n), "X-Survey": encodeURIComponent(String(ex.survey == null ? "" : ex.survey)), "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Rows, X-Survey" } });
       }
       if (url.pathname.startsWith("/self-assess/")) return await handleSelfAssess(request, env, url);
+      if (url.pathname === "/consultations" || url.pathname.startsWith("/consultations/")) return await consHandle(request, env, url);
       if (url.pathname === "/showcase" || url.pathname.startsWith("/showcase/")) return await handleShowcase(request, env, url);
       if (url.pathname === "/field-activity" && request.method === "GET" || url.pathname === "/field-sessions") {
         const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
@@ -8630,6 +8631,12 @@ async function bkSheetsWrite(env, job) {
     await appSettingSet(env, "backup_sheet_id", sid);
   }
   const n = await bkWrite(token, sid, gt, job.pl);
+  try {
+    const st = await svExportSheet(env, tabs.map((t) => [t[0].replace(/ — od \d{4}-\d{2}-\d{2}$/, ""), t[1]]));
+    job.students = st && st.ok ? "ok" : st && st.error || "b\u0142\u0105d";
+  } catch (e) {
+    job.students = String(e && e.message || e);
+  }
   if (job.day.slice(8, 10) === "01" || job.snapshot) {
     const ym = job.day.slice(0, 7), done = await appSettingGet(env, "backup_snapshot_" + ym);
     if (!done || job.snapshot) {
@@ -8645,17 +8652,19 @@ async function bkJobFinish(env, job) {
   const files = Object.entries(job.files).map(([slug, f]) => ({ slug, tab: f.tab, cols: f.cols, keys: f.keys, rows: f.rows, bytes: f.bytes }));
   await env.RECORDINGS.put("backups/" + job.day + "/manifest.json", JSON.stringify({ day: job.day, at: Math.floor(Date.now() / 1e3), files }), { httpMetadata: { contentType: "application/json" } });
   try {
-    const cut = new Date(Date.now() - 35 * 864e5).toISOString().slice(0, 10);
+    const all = [];
     let cursor;
     do {
       const L = await env.RECORDINGS.list({ prefix: "backups/", cursor, limit: 1e3 });
-      const old = L.objects.map((o) => o.key).filter((k) => {
-        const d = k.split("/")[1] || "";
-        return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < cut && d.slice(8, 10) !== "01";
-      });
-      if (old.length) await env.RECORDINGS.delete(old);
+      L.objects.forEach((o) => all.push(o.key));
       cursor = L.truncated ? L.cursor : null;
     } while (cursor);
+    const days = [...new Set(all.map((k) => k.split("/")[1] || "").filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort().reverse(), keep = new Set(days.slice(0, 3));
+    const old = all.filter((k) => {
+      const d = k.split("/")[1] || "";
+      return /^\d{4}-\d{2}-\d{2}$/.test(d) && !keep.has(d);
+    });
+    for (let q = 0; q < old.length; q += 1e3) await env.RECORDINGS.delete(old.slice(q, q + 1e3));
   } catch (e) {
   }
   const sh = job.sheet || {};
@@ -12893,6 +12902,199 @@ async function handleShowcase(request, env, url) {
   return json({ error: "Nieznana akcja" }, 404);
 }
 __name(handleShowcase, "handleShowcase");
+var CONS_MEET = "https://meet.google.com/qdr-cnva-eky";
+var CONS_WA = "+48 607 062 701";
+var CONS_WA_LINK = "https://wa.me/48607062701";
+var CONS_TXT = {
+  pl: {
+    subj: "Konsultacja \u2014 Szko\u0142a Nowej Mowy",
+    hi: "Dzie\u0144 dobry",
+    conf: "potwierdzam termin konsultacji",
+    at: "godz.",
+    min: "min",
+    approx: "ok.",
+    cam: "\u{1F4F7} <b>Konieczna jest dzia\u0142aj\u0105ca kamerka</b> \u2014 trener chce Pana/Pani\u0105 zobaczy\u0107 podczas rozmowy. Prosz\u0119 sprawdzi\u0107 j\u0105 przed spotkaniem.",
+    meet: "Konsultacja odb\u0119dzie si\u0119 online przez Google Meet. W um\xF3wionym czasie wystarczy klikn\u0105\u0107 link (na komputerze dzia\u0142a w przegl\u0105darce, na telefonie w aplikacji Google Meet):",
+    meetBtn: "Do\u0142\u0105cz do spotkania",
+    wa: "Konsultacja odb\u0119dzie si\u0119 przez WhatsApp. <b>10 minut przed spotkaniem prosz\u0119 napisa\u0107 na WhatsApp na numer {n}</b>, \u017Ce jest Pan/Pani gotowy/a \u2014 wtedy zadzwoni\u0119 (po\u0142\u0105czenie wideo).",
+    waBtn: "Napisz na WhatsApp",
+    change: "Je\u015Bli termin si\u0119 nie zgadza albo co\u015B si\u0119 zmieni, prosz\u0119 o wiadomo\u015B\u0107.",
+    sign: "Do us\u0142yszenia,<br>Szko\u0142a Nowej Mowy",
+    days: ["niedziela", "poniedzia\u0142ek", "wtorek", "\u015Broda", "czwartek", "pi\u0105tek", "sobota"]
+  },
+  sk: {
+    subj: "Konzult\xE1cia \u2014 \u0160kola Novej re\u010Di",
+    hi: "Dobr\xFD de\u0148",
+    conf: "potvrdzujem term\xEDn konzult\xE1cie",
+    at: "o",
+    min: "min",
+    approx: "cca",
+    cam: "\u{1F4F7} <b>Nevyhnutn\xE1 je funguj\xFAca kamera</b> \u2014 tr\xE9ner v\xE1s chce po\u010Das rozhovoru vidie\u0165. Pros\xEDm, skontrolujte ju pred stretnut\xEDm.",
+    meet: "Konzult\xE1cia prebehne online cez Google Meet. V dohodnutom \u010Dase sta\u010D\xED klikn\xFA\u0165 na odkaz (na po\u010D\xEDta\u010Di v prehliada\u010Di, na mobile v aplik\xE1cii Google Meet):",
+    meetBtn: "Pripoji\u0165 sa",
+    wa: "Konzult\xE1cia prebehne cez WhatsApp. <b>10 min\xFAt pred stretnut\xEDm pros\xEDm nap\xED\u0161te na WhatsApp na \u010D\xEDslo {n}</b>, \u017Ee ste pripraven\xFD/\xE1 \u2014 potom zavol\xE1m.",
+    waBtn: "Nap\xEDsa\u0165 na WhatsApp",
+    change: "Ak v\xE1m term\xEDn nevyhovuje alebo sa nie\u010Do zmen\xED, dajte mi pros\xEDm vedie\u0165.",
+    sign: "S pozdravom,<br>\u0160kola Novej re\u010Di",
+    days: ["nede\u013Ea", "pondelok", "utorok", "streda", "\u0161tvrtok", "piatok", "sobota"]
+  },
+  cs: {
+    subj: "Konzultace \u2014 \u0160kola Nov\xE9 \u0159e\u010Di",
+    hi: "Dobr\xFD den",
+    conf: "potvrzuji term\xEDn konzultace",
+    at: "v",
+    min: "min",
+    approx: "cca",
+    cam: "\u{1F4F7} <b>Nutn\xE1 je funk\u010Dn\xED kamera</b> \u2014 tren\xE9r v\xE1s chce b\u011Bhem rozhovoru vid\u011Bt. Pros\xEDm, zkontrolujte ji p\u0159ed sch\u016Fzkou.",
+    meet: "Konzultace prob\u011Bhne online p\u0159es Google Meet. V domluven\xFD \u010Das sta\u010D\xED kliknout na odkaz (na po\u010D\xEDta\u010Di v prohl\xED\u017Ee\u010Di, na mobilu v aplikaci Google Meet):",
+    meetBtn: "P\u0159ipojit se",
+    wa: "Konzultace prob\u011Bhne p\u0159es WhatsApp. <b>10 minut p\u0159ed sch\u016Fzkou pros\xEDm napi\u0161te na WhatsApp na \u010D\xEDslo {n}</b>, \u017Ee jste p\u0159ipraven/a \u2014 pak zavol\xE1m.",
+    waBtn: "Napsat na WhatsApp",
+    change: "Pokud v\xE1m term\xEDn nevyhovuje nebo se n\u011Bco zm\u011Bn\xED, dejte mi pros\xEDm v\u011Bd\u011Bt.",
+    sign: "S pozdravem,<br>\u0160kola Nov\xE9 \u0159e\u010Di",
+    days: ["ned\u011Ble", "pond\u011Bl\xED", "\xFAter\xFD", "st\u0159eda", "\u010Dtvrtek", "p\xE1tek", "sobota"]
+  },
+  en: {
+    subj: "Consultation \u2014 New Speech School",
+    hi: "Hello",
+    conf: "I confirm the date of your consultation",
+    at: "at",
+    min: "min",
+    approx: "approx.",
+    cam: "\u{1F4F7} <b>A working camera is required</b> \u2014 the trainer wants to see you during the call. Please check it before the meeting.",
+    meet: "The consultation will take place online via Google Meet. At the agreed time just click the link (in a browser on a computer, in the Google Meet app on a phone):",
+    meetBtn: "Join the meeting",
+    wa: "The consultation will take place via WhatsApp. <b>10 minutes before the meeting please send a WhatsApp message to {n}</b> saying you are ready \u2014 then I will call you.",
+    waBtn: "Message on WhatsApp",
+    change: "If the date does not suit you or something changes, please let me know.",
+    sign: "Best regards,<br>New Speech School",
+    days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+  }
+};
+async function consTable(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS consultations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT, phone TEXT, start_at INTEGER, minutes INTEGER, mode TEXT, lang TEXT, note TEXT, gcal_event_id TEXT, mail_at INTEGER, mail_error TEXT, status TEXT, created_by TEXT, created_at INTEGER)").run();
+  try {
+    await env.DB.prepare("ALTER TABLE consultations ADD COLUMN gcal_error TEXT").run();
+  } catch (e) {
+  }
+}
+__name(consTable, "consTable");
+function consWhen(startAt, lang) {
+  const T = CONS_TXT[lang] || CONS_TXT.pl, d = new Date(startAt * 1e3);
+  const p = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short" }).formatToParts(d);
+  const g = /* @__PURE__ */ __name((t) => (p.find((x) => x.type === t) || {}).value || "", "g");
+  const wd = new Date(Date.UTC(+g("year"), +g("month") - 1, +g("day"))).getUTCDay();
+  return { date: g("day") + "." + g("month") + "." + g("year"), time: g("hour") + ":" + g("minute"), wd: T.days[wd] };
+}
+__name(consWhen, "consWhen");
+function consMailHtml(c) {
+  const T = CONS_TXT[c.lang] || CONS_TXT.pl, w = consWhen(c.start_at, c.lang), first = String(c.name || "").trim().split(/\s+/)[0] || "";
+  const btn = /* @__PURE__ */ __name((href, t, bg) => '<a href="' + href + '" style="display:inline-block;background:' + bg + ';color:#fff;text-decoration:none;font-weight:700;padding:11px 20px;border-radius:10px">' + t + "</a>", "btn");
+  const how = c.mode === "whatsapp" ? "<p>" + T.wa.replace("{n}", CONS_WA) + "</p><p>" + btn(CONS_WA_LINK, "\u{1F4AC} " + T.waBtn, "#25D366") + "</p>" : "<p>" + T.meet + "</p><p>" + btn(CONS_MEET, "\u{1F3A5} " + T.meetBtn, "#1A73E8") + '</p><p style="font-size:13px;color:#6B5B43">' + CONS_MEET + "</p>";
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#2B2419;max-width:560px"><p>' + T.hi + (first ? " " + ofEsc(first) : "") + ",</p><p>" + T.conf + ':</p><p style="font-size:18px;font-weight:700;background:#FFF6E5;border-radius:10px;padding:12px 14px;margin:8px 0">\u{1F4C5} ' + w.wd + ", " + w.date + " \xB7 " + T.at + " " + w.time + (c.minutes ? ' <span style="font-weight:400;font-size:14px">(' + T.approx + " " + c.minutes + " " + T.min + ")</span>" : "") + "</p>" + how + '<p style="background:#FDECEC;border-radius:10px;padding:10px 14px">' + T.cam + "</p>" + (c.note ? "<p>" + ofEsc(c.note).replace(/\n/g, "<br>") + "</p>" : "") + "<p>" + T.change + "</p><p>" + T.sign + "</p></div>";
+}
+__name(consMailHtml, "consMailHtml");
+async function consGcal(env, c, who) {
+  const auth = await gcalAuth(env);
+  if (!auth) return { id: null, error: "Kalendarz Google nie jest po\u0142\u0105czony (Ustawienia \u2192 Google)" };
+  const start = c.start_at * 1e3, mode = c.mode, name = c.name, email = c.email;
+  const body = {
+    summary: "\u{1F4DE} Konsultacja: " + (name || email) + (mode === "whatsapp" ? " (WhatsApp)" : " (Meet)"),
+    description: [mode === "whatsapp" ? "WhatsApp \u2014 kursant napisze 10 min przed na " + CONS_WA + (c.phone ? "\nTelefon: " + c.phone : "") : "Google Meet: " + CONS_MEET, email ? "E-mail: " + email : "", c.note, "\u{1F4F7} Kursant ma mie\u0107 w\u0142\u0105czon\u0105 kamerk\u0119", "Dodane z panelu trenera (konsultacje)"].filter(Boolean).join("\n"),
+    start: { dateTime: new Date(start).toISOString(), timeZone: "Europe/Warsaw" },
+    end: { dateTime: new Date(start + (c.minutes || 60) * 6e4).toISOString(), timeZone: "Europe/Warsaw" },
+    reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 30 }, { method: "popup", minutes: 10 }] }
+  };
+  if (mode === "meet") body.location = CONS_MEET;
+  let qs = "";
+  if (auth.mode === "oauth") {
+    const g = [who && who.email].concat(callDaysCc(env)).map((e) => String(e || "").trim().toLowerCase()).filter((e) => /@/.test(e) && e !== String(email || "").toLowerCase());
+    if (g.length) {
+      body.attendees = [...new Set(g)].map((e) => ({ email: e }));
+      body.guestsCanModify = false;
+      qs = "?sendUpdates=all";
+    }
+  }
+  try {
+    const rr = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(gcalCalendarId(env, auth.mode))}/events${qs}`, { method: "POST", headers: { "Authorization": "Bearer " + auth.token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await rr.json().catch(() => null);
+    if (rr.ok && d && d.id) return { id: d.id, link: d.htmlLink || null, error: null };
+    return { id: null, error: d && d.error && d.error.message || "HTTP " + rr.status };
+  } catch (e) {
+    return { id: null, error: String(e && e.message || e) };
+  }
+}
+__name(consGcal, "consGcal");
+async function consCreate(env, b, who) {
+  await consTable(env);
+  const email = String(b.email || "").trim().toLowerCase(), name = String(b.name || "").trim().slice(0, 120);
+  const start = Date.parse(String(b.start || ""));
+  if (!isFinite(start)) throw new Error("Z\u0142a data i godzina");
+  const mode = b.mode === "whatsapp" ? "whatsapp" : "meet", lang = CONS_TXT[b.lang] ? b.lang : "pl", minutes = Math.max(10, Math.min(240, parseInt(b.minutes, 10) || 60));
+  const c = { name, email, phone: String(b.phone || "").slice(0, 40), start_at: Math.floor(start / 1e3), minutes, mode, lang, note: String(b.note || "").slice(0, 1e3) };
+  let evId = null, gerr = null;
+  if (b.calendar !== false) {
+    const g = await consGcal(env, c, who);
+    evId = g.id;
+    gerr = g.error;
+  }
+  let mailAt = null, merr = null;
+  if (b.mail !== false && email) {
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) merr = "z\u0142y adres e-mail";
+    else {
+      const account = await appSettingGet(env, "google_account") || "", w = consWhen(c.start_at, lang), T = CONS_TXT[lang];
+      const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: email, replyTo: account || who.email, subject: T.subj + " \xB7 " + w.date + " " + w.time, html: consMailHtml(c) }));
+      if (s && s.ok) mailAt = Math.floor(Date.now() / 1e3);
+      else merr = s && s.error || "nie wys\u0142ano";
+    }
+  }
+  const r = await env.DB.prepare("INSERT INTO consultations (name, email, phone, start_at, minutes, mode, lang, note, gcal_event_id, gcal_error, mail_at, mail_error, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)").bind(name, email, c.phone, c.start_at, minutes, mode, lang, c.note, evId, b.calendar !== false ? gerr : null, mailAt, merr, who.email, Math.floor(Date.now() / 1e3)).run();
+  return { ok: true, id: r.meta && r.meta.last_row_id, calendar: evId ? "ok" : gerr, mail: mailAt ? "ok" : email ? merr : "bez maila" };
+}
+__name(consCreate, "consCreate");
+async function consHandle(request, env, url) {
+  const q = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+  const g = /* @__PURE__ */ __name((k) => q[k] != null ? q[k] : url.searchParams.get(k), "g");
+  const who = await contactAuth(env, g("ns_token"), g("ns_email"), g("ns_server"));
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden) return json({ error: "Tylko trener" }, 403);
+  await consTable(env);
+  try {
+    if (url.pathname === "/consultations" && request.method === "POST") return json(await consCreate(env, q, who));
+    if (url.pathname === "/consultations/preview" && request.method === "POST") {
+      const start = Date.parse(String(q.start || ""));
+      if (!isFinite(start)) return json({ error: "Z\u0142a data" }, 400);
+      return json({ ok: true, html: consMailHtml({ name: q.name, start_at: Math.floor(start / 1e3), minutes: parseInt(q.minutes, 10) || 60, mode: q.mode === "whatsapp" ? "whatsapp" : "meet", lang: CONS_TXT[q.lang] ? q.lang : "pl", note: q.note || "" }) });
+    }
+    if (url.pathname === "/consultations/update" && request.method === "POST") {
+      const r = await env.DB.prepare("SELECT * FROM consultations WHERE id = ?").bind(Number(q.id) || 0).first();
+      if (!r) return json({ error: "Nie ma takiej konsultacji" }, 404);
+      if (q.delete) {
+        if (r.gcal_event_id) {
+          try {
+            await gcalDelete(env, r.gcal_event_id);
+          } catch (e) {
+          }
+        }
+        await env.DB.prepare("DELETE FROM consultations WHERE id = ?").bind(r.id).run();
+        return json({ ok: true, deleted: true });
+      }
+      if (q.calendar) {
+        if (r.gcal_event_id) return json({ ok: true, calendar: "ok", already: true });
+        const g2 = await consGcal(env, r, who);
+        await env.DB.prepare("UPDATE consultations SET gcal_event_id = ?, gcal_error = ? WHERE id = ?").bind(g2.id, g2.error, r.id).run();
+        return json({ ok: true, calendar: g2.id ? "ok" : g2.error });
+      }
+      if (q.status) await env.DB.prepare("UPDATE consultations SET status = ? WHERE id = ?").bind(String(q.status).slice(0, 20), r.id).run();
+      return json({ ok: true });
+    }
+    const rows = (await env.DB.prepare("SELECT * FROM consultations WHERE start_at >= ? ORDER BY start_at").bind(Math.floor(Date.now() / 1e3) - 30 * 86400).all()).results || [];
+    return json({ ok: true, meet: CONS_MEET, wa: CONS_WA, items: rows });
+  } catch (e) {
+    return json({ error: String(e && e.message || e) }, 400);
+  }
+}
+__name(consHandle, "consHandle");
 async function techniqueStats(env, sid, from, to) {
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
@@ -17241,6 +17443,10 @@ async function sstTable(env) {
     await env.DB.prepare("ALTER TABLE survey_status ADD COLUMN no_contact INTEGER").run();
   } catch (e) {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE survey_status ADD COLUMN decline TEXT").run();
+  } catch (e) {
+  }
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_merge (row_key TEXT PRIMARY KEY, into_key TEXT, merged_by TEXT, merged_at INTEGER)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS survey_hidden (row_key TEXT PRIMARY KEY, hidden_by TEXT, hidden_at INTEGER)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS offer_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, to_email TEXT, kind TEXT, variant INTEGER, variant_name TEXT, price INTEGER, sent_by TEXT, created_at INTEGER)").run();
@@ -17266,6 +17472,12 @@ async function svSetStatus(env, who, b) {
   if (b.severity !== void 0) o.severity = Math.max(0, Math.min(3, Number(b.severity) || 0));
   if (b.note !== void 0) o.note = String(b.note || "").slice(0, 2e3);
   if (b.no_contact !== void 0) o.no_contact = b.no_contact ? 1 : 0;
+  if (b.decline !== void 0) {
+    const d = b.decline || {}, reasons = (Array.isArray(d.reasons) ? d.reasons : []).map((x) => String(x || "").slice(0, 60)).filter(Boolean).slice(0, 12), text = String(d.text || "").slice(0, 1e3);
+    o.decline = reasons.length || text ? JSON.stringify({ reasons, text, at: now, by: String(who.email || "") }) : null;
+    await env.DB.prepare("INSERT INTO survey_status (row_key, updated_by, updated_at) VALUES (?, ?, ?) ON CONFLICT(row_key) DO NOTHING").bind(key, String(who.email || ""), now).run();
+    await env.DB.prepare("UPDATE survey_status SET decline = ? WHERE row_key = ?").bind(o.decline, key).run();
+  }
   await env.DB.prepare("INSERT INTO survey_status (row_key, offer_at, contract_at, variant, severity, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(row_key) DO UPDATE SET offer_at = excluded.offer_at, contract_at = excluded.contract_at, variant = excluded.variant, severity = excluded.severity, note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at").bind(key, o.offer_at || null, o.contract_at || null, o.variant || null, o.severity || 0, o.note || "", String(who.email || ""), now).run();
   await env.DB.prepare("UPDATE survey_status SET no_contact = ? WHERE row_key = ?").bind(o.no_contact ? 1 : 0, key).run();
   return { ok: true, status: o };
@@ -17330,7 +17542,7 @@ async function svBulkMail(env, who, b) {
 }
 __name(svBulkMail, "svBulkMail");
 __name2(svBulkMail, "svBulkMail");
-async function svExportSheet(env) {
+async function svExportSheet(env, pre) {
   const L = await svList(env);
   if (!L.ok) return L;
   const id = await svSheetId(env);
@@ -17469,7 +17681,7 @@ async function svExportSheet(env) {
     }
     let more = [];
     try {
-      more = (await bkCollect(env)).filter((t) => ["\u{1F4C5} Dni treningowe", "Nagrania", "Dzienniki (NS)", "Harmonogramy (NS)"].indexOf(t[0]) >= 0 || t[0] === "Kursanci");
+      more = (pre || await bkCollect(env, null, { since: new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10), noD1: true })).filter((t) => ["\u{1F4C5} Dni treningowe", "Nagrania", "Dzienniki (NS)", "Harmonogramy (NS)"].indexOf(t[0]) >= 0 || t[0] === "Kursanci");
     } catch (e) {
       more = [["\u26A0\uFE0F b\u0142\u0105d danych NS", [["b\u0142\u0105d"], [String(e && e.message || e)]]]];
     }
@@ -17640,6 +17852,13 @@ async function svList(env) {
       severity: st.severity || 0,
       status_note: st.note || "",
       no_contact: !!st.no_contact,
+      decline: (() => {
+        try {
+          return st.decline ? JSON.parse(st.decline) : null;
+        } catch (e) {
+          return null;
+        }
+      })(),
       last_contact_at: (sent[em] || {}).last || null,
       last_contact_subject: (sent[em] || {}).last_subject || "",
       reminders_sent: (sent[em] || {}).rem || 0,
