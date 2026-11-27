@@ -6417,6 +6417,7 @@ var worker_default = {
         if (who.forbidden || !who.admin) return json({ error: "Tylko administrator" }, 403);
         return json(await handleAiUsage(env, who));
       }
+      if (url.pathname === "/offers/indiv" || url.pathname.startsWith("/offers/indiv/")) return await indHandle(request, env, url);
       if (url.pathname === "/offers/send" && request.method === "POST") return await handleOfferSend(request, env);
       if (url.pathname === "/offers/translate" && request.method === "POST") return await handleOfferTranslate(request, env);
       if (url.pathname === "/raty" && request.method === "GET") return ofRatyPage(url);
@@ -6439,6 +6440,7 @@ var worker_default = {
       if (url.pathname === "/potwierdz" || url.pathname === "/potwierdz/plik") return await resLinkPage(request, env, url, ctx);
       if (url.pathname === "/oferta") return await ofbPage(request, env, url, ctx);
       if (url.pathname === "/wybierz") return await ofFluPickPage(request, env, url);
+      if (url.pathname === "/oferta-indywidualna") return await indPickPage(request, env, url);
       if (url.pathname === "/offers/feedback" || url.pathname === "/offers/feedback/done" || url.pathname === "/offers/feedback/reply") {
         let fbb = {};
         if (request.method === "POST") {
@@ -13489,6 +13491,592 @@ async function consHandle(request, env, url) {
   }
 }
 __name(consHandle, "consHandle");
+var IND_TXT = {
+  pl: {
+    dA: "Intensywny start",
+    dB: "Pe\u0142ny program",
+    varL: "WARIANT",
+    subj: "Indywidualny program treningu mowy \u2014 oferta dla %n",
+    subj0: "Indywidualny program treningu mowy \u2014 oferta",
+    kicker: "OFERTA INDYWIDUALNA",
+    title: "Indywidualny program treningu mowy",
+    forN: "przygotowany dla: %n",
+    hi: "Dzie\u0144 dobry,",
+    hiN: "Dzie\u0144 dobry, %n,",
+    introA: "dzi\u0119kujemy za rozmow\u0119. Poniewa\u017C mieszkasz za granic\u0105, przygotowali\u015Bmy program, w kt\xF3rym to trener przyje\u017Cd\u017Ca do Ciebie \u2014 nie musisz organizowa\u0107 podr\xF3\u017Cy do Miko\u0142owa.",
+    introE: "dzi\u0119kujemy za rozmow\u0119. Przygotowali\u015Bmy dla Ciebie indywidualny program treningu Nowej Mowy \u2014 z trenerem, kt\xF3ry przyje\u017Cd\u017Ca do Ciebie, i z codziennym prowadzeniem po zaj\u0119ciach.",
+    introB: "dzi\u0119kujemy za rozmow\u0119. Przygotowali\u015Bmy dla Ciebie indywidualny program treningu Nowej Mowy \u2014 trener przyje\u017Cd\u017Ca do Ciebie, a po zaj\u0119ciach prowadzimy Ci\u0119 codziennie przez aplikacj\u0119.",
+    whereA: "Zaj\u0119cia u Ciebie: %c",
+    whereP: "Zaj\u0119cia w Twoim mie\u015Bcie: %c",
+    whereA0: "Zaj\u0119cia u Ciebie, za granic\u0105",
+    whereP0: "Zaj\u0119cia w Twoim mie\u015Bcie",
+    pillT: "W cenie ka\u017Cdego wariantu",
+    p1A: "Trener przylatuje do Ciebie",
+    p1Ad: "przelot, pobyt trenera na miejscu i zaj\u0119cia indywidualne",
+    p1P: "Trener przyje\u017Cd\u017Ca do Ciebie",
+    p1Pd: "przejazd, pobyt trenera i zaj\u0119cia indywidualne w Twoim mie\u015Bcie",
+    p2: "Codzienna analiza mowy",
+    p2d: "w aplikacji \u2014 nagrywasz, trener na bie\u017C\u0105co ocenia i koryguje",
+    p3: "%k telefony kontrolne",
+    p3_5: "%k telefon\xF3w kontrolnych",
+    p3d: "rozmowy z trenerem, kt\xF3re sprawdzaj\u0105 post\u0119py i ustalaj\u0105 kolejne kroki",
+    varsT: "Dwa warianty do wyboru",
+    var1T: "Tw\xF3j wariant",
+    days: "Zaj\u0119cia z trenerem",
+    daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "dzie\u0144" : "dni"), "daysV"),
+    inc: "W cenie:",
+    iFly: "przelot trenera w obie strony",
+    iStayA: "pobyt trenera na miejscu (%d)",
+    iClassA: "zaj\u0119cia indywidualne u Ciebie (%d)",
+    iTrav: "przejazd trenera do Twojego miasta",
+    iStayP: "pobyt trenera (%d)",
+    iClassP: "zaj\u0119cia indywidualne w Twoim mie\u015Bcie (%d)",
+    iAn: "codzienna analiza mowy w aplikacji",
+    iAnD: "codzienna analiza mowy w aplikacji przez %d",
+    iCalls: "%k telefony kontrolne z trenerem",
+    iCalls5: "%k telefon\xF3w kontrolnych z trenerem",
+    pick: "Wybieram ten wariant",
+    pickAll: "Wybierz wariant",
+    stepsT: "Jak to przebiega",
+    s1: "Wybierasz wariant",
+    s1d: "jednym klikni\u0119ciem w przycisku \u2014 trener od razu dostaje informacj\u0119.",
+    s2: "Ustalamy termin",
+    s2d: "dogadujemy dni zaj\u0119\u0107 i szczeg\xF3\u0142y przyjazdu trenera.",
+    s3: "Zaj\u0119cia z trenerem",
+    s3d: "intensywny trening Nowej Mowy u Ciebie \u2014 w realnych sytuacjach, w Twoim otoczeniu.",
+    s4: "Codzienne prowadzenie",
+    s4d: "analiza nagra\u0144 w aplikacji i telefony kontrolne, \u017Ceby nowa mowa utrwali\u0142a si\u0119 w codziennym \u017Cyciu.",
+    payT: "P\u0142atno\u015B\u0107",
+    dep: "Zadatek (rezerwuje termin)",
+    payBy: "Termin wp\u0142aty zadatku",
+    rest: "Pozosta\u0142a kwota",
+    restV: "przed rozpocz\u0119ciem zaj\u0119\u0107",
+    acc: "Numer konta",
+    iban: "IBAN",
+    holder: "Odbiorca",
+    bank: "Bank",
+    swift: "SWIFT/BIC",
+    ttl: "Tytu\u0142 przelewu",
+    ttlV: "Indywidualny program treningu mowy \u2014 %n",
+    q: "Masz pytania albo chcesz co\u015B zmieni\u0107 w programie? Wystarczy odpisa\u0107 na tego maila.",
+    bye: "Z pozdrowieniami",
+    valid: "Oferta wa\u017Cna do %d.",
+    pgT: "Oferta indywidualna",
+    pgOk: "Dzi\u0119kujemy! Wybrany wariant:",
+    pgInfo: "Trener skontaktuje si\u0119 z Tob\u0105, \u017Ceby ustali\u0107 termin zaj\u0119\u0107.",
+    pgGone: "Ta oferta jest ju\u017C nieaktualna. Skontaktuj si\u0119 z nami, a przygotujemy now\u0105.",
+    pgChosen: "wybrany",
+    pgChange: "\u2190 zmie\u0144 wyb\xF3r"
+  },
+  en: {
+    dA: "Intensive start",
+    dB: "Full programme",
+    varL: "OPTION",
+    subj: "Individual speech training programme \u2014 offer for %n",
+    subj0: "Individual speech training programme \u2014 offer",
+    kicker: "INDIVIDUAL OFFER",
+    title: "Individual speech training programme",
+    forN: "prepared for: %n",
+    hi: "Hello,",
+    hiN: "Hello %n,",
+    introA: "thank you for our conversation. As you live abroad, we have prepared a programme in which the trainer comes to you \u2014 you don't need to arrange travel to Miko\u0142\xF3w.",
+    introE: "thank you for our conversation. We have prepared an individual Nowa Mowa training programme for you \u2014 with a trainer who comes to you and daily guidance after the sessions.",
+    introB: "thank you for our conversation. We have prepared an individual Nowa Mowa training programme for you \u2014 the trainer comes to you, and after the sessions we guide you every day through the app.",
+    whereA: "Sessions at your place: %c",
+    whereP: "Sessions in your city: %c",
+    whereA0: "Sessions at your place, abroad",
+    whereP0: "Sessions in your city",
+    pillT: "Included in each option",
+    p1A: "The trainer flies to you",
+    p1Ad: "flight, the trainer's stay and individual sessions",
+    p1P: "The trainer comes to you",
+    p1Pd: "travel, the trainer's stay and individual sessions in your city",
+    p2: "Daily speech analysis",
+    p2d: "in the app \u2014 you record, the trainer reviews and corrects on an ongoing basis",
+    p3: "%k follow-up calls",
+    p3_5: "%k follow-up calls",
+    p3d: "calls with the trainer to check progress and agree on next steps",
+    varsT: "Two options to choose from",
+    var1T: "Your option",
+    days: "Sessions with the trainer",
+    daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "day" : "days"), "daysV"),
+    inc: "Included:",
+    iFly: "the trainer's return flight",
+    iStayA: "the trainer's stay on site (%d)",
+    iClassA: "individual sessions at your place (%d)",
+    iTrav: "the trainer's travel to your city",
+    iStayP: "the trainer's stay (%d)",
+    iClassP: "individual sessions in your city (%d)",
+    iAn: "daily speech analysis in the app",
+    iAnD: "daily speech analysis in the app for %d",
+    iCalls: "%k follow-up calls with the trainer",
+    iCalls5: "%k follow-up calls with the trainer",
+    pick: "I choose this option",
+    pickAll: "Choose an option",
+    stepsT: "How it works",
+    s1: "You choose an option",
+    s1d: "with one click \u2014 the trainer is notified straight away.",
+    s2: "We set the dates",
+    s2d: "we agree on the session days and the details of the trainer's visit.",
+    s3: "Sessions with the trainer",
+    s3d: "intensive Nowa Mowa training at your place \u2014 in real situations, in your own surroundings.",
+    s4: "Daily guidance",
+    s4d: "recording analysis in the app and follow-up calls, so the new speech becomes part of everyday life.",
+    payT: "Payment",
+    dep: "Deposit (secures the dates)",
+    payBy: "Deposit due by",
+    rest: "Remaining amount",
+    restV: "before the sessions start",
+    acc: "Account number",
+    iban: "IBAN",
+    holder: "Recipient",
+    bank: "Bank",
+    swift: "SWIFT/BIC",
+    ttl: "Payment reference",
+    ttlV: "Individual speech training programme \u2014 %n",
+    q: "Any questions, or would you like to change something in the programme? Simply reply to this email.",
+    bye: "Kind regards",
+    valid: "Offer valid until %d.",
+    pgT: "Individual offer",
+    pgOk: "Thank you! Your chosen option:",
+    pgInfo: "The trainer will contact you to set the session dates.",
+    pgGone: "This offer is no longer valid. Contact us and we will prepare a new one.",
+    pgChosen: "chosen",
+    pgChange: "\u2190 change choice"
+  },
+  sk: {
+    dA: "Intenz\xEDvny \u0161tart",
+    dB: "Pln\xFD program",
+    varL: "VARIANT",
+    subj: "Individu\xE1lny program tr\xE9ningu re\u010Di \u2014 ponuka pre %n",
+    subj0: "Individu\xE1lny program tr\xE9ningu re\u010Di \u2014 ponuka",
+    kicker: "INDIVIDU\xC1LNA PONUKA",
+    title: "Individu\xE1lny program tr\xE9ningu re\u010Di",
+    forN: "pripraven\xFD pre: %n",
+    hi: "Dobr\xFD de\u0148,",
+    hiN: "Dobr\xFD de\u0148, %n,",
+    introA: "\u010Fakujeme za rozhovor. Ke\u010F\u017Ee \u017Eijete v zahrani\u010D\xED, pripravili sme program, v ktorom tr\xE9ner pr\xEDde za Vami \u2014 nemus\xEDte organizova\u0165 cestu do Miko\u0142owa.",
+    introE: "\u010Fakujeme za rozhovor. Pripravili sme pre V\xE1s individu\xE1lny program tr\xE9ningu Nowej Mowy \u2014 s tr\xE9nerom, ktor\xFD pr\xEDde za Vami, a s ka\u017Edodenn\xFDm veden\xEDm po tr\xE9ningu.",
+    introB: "\u010Fakujeme za rozhovor. Pripravili sme pre V\xE1s individu\xE1lny program tr\xE9ningu Nowej Mowy \u2014 tr\xE9ner pr\xEDde za Vami a po tr\xE9ningu V\xE1s ka\u017Ed\xFD de\u0148 vedieme cez aplik\xE1ciu.",
+    whereA: "Tr\xE9ning u V\xE1s: %c",
+    whereP: "Tr\xE9ning vo Va\u0161om meste: %c",
+    whereA0: "Tr\xE9ning u V\xE1s, v zahrani\u010D\xED",
+    whereP0: "Tr\xE9ning vo Va\u0161om meste",
+    pillT: "V cene ka\u017Ed\xE9ho variantu",
+    p1A: "Tr\xE9ner prilet\xED za Vami",
+    p1Ad: "let, pobyt tr\xE9nera na mieste a individu\xE1lny tr\xE9ning",
+    p1P: "Tr\xE9ner pr\xEDde za Vami",
+    p1Pd: "cesta, pobyt tr\xE9nera a individu\xE1lny tr\xE9ning vo Va\u0161om meste",
+    p2: "Ka\u017Edodenn\xE1 anal\xFDza re\u010Di",
+    p2d: "v aplik\xE1cii \u2014 nahr\xE1vate, tr\xE9ner priebe\u017Ene hodnot\xED a opravuje",
+    p3: "%k kontroln\xE9 telefon\xE1ty",
+    p3_5: "%k kontroln\xFDch telefon\xE1tov",
+    p3d: "rozhovory s tr\xE9nerom, ktor\xE9 overia pokrok a ur\u010Dia \u010Fal\u0161ie kroky",
+    varsT: "Dva varianty na v\xFDber",
+    var1T: "V\xE1\u0161 variant",
+    days: "Tr\xE9ning s tr\xE9nerom",
+    daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "de\u0148" : n < 5 ? "dni" : "dn\xED"), "daysV"),
+    inc: "V cene:",
+    iFly: "let tr\xE9nera tam a sp\xE4\u0165",
+    iStayA: "pobyt tr\xE9nera na mieste (%d)",
+    iClassA: "individu\xE1lny tr\xE9ning u V\xE1s (%d)",
+    iTrav: "cesta tr\xE9nera do V\xE1\u0161ho mesta",
+    iStayP: "pobyt tr\xE9nera (%d)",
+    iClassP: "individu\xE1lny tr\xE9ning vo Va\u0161om meste (%d)",
+    iAn: "ka\u017Edodenn\xE1 anal\xFDza re\u010Di v aplik\xE1cii",
+    iAnD: "ka\u017Edodenn\xE1 anal\xFDza re\u010Di v aplik\xE1cii po\u010Das %d",
+    iCalls: "%k kontroln\xE9 telefon\xE1ty s tr\xE9nerom",
+    iCalls5: "%k kontroln\xFDch telefon\xE1tov s tr\xE9nerom",
+    pick: "Vyber\xE1m tento variant",
+    pickAll: "Vybra\u0165 variant",
+    stepsT: "Ako to prebieha",
+    s1: "Vyberiete variant",
+    s1d: "jedn\xFDm kliknut\xEDm \u2014 tr\xE9ner hne\u010F dostane inform\xE1ciu.",
+    s2: "Dohodneme term\xEDn",
+    s2d: "dohodneme dni tr\xE9ningu a podrobnosti pr\xEDchodu tr\xE9nera.",
+    s3: "Tr\xE9ning s tr\xE9nerom",
+    s3d: "intenz\xEDvny tr\xE9ning Nowej Mowy u V\xE1s \u2014 v re\xE1lnych situ\xE1ci\xE1ch, vo Va\u0161om prostred\xED.",
+    s4: "Ka\u017Edodenn\xE9 vedenie",
+    s4d: "anal\xFDza nahr\xE1vok v aplik\xE1cii a kontroln\xE9 telefon\xE1ty, aby sa nov\xE1 re\u010D upevnila v be\u017Enom \u017Eivote.",
+    payT: "Platba",
+    dep: "Z\xE1loha (rezervuje term\xEDn)",
+    payBy: "Term\xEDn \xFAhrady z\xE1lohy",
+    rest: "Zvy\u0161n\xE1 suma",
+    restV: "pred za\u010Diatkom tr\xE9ningu",
+    acc: "\u010C\xEDslo \xFA\u010Dtu",
+    iban: "IBAN",
+    holder: "Pr\xEDjemca",
+    bank: "Banka",
+    swift: "SWIFT/BIC",
+    ttl: "Spr\xE1va pre pr\xEDjemcu",
+    ttlV: "Individu\xE1lny program tr\xE9ningu re\u010Di \u2014 %n",
+    q: "M\xE1te ot\xE1zky alebo chcete nie\u010Do v programe zmeni\u0165? Sta\u010D\xED odpoveda\u0165 na tento e-mail.",
+    bye: "S pozdravom",
+    valid: "Ponuka plat\xED do %d.",
+    pgT: "Individu\xE1lna ponuka",
+    pgOk: "\u010Eakujeme! Vybran\xFD variant:",
+    pgInfo: "Tr\xE9ner V\xE1s bude kontaktova\u0165, aby ste dohodli term\xEDn tr\xE9ningu.",
+    pgGone: "T\xE1to ponuka u\u017E nie je aktu\xE1lna. Kontaktujte n\xE1s a priprav\xEDme nov\xFA.",
+    pgChosen: "vybran\xFD",
+    pgChange: "\u2190 zmeni\u0165 v\xFDber"
+  },
+  cs: {
+    dA: "Intenzivn\xED start",
+    dB: "Pln\xFD program",
+    varL: "VARIANTA",
+    subj: "Individu\xE1ln\xED program tr\xE9ninku \u0159e\u010Di \u2014 nab\xEDdka pro %n",
+    subj0: "Individu\xE1ln\xED program tr\xE9ninku \u0159e\u010Di \u2014 nab\xEDdka",
+    kicker: "INDIVIDU\xC1LN\xCD NAB\xCDDKA",
+    title: "Individu\xE1ln\xED program tr\xE9ninku \u0159e\u010Di",
+    forN: "p\u0159ipraven\xFD pro: %n",
+    hi: "Dobr\xFD den,",
+    hiN: "Dobr\xFD den, %n,",
+    introA: "d\u011Bkujeme za rozhovor. Proto\u017Ee \u017Eijete v zahrani\u010D\xED, p\u0159ipravili jsme program, ve kter\xE9m tren\xE9r p\u0159ijede za V\xE1mi \u2014 nemus\xEDte organizovat cestu do Miko\u0142owa.",
+    introE: "d\u011Bkujeme za rozhovor. P\u0159ipravili jsme pro V\xE1s individu\xE1ln\xED program tr\xE9ninku Nowej Mowy \u2014 s tren\xE9rem, kter\xFD p\u0159ijede za V\xE1mi, a s ka\u017Edodenn\xEDm veden\xEDm po tr\xE9ninku.",
+    introB: "d\u011Bkujeme za rozhovor. P\u0159ipravili jsme pro V\xE1s individu\xE1ln\xED program tr\xE9ninku Nowej Mowy \u2014 tren\xE9r p\u0159ijede za V\xE1mi a po tr\xE9ninku V\xE1s ka\u017Ed\xFD den vedeme p\u0159es aplikaci.",
+    whereA: "Tr\xE9nink u V\xE1s: %c",
+    whereP: "Tr\xE9nink ve Va\u0161em m\u011Bst\u011B: %c",
+    whereA0: "Tr\xE9nink u V\xE1s, v zahrani\u010D\xED",
+    whereP0: "Tr\xE9nink ve Va\u0161em m\u011Bst\u011B",
+    pillT: "V cen\u011B ka\u017Ed\xE9 varianty",
+    p1A: "Tren\xE9r p\u0159ilet\xED za V\xE1mi",
+    p1Ad: "let, pobyt tren\xE9ra na m\xEDst\u011B a individu\xE1ln\xED tr\xE9nink",
+    p1P: "Tren\xE9r p\u0159ijede za V\xE1mi",
+    p1Pd: "cesta, pobyt tren\xE9ra a individu\xE1ln\xED tr\xE9nink ve Va\u0161em m\u011Bst\u011B",
+    p2: "Ka\u017Edodenn\xED anal\xFDza \u0159e\u010Di",
+    p2d: "v aplikaci \u2014 nahr\xE1v\xE1te, tren\xE9r pr\u016Fb\u011B\u017En\u011B hodnot\xED a opravuje",
+    p3: "%k kontroln\xED telefon\xE1ty",
+    p3_5: "%k kontroln\xEDch telefon\xE1t\u016F",
+    p3d: "rozhovory s tren\xE9rem, kter\xE9 ov\u011B\u0159\xED pokrok a ur\u010D\xED dal\u0161\xED kroky",
+    varsT: "Dv\u011B varianty na v\xFDb\u011Br",
+    var1T: "Va\u0161e varianta",
+    days: "Tr\xE9nink s tren\xE9rem",
+    daysV: /* @__PURE__ */ __name((n) => n + " " + (n === 1 ? "den" : n < 5 ? "dny" : "dn\xED"), "daysV"),
+    inc: "V cen\u011B:",
+    iFly: "let tren\xE9ra tam a zp\u011Bt",
+    iStayA: "pobyt tren\xE9ra na m\xEDst\u011B (%d)",
+    iClassA: "individu\xE1ln\xED tr\xE9nink u V\xE1s (%d)",
+    iTrav: "cesta tren\xE9ra do Va\u0161eho m\u011Bsta",
+    iStayP: "pobyt tren\xE9ra (%d)",
+    iClassP: "individu\xE1ln\xED tr\xE9nink ve Va\u0161em m\u011Bst\u011B (%d)",
+    iAn: "ka\u017Edodenn\xED anal\xFDza \u0159e\u010Di v aplikaci",
+    iAnD: "ka\u017Edodenn\xED anal\xFDza \u0159e\u010Di v aplikaci po dobu %d",
+    iCalls: "%k kontroln\xED telefon\xE1ty s tren\xE9rem",
+    iCalls5: "%k kontroln\xEDch telefon\xE1t\u016F s tren\xE9rem",
+    pick: "Vyb\xEDr\xE1m tuto variantu",
+    pickAll: "Vybrat variantu",
+    stepsT: "Jak to prob\xEDh\xE1",
+    s1: "Vyberete variantu",
+    s1d: "jedn\xEDm kliknut\xEDm \u2014 tren\xE9r hned dostane informaci.",
+    s2: "Domluv\xEDme term\xEDn",
+    s2d: "domluv\xEDme dny tr\xE9ninku a podrobnosti p\u0159\xEDjezdu tren\xE9ra.",
+    s3: "Tr\xE9nink s tren\xE9rem",
+    s3d: "intenzivn\xED tr\xE9nink Nowej Mowy u V\xE1s \u2014 v re\xE1ln\xFDch situac\xEDch, ve Va\u0161em prost\u0159ed\xED.",
+    s4: "Ka\u017Edodenn\xED veden\xED",
+    s4d: "anal\xFDza nahr\xE1vek v aplikaci a kontroln\xED telefon\xE1ty, aby se nov\xE1 \u0159e\u010D upevnila v b\u011B\u017En\xE9m \u017Eivot\u011B.",
+    payT: "Platba",
+    dep: "Z\xE1loha (rezervuje term\xEDn)",
+    payBy: "Term\xEDn \xFAhrady z\xE1lohy",
+    rest: "Zb\xFDvaj\xEDc\xED \u010D\xE1stka",
+    restV: "p\u0159ed za\u010D\xE1tkem tr\xE9ninku",
+    acc: "\u010C\xEDslo \xFA\u010Dtu",
+    iban: "IBAN",
+    holder: "P\u0159\xEDjemce",
+    bank: "Banka",
+    swift: "SWIFT/BIC",
+    ttl: "Zpr\xE1va pro p\u0159\xEDjemce",
+    ttlV: "Individu\xE1ln\xED program tr\xE9ninku \u0159e\u010Di \u2014 %n",
+    q: "M\xE1te ot\xE1zky nebo chcete n\u011Bco v programu zm\u011Bnit? Sta\u010D\xED odpov\u011Bd\u011Bt na tento e-mail.",
+    bye: "S pozdravem",
+    valid: "Nab\xEDdka plat\xED do %d.",
+    pgT: "Individu\xE1ln\xED nab\xEDdka",
+    pgOk: "D\u011Bkujeme! Vybran\xE1 varianta:",
+    pgInfo: "Tren\xE9r V\xE1s bude kontaktovat, abyste domluvili term\xEDn tr\xE9ninku.",
+    pgGone: "Tato nab\xEDdka ji\u017E nen\xED aktu\xE1ln\xED. Kontaktujte n\xE1s a p\u0159iprav\xEDme novou.",
+    pgChosen: "vybran\xE1",
+    pgChange: "\u2190 zm\u011Bnit v\xFDb\u011Br"
+  }
+};
+var IND_DAYS = /* @__PURE__ */ __name((L, lang, n) => lang === "pl" ? n === 1 ? "1 dzie\u0144" : n + " dni" : L.daysV(n), "IND_DAYS");
+var IND_LETTERS = ["A", "B"];
+function indCalls(L, k) {
+  return (k >= 5 || k === 0 ? L.iCalls5 : L.iCalls).replace("%k", k);
+}
+__name(indCalls, "indCalls");
+function indCallsP(L, k) {
+  return (k >= 5 || k === 0 ? L.p3_5 : L.p3).replace("%k", k);
+}
+__name(indCallsP, "indCallsP");
+async function indTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS indiv_offers (id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT UNIQUE, to_email TEXT, name TEXT, lang TEXT, currency TEXT,
+    place TEXT, city TEXT, profile TEXT, variants TEXT, calls INTEGER, deposit INTEGER, pay_by TEXT, valid_to TEXT, pay TEXT, hello TEXT, note TEXT, signer TEXT,
+    picked INTEGER, picked_at INTEGER, status TEXT, mail_at INTEGER, created_by TEXT, created_at INTEGER, updated_at INTEGER, events TEXT)`).run();
+}
+__name(indTable, "indTable");
+function indNorm(b) {
+  const S = /* @__PURE__ */ __name((v, n) => String(v == null ? "" : v).trim().slice(0, n || 200), "S"), ymd = /* @__PURE__ */ __name((v) => /^\d{4}-\d{2}-\d{2}$/.test(S(v)) ? S(v) : "", "ymd");
+  const num = /* @__PURE__ */ __name((v) => Math.max(0, Math.round(Number(String(v == null ? "" : v).replace(/[^\d.,]/g, "").replace(",", ".")) || 0)), "num");
+  const lang = /^(pl|sk|cs|en)$/.test(S(b.lang)) ? S(b.lang) : "pl";
+  const V = (Array.isArray(b.variants) ? b.variants : []).slice(0, 2).map((v, i) => ({ name: S(v && v.name, 60) || (i ? IND_TXT[lang].dB : IND_TXT[lang].dA), days: Math.min(30, num(v && v.days)), price: num(v && v.price), an: Math.min(365, num(v && v.an)), note: S(v && v.note, 600) })).filter((v) => v.days > 0 || v.price > 0);
+  const P = b.pay || {};
+  return {
+    to: S(b.to, 200),
+    name: S(b.name, 120),
+    lang,
+    currency: S(b.currency) === "EUR" || !b.currency && lang !== "pl" ? "EUR" : "PLN",
+    place: S(b.place) === "pl" ? "pl" : "abroad",
+    city: S(b.city, 120),
+    profile: /^(abroad|esbs|both)$/.test(S(b.profile)) ? S(b.profile) : "abroad",
+    variants: V,
+    calls: b.calls === void 0 || b.calls === "" ? 4 : Math.min(20, num(b.calls)),
+    deposit: num(b.deposit),
+    pay_by: ymd(b.pay_by),
+    valid_to: ymd(b.valid_to),
+    pay: { payee: S(P.payee) === "fund" ? "fund" : "ns", account: S(P.account, 80), holder: S(P.holder, 120), bank: S(P.bank, 80), bank_addr: S(P.bank_addr, 120), swift: S(P.swift, 20) },
+    hello: S(b.hello, 120),
+    note: S(b.note, 1500),
+    signer: S(b.signer, 80)
+  };
+}
+__name(indNorm, "indNorm");
+function indIncl(L, x, v) {
+  const d = IND_DAYS(L, x.lang, v.days || 1), out = [];
+  if (x.place === "abroad") out.push(L.iFly, L.iStayA.replace("%d", d), L.iClassA.replace("%d", d));
+  else out.push(L.iTrav, L.iStayP.replace("%d", d), L.iClassP.replace("%d", d));
+  out.push(v.an ? L.iAnD.replace("%d", IND_DAYS(L, x.lang, v.an)) : L.iAn);
+  if (x.calls) out.push(indCalls(L, x.calls));
+  return out;
+}
+__name(indIncl, "indIncl");
+function indHtml(x, pickUrl) {
+  const L = IND_TXT[ofLang(x.lang)], e = ofEsc, M = /* @__PURE__ */ __name((n) => ofFluMoney(n, x.currency), "M"), D = /* @__PURE__ */ __name((d) => ofDateL(d, x.lang, true), "D"), V = x.variants || [];
+  const OR = "#E8820C", INK = "#1E1E1E", MUTE = "#7A6A55", LINE = "#EFE6D8";
+  const intro = x.profile === "abroad" ? L.introA : x.profile === "esbs" ? L.introE : L.introB;
+  const where = x.place === "abroad" ? x.city ? L.whereA.replace("%c", x.city) : L.whereA0 : x.city ? L.whereP.replace("%c", x.city) : L.whereP0;
+  const pill = /* @__PURE__ */ __name((ic, t, d) => '<td valign="top" width="33%" style="padding:6px"><div style="background:#FFF8EE;border:1px solid #F3DFC2;border-radius:12px;padding:14px 12px;text-align:center;height:100%"><div style="font-size:26px;line-height:1">' + ic + '</div><div style="font-weight:bold;font-size:14px;margin:8px 0 4px;color:' + INK + '">' + e(t) + '</div><div style="font-size:12.5px;color:' + MUTE + ';line-height:1.4">' + e(d) + "</div></div></td>", "pill");
+  const pills = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + (x.place === "abroad" ? pill("\u2708\uFE0F", L.p1A, L.p1Ad) : pill("\u{1F697}", L.p1P, L.p1Pd)) + pill("\u{1F4F1}", L.p2, L.p2d) + (x.calls ? pill("\u260E\uFE0F", indCallsP(L, x.calls), L.p3d) : "") + "</tr></table>";
+  const card = /* @__PURE__ */ __name((v, i) => {
+    const top = V.length > 1 && i === V.length - 1;
+    return '<td valign="top" width="' + (V.length > 1 ? "50%" : "100%") + '" style="padding:6px"><div style="border:' + (top ? "2px solid " + OR : "1px solid #E6D9C3") + ';border-radius:14px;overflow:hidden;background:#fff"><div style="background:' + (top ? OR : INK) + ';color:#fff;padding:12px 16px"><div style="font-size:11px;letter-spacing:2px;opacity:.85;font-weight:bold">' + (V.length > 1 ? L.varL + " " + IND_LETTERS[i] : "") + '</div><div style="font-size:18px;font-weight:bold">' + e(v.name) + '</div></div><div style="padding:14px 16px"><div style="font-size:13px;color:' + MUTE + '">' + e(L.days) + '</div><div style="font-size:16px;font-weight:bold;color:' + INK + ';margin-bottom:8px">' + e(IND_DAYS(L, x.lang, v.days || 1)) + "</div>" + (v.price ? '<div style="font-size:28px;font-weight:bold;color:' + OR + ';margin:4px 0 10px">' + M(v.price) + "</div>" : "") + '<div style="font-size:13px;font-weight:bold;color:' + INK + ';margin-bottom:4px">' + e(L.inc) + "</div>" + indIncl(L, x, v).map((t) => '<div style="font-size:13.5px;line-height:1.45;margin:3px 0;color:#333">\u2713&nbsp; ' + e(t) + "</div>").join("") + (v.note ? '<div style="margin-top:10px;padding:8px 10px;background:#F3EEFB;border-left:3px solid #7A5BC4;border-radius:6px;font-size:13px;color:#3D2C66">\u{1F4A1} ' + e(v.note).replace(/\n/g, "<br>") + "</div>" : "") + (pickUrl ? '<div style="margin-top:14px"><a href="' + e(pickUrl + "&k=" + i) + '" style="display:block;text-align:center;background:' + (top ? OR : INK) + ';color:#fff;padding:12px 10px;border-radius:9px;text-decoration:none;font-weight:bold;font-size:15px">' + e(L.pick) + "</a></div>" : "") + "</div></div></td>";
+  }, "card");
+  const step = /* @__PURE__ */ __name((n, t, d) => '<tr><td valign="top" width="34" style="padding:6px 0"><div style="width:26px;height:26px;border-radius:13px;background:' + OR + ';color:#fff;font-weight:bold;font-size:13px;text-align:center;line-height:26px">' + n + '</div></td><td style="padding:6px 0 6px 6px;font-size:14px;line-height:1.45"><b>' + e(t) + "</b> \u2014 " + e(d) + "</td></tr>", "step");
+  const row = /* @__PURE__ */ __name((a, b) => '<tr><td style="padding:7px 10px;border-bottom:1px solid ' + LINE + ";color:" + MUTE + ';white-space:nowrap;vertical-align:top;font-size:13.5px">' + e(a) + '</td><td style="padding:7px 10px;border-bottom:1px solid ' + LINE + ';font-size:14px">' + b + "</td></tr>", "row");
+  const P = x.pay || {}, eur = x.currency === "EUR";
+  let pay = "";
+  if (x.deposit || P.account) {
+    if (x.deposit) pay += row(L.dep, "<b>" + M(x.deposit) + "</b>");
+    if (x.deposit && x.pay_by) pay += row(L.payBy, "<b>" + e(D(x.pay_by)) + "</b>");
+    if (x.deposit) pay += row(L.rest, e(L.restV));
+    if (P.account) {
+      if (P.holder) pay += row(L.holder, e(P.holder));
+      pay += row(eur ? L.iban : L.acc, '<b translate="no">' + e(P.account) + "</b>");
+      if (eur && P.swift) pay += row(L.swift, '<span translate="no">' + e(P.swift) + "</span>");
+      if (P.bank) pay += row(L.bank, e(P.bank) + (eur && P.bank_addr ? "<br>" + e(P.bank_addr) : ""));
+      pay += row(L.ttl, e(P.payee === "fund" ? OF_FUND_TITLE : L.ttlV.replace("%n", x.name || x.to)));
+    }
+    pay = '<div style="font-weight:bold;font-size:17px;margin:24px 0 8px;color:' + INK + '">' + e(L.payT) + '</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#FFFCF7;border:1px solid ' + LINE + ';border-radius:10px">' + pay + "</table>";
+  }
+  const h2 = /* @__PURE__ */ __name((t) => '<div style="font-weight:bold;font-size:17px;margin:24px 0 8px;color:' + INK + '">' + e(t) + "</div>", "h2");
+  return '<div style="background:#f4f1ed;padding:18px 8px;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.06)"><tr><td style="background:' + INK + ';padding:22px 26px;border-top:6px solid #F5A623"><div style="color:#F5A623;font-size:11px;letter-spacing:3px;font-weight:bold">SZKO\u0141A NOWEJ MOWY \xB7 ' + e(L.kicker) + '</div><div style="color:#fff;font-size:24px;font-weight:bold;margin-top:6px;line-height:1.25">' + e(L.title) + "</div>" + (x.name ? '<div style="color:#D8CBB6;font-size:14px;margin-top:6px">' + e(L.forN.replace("%n", x.name)) + "</div>" : "") + '<div style="display:inline-block;margin-top:12px;background:rgba(245,166,35,.15);color:#F5C26B;border:1px solid rgba(245,166,35,.4);border-radius:20px;padding:5px 12px;font-size:13px">\u{1F4CD} ' + e(where) + '</div></td></tr><tr><td style="padding:24px 26px 8px;font-size:15px;line-height:1.6;color:#2b2b2b"><p style="margin:0 0 10px">' + e(x.hello || (x.name ? L.hiN.replace("%n", String(x.name).split(" ")[0]) : L.hi)) + '</p><p style="margin:0 0 6px">' + e(intro) + "</p>" + h2(L.pillT) + pills + h2(V.length > 1 ? L.varsT : L.var1T) + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + V.map(card).join("") + "</tr></table>" + h2(L.stepsT) + '<table role="presentation" cellpadding="0" cellspacing="0">' + step(1, L.s1, L.s1d) + step(2, L.s2, L.s2d) + step(3, L.s3, L.s3d) + step(4, L.s4, L.s4d) + "</table>" + pay + (x.note ? '<div style="margin:20px 0 0;padding:12px 14px;background:#F7F4EF;border-radius:10px;font-size:14.5px">' + e(x.note).replace(/\n/g, "<br>") + "</div>" : "") + (x.valid_to ? '<p style="margin:16px 0 0;font-size:13px;color:' + MUTE + '">' + e(L.valid.replace("%d", D(x.valid_to))) + "</p>" : "") + '<p style="margin:18px 0 0">' + e(L.q) + '</p><p style="margin:14px 0 0">' + e(L.bye) + (x.signer ? "<br><b>" + e(x.signer) + "</b>" : "") + '<br>Szko\u0142a Nowej Mowy</p></td></tr><tr><td style="padding:16px 26px 22px;font-size:12px;color:#8C7A5C;border-top:1px solid ' + LINE + '">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, 43-190 Miko\u0142\xF3w \xB7 nowamowa.com</td></tr></table></div>';
+}
+__name(indHtml, "indHtml");
+function indWa(x, pickUrl) {
+  const L = IND_TXT[ofLang(x.lang)], M = /* @__PURE__ */ __name((n) => ofFluMoney(n, x.currency).replace(/ /g, " "), "M"), V = x.variants || [];
+  const intro = x.profile === "abroad" ? L.introA : x.profile === "esbs" ? L.introE : L.introB;
+  const where = x.place === "abroad" ? x.city ? L.whereA.replace("%c", x.city) : L.whereA0 : x.city ? L.whereP.replace("%c", x.city) : L.whereP0;
+  const o = [
+    "\u{1F30D} *" + L.title + "*",
+    "\u{1F4CD} " + where,
+    "",
+    x.hello || (x.name ? L.hiN.replace("%n", String(x.name).split(" ")[0]) : L.hi),
+    intro,
+    "",
+    "*" + L.pillT + ":*",
+    x.place === "abroad" ? "\u2708\uFE0F " + L.p1A + " \u2014 " + L.p1Ad : "\u{1F697} " + L.p1P + " \u2014 " + L.p1Pd,
+    "\u{1F4F1} " + L.p2 + " \u2014 " + L.p2d
+  ];
+  if (x.calls) o.push("\u260E\uFE0F " + indCallsP(L, x.calls) + " \u2014 " + L.p3d);
+  V.forEach((v, i) => {
+    o.push("", (V.length > 1 ? "*" + L.varL + " " + IND_LETTERS[i] + " \u2014 " : "*") + v.name + "*", L.days + ": " + IND_DAYS(L, x.lang, v.days || 1) + (v.price ? " \xB7 *" + M(v.price) + "*" : ""));
+    indIncl(L, x, v).forEach((t) => o.push("\u2713 " + t));
+    if (v.note) o.push("\u{1F4A1} _" + v.note.replace(/\s*\n+\s*/g, " ") + "_");
+  });
+  if (pickUrl) o.push("", "\u{1F449} *" + L.pickAll + ":* " + pickUrl);
+  if (x.deposit) o.push("", "\u{1F4B3} " + L.dep + ": *" + M(x.deposit) + "*" + (x.pay_by ? " \u2014 " + L.payBy.toLowerCase() + ": " + ofDateL(x.pay_by, x.lang, true) : ""));
+  const P = x.pay || {};
+  if (P.account) {
+    o.push("\u{1F3E6} " + (x.currency === "EUR" ? L.iban : L.acc) + ":", "```" + P.account + "```");
+    if (P.holder) o.push(L.holder + ": " + P.holder);
+    if (x.currency === "EUR" && P.swift) o.push(L.swift + ": " + P.swift);
+  }
+  if (x.note) o.push("", x.note);
+  if (x.valid_to) o.push("", L.valid.replace("%d", ofDateL(x.valid_to, x.lang, true)));
+  o.push("", L.bye + (x.signer ? "\n" + x.signer : "") + "\nSzko\u0142a Nowej Mowy");
+  return o.join("\n");
+}
+__name(indWa, "indWa");
+async function indPickUrl(env, token) {
+  const base = (await svfCfg(env)).public_base || "https://ask.nowamowa.com";
+  return base + "/oferta-indywidualna?t=" + token;
+}
+__name(indPickUrl, "indPickUrl");
+function indRowX(r) {
+  const j = /* @__PURE__ */ __name((s, d) => {
+    try {
+      return JSON.parse(s || "") || d;
+    } catch (e) {
+      return d;
+    }
+  }, "j");
+  return {
+    id: r.id,
+    to: r.to_email,
+    name: r.name,
+    lang: r.lang,
+    currency: r.currency,
+    place: r.place,
+    city: r.city,
+    profile: r.profile,
+    variants: j(r.variants, []),
+    calls: r.calls == null ? 4 : r.calls,
+    deposit: r.deposit || 0,
+    pay_by: r.pay_by || "",
+    valid_to: r.valid_to || "",
+    pay: j(r.pay, {}),
+    hello: r.hello || "",
+    note: r.note || "",
+    signer: r.signer || "",
+    picked: r.picked,
+    picked_at: r.picked_at,
+    status: r.status || "",
+    mail_at: r.mail_at,
+    created_by: r.created_by,
+    created_at: r.created_at,
+    token: r.token
+  };
+}
+__name(indRowX, "indRowX");
+async function indHandle(request, env, url) {
+  const q = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  const g = /* @__PURE__ */ __name((k) => q[k] || url.searchParams.get(k), "g");
+  const who = await contactAuth(env, g("ns_token"), g("ns_email"), g("ns_server"));
+  if (!who) return json({ error: "Nieprawid\u0142owy lub wygas\u0142y token NS \u2014 zaloguj si\u0119 ponownie" }, 401);
+  if (who.forbidden) return json({ error: "Brak dost\u0119pu" }, 403);
+  await indTable(env);
+  const now = Math.floor(Date.now() / 1e3);
+  if (url.pathname === "/offers/indiv" && request.method === "GET") {
+    const rows = (await env.DB.prepare("SELECT * FROM indiv_offers WHERE COALESCE(status, '') <> 'deleted' ORDER BY created_at DESC LIMIT 200").all()).results || [];
+    return json({ ok: true, items: rows.map(indRowX) });
+  }
+  if (url.pathname === "/offers/indiv/update" && request.method === "POST") {
+    const r = await env.DB.prepare("SELECT * FROM indiv_offers WHERE id = ?").bind(Number(q.id) || 0).first();
+    if (!r) return json({ error: "Nie ma takiej oferty" }, 404);
+    const st = q.delete ? "deleted" : /^(|accepted|declined|done)$/.test(String(q.status || "")) ? String(q.status || "") : null;
+    if (st === null) return json({ error: "Z\u0142y status" }, 400);
+    let ev = [];
+    try {
+      ev = JSON.parse(r.events || "[]") || [];
+    } catch (e) {
+    }
+    ev.push({ t: now, a: "status", v: st, by: who.email });
+    await env.DB.prepare("UPDATE indiv_offers SET status = ?, updated_at = ?, events = ? WHERE id = ?").bind(st, now, JSON.stringify(ev.slice(-60)), r.id).run();
+    return json({ ok: true });
+  }
+  if (url.pathname === "/offers/indiv/send" && request.method === "POST") {
+    const x = indNorm(q), old = Number(q.id) ? await env.DB.prepare("SELECT * FROM indiv_offers WHERE id = ?").bind(Number(q.id)).first() : null;
+    if (Number(q.id) && !old) return json({ error: "Nie ma takiej oferty" }, 404);
+    if (!x.variants.length) return json({ error: "Uzupe\u0142nij przynajmniej jeden wariant (liczba dni i cena)" }, 400);
+    if (!q.preview && !/^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i.test(x.to)) return json({ error: "Nieprawid\u0142owy adres e-mail kursanta" }, 400);
+    const token = old && old.token || Array.from(crypto.getRandomValues(new Uint8Array(12))).map((v) => v.toString(16).padStart(2, "0")).join("");
+    const pickUrl = await indPickUrl(env, token), L = IND_TXT[x.lang];
+    const subject = x.name ? L.subj.replace("%n", x.name) : L.subj0, html = indHtml(x, pickUrl);
+    if (q.preview) return json({ ok: true, preview: true, subject, html, wa: indWa(x, pickUrl) });
+    let mailAt = old ? old.mail_at : null;
+    if (q.mail !== false) {
+      await ensureGoogleTables(env);
+      const account = await appSettingGet(env, "google_account") || "";
+      const s = await ofGmailSend(env, ofMime({ from: account, fromName: "Nowa Mowa", to: x.to, cc: q.cc_me ? who.email : null, replyTo: who.email, subject, html }));
+      if (!s.ok) return json({ error: s.error || "Nie wys\u0142ano maila" }, 502);
+      mailAt = now;
+      try {
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ns_student_id TEXT, to_email TEXT, subject TEXT, sent_by TEXT, gmail_id TEXT, created_at INTEGER)").run();
+        await env.DB.prepare("INSERT INTO email_log (ns_student_id, to_email, subject, sent_by, gmail_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind("", x.to, subject, who.email, s.id || "", now).run();
+      } catch (e) {
+      }
+    }
+    let ev = [];
+    try {
+      ev = JSON.parse(old && old.events || "[]") || [];
+    } catch (e) {
+    }
+    ev.push({ t: now, a: old ? "edit" : "new", v: x.variants.map((v) => v.name + " " + v.days + "d " + v.price).join(" / ") + (q.mail !== false ? " \xB7 mail" : ""), by: who.email });
+    const picked = old && old.picked != null && old.picked < x.variants.length ? old.picked : null;
+    const vals = [x.to, x.name, x.lang, x.currency, x.place, x.city, x.profile, JSON.stringify(x.variants), x.calls, x.deposit || null, x.pay_by || null, x.valid_to || null, JSON.stringify(x.pay), x.hello, x.note, x.signer, picked, mailAt, now, JSON.stringify(ev.slice(-60))];
+    let id = old && old.id;
+    if (old) await env.DB.prepare("UPDATE indiv_offers SET to_email=?, name=?, lang=?, currency=?, place=?, city=?, profile=?, variants=?, calls=?, deposit=?, pay_by=?, valid_to=?, pay=?, hello=?, note=?, signer=?, picked=?, mail_at=?, updated_at=?, events=? WHERE id = ?").bind(...vals, old.id).run();
+    else {
+      const r = await env.DB.prepare("INSERT INTO indiv_offers (to_email, name, lang, currency, place, city, profile, variants, calls, deposit, pay_by, valid_to, pay, hello, note, signer, picked, mail_at, updated_at, events, token, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)").bind(...vals, token, who.email, now).run();
+      id = r.meta && r.meta.last_row_id;
+    }
+    return json({ ok: true, id, mailed: q.mail !== false, pick_url: pickUrl, wa: indWa(x, pickUrl) });
+  }
+  return json({ error: "Nieznana \u015Bcie\u017Cka" }, 404);
+}
+__name(indHandle, "indHandle");
+async function indPickPage(request, env, url) {
+  await indTable(env);
+  let body = {};
+  if (request.method === "POST") {
+    try {
+      body = Object.fromEntries((await request.formData()).entries());
+    } catch (e2) {
+    }
+  }
+  const token = String(url.searchParams.get("t") || body.t || "").replace(/[^a-f0-9]/gi, "").slice(0, 40);
+  const r = token ? await env.DB.prepare("SELECT * FROM indiv_offers WHERE token = ? AND COALESCE(status, '') NOT IN ('deleted', 'declined')").bind(token).first() : null;
+  const x = r ? indRowX(r) : { lang: "pl", variants: [] }, lg = ofLang(x.lang), L = IND_TXT[lg], e = ofEsc;
+  const page = /* @__PURE__ */ __name((inner) => new Response(
+    '<!doctype html><html lang="' + lg + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>' + e(L.pgT) + ' \xB7 Nowa Mowa</title><style>body{margin:0;background:#f4f1ed;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#2b2b2b}.w{max-width:680px;margin:0 auto;padding:12px}.ok{background:#EAF6EC;border-radius:12px;padding:14px 16px;margin:12px 0;font-size:16px}.btn{display:block;width:100%;border:0;border-radius:9px;color:#fff;font-size:16px;font-weight:700;padding:13px;cursor:pointer}a{color:#D9822B}</style></head><body><div class="w">' + inner + "</div></body></html>",
+    { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+  ), "page");
+  if (!r) return page('<div style="background:#fff;border-radius:14px;padding:20px;margin-top:20px">' + e(L.pgGone) + "</div>");
+  const V = x.variants;
+  if (request.method === "POST" && body.k !== void 0 && V[Number(body.k)]) {
+    const k = Number(body.k), now = Math.floor(Date.now() / 1e3), v = V[k];
+    let ev = [];
+    try {
+      ev = JSON.parse(r.events || "[]") || [];
+    } catch (er) {
+    }
+    ev.push({ t: now, a: "pick", v: k, by: "kursant" });
+    await env.DB.prepare("UPDATE indiv_offers SET picked = ?, picked_at = ?, events = ? WHERE id = ?").bind(k, now, JSON.stringify(ev.slice(-60)), r.id).run();
+    if (k !== r.picked && r.created_by) {
+      try {
+        await ensureGoogleTables(env);
+        const account = await appSettingGet(env, "google_account") || "", nm = x.name || x.to;
+        await ofGmailSend(env, ofMime({
+          from: account,
+          fromName: "Panel Nowej Mowy",
+          to: r.created_by,
+          replyTo: x.to || null,
+          subject: "\u{1F30D} " + nm + " wybra\u0142(a) ofert\u0119 indywidualn\u0105: " + v.name,
+          html: '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5"><p><b>' + ofEsc(nm) + "</b> (" + ofEsc(x.to || "") + ') wybra\u0142(a) wariant oferty indywidualnej:</p><p style="font-size:17px">\u2705 <b>' + ofEsc(v.name) + "</b> \u2014 " + ofEsc(IND_DAYS(IND_TXT.pl, "pl", v.days || 1)) + (v.price ? " \xB7 <b>" + ofFluMoney(v.price, x.currency) + "</b>" : "") + "</p><p>\u{1F4CD} " + ofEsc(x.place === "abroad" ? "za granic\u0105" : "w Polsce") + (x.city ? ": " + ofEsc(x.city) : "") + "</p><p>Ustal z kursantem termin zaj\u0119\u0107 (panel \u2192 Oferty \u2192 \u{1F30D} Oferty indywidualne).</p></div>"
+        }));
+      } catch (er) {
+      }
+    }
+    return page('<div class="ok">\u2705 ' + e(L.pgOk) + '<br><b style="font-size:19px">' + e(v.name) + "</b> \u2014 " + e(IND_DAYS(L, lg, v.days || 1)) + (v.price ? " \xB7 <b>" + ofFluMoney(v.price, x.currency) + "</b>" : "") + '<br><span style="font-size:14px;color:#3A5A40">' + e(L.pgInfo) + '</span></div><p><a href="?t=' + token + '">' + e(L.pgChange) + "</a></p>");
+  }
+  let html = indHtml(x, "#pick");
+  V.forEach((v, i) => {
+    const on = r.picked === i, top = V.length > 1 && i === V.length - 1;
+    const btn = on ? '<div style="text-align:center;background:#EAF6EC;color:#1E6B3A;border-radius:9px;padding:12px;font-weight:bold">\u2705 ' + e(L.pgChosen) + "</div>" : '<form method="post" style="margin:0"><input type="hidden" name="t" value="' + token + '"><input type="hidden" name="k" value="' + i + '"><button class="btn" type="submit" style="background:' + (top ? "#E8820C" : "#1E1E1E") + '">' + e(L.pick) + "</button></form>";
+    html = html.replace(new RegExp('<a href="#pick&amp;k=' + i + '"[^>]*>[^<]*</a>'), btn);
+  });
+  const hl = String(url.searchParams.get("k") || "");
+  return page(html + (hl ? "<script>var f=document.querySelectorAll('form');var el=f[" + Math.max(0, Math.min(1, Number(hl) || 0)) + "];if(el)el.scrollIntoView({block:'center'})<\/script>" : ""));
+}
+__name(indPickPage, "indPickPage");
 async function techniqueStats(env, sid, from, to) {
   const pg = new Client({ connectionString: env.HYPERDRIVE.connectionString });
   await pg.connect();
@@ -14725,7 +15313,7 @@ async function handleOfferSend(request, env) {
     const r = await env.DB.prepare("INSERT INTO course_reminders (to_email, student_name, start_date, child, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(to, String(rm.name || "").slice(0, 120), rm.start, rm.child ? 1 : 0, who.email, Math.floor(Date.now() / 1e3)).run();
     try {
       const nid = r.meta && r.meta.last_row_id;
-      if (nid && (Number(rm.price) > 0 || Number(rm.deposit) > 0)) await env.DB.prepare("UPDATE course_reminders SET price = ?, deposit = ?, currency = ?, lang = COALESCE(lang, ?) WHERE id = ?").bind(Math.round(Number(rm.price) || 0) || null, Math.round(Number(rm.deposit) || 0) || null, rm.currency === "EUR" ? "EUR" : "PLN", /^(pl|sk|cs|en)$/.test(String(rm.lang || "")) ? rm.lang : null, nid).run();
+      if (nid && (Number(rm.price) > 0 || Number(rm.deposit) > 0)) await env.DB.prepare("UPDATE course_reminders SET price = ?, deposit = ?, currency = ?, lang = COALESCE(lang, ?) WHERE id = ?").bind(Math.round(Number(rm.price) || 0) || null, Math.round(Number(rm.deposit) || 0) || null, rm.currency === "EUR" || rm.currency === "USD" ? rm.currency : "PLN", /^(pl|sk|cs|en)$/.test(String(rm.lang || "")) ? rm.lang : null, nid).run();
     } catch (e) {
     }
     reminder = { id: r.meta && r.meta.last_row_id, start: rm.start, on: ofAddDays(rm.start, -7), to: ofReminderTo(env) };
@@ -14757,7 +15345,7 @@ async function ofbCreate(env, b, to, who) {
   const token = Array.from(crypto.getRandomValues(new Uint8Array(12))).map((x) => x.toString(16).padStart(2, "0")).join("");
   const variants = (Array.isArray(fb.variants) ? fb.variants : []).slice(0, 12).map((v) => ({ n: Number(v.n) || 0, name: String(v.name || "").slice(0, 120), price: Number(v.price) || null })).filter((v) => v.n);
   const terms = (Array.isArray(fb.terms) ? fb.terms : []).slice(0, 12).map((t) => ({ ymd: /^\d{4}-\d{2}-\d{2}$/.test(String(t.ymd || "")) ? t.ymd : null, label: String(t.label || "").slice(0, 80) })).filter((t) => t.label);
-  const pl = { variants, terms, cur: fb.cur === "EUR" ? "EUR" : "PLN", rec: Number(fb.rec) || null, hg: String(fb.hg || "").slice(0, 120) };
+  const pl = { variants, terms, cur: fb.cur === "EUR" || fb.cur === "USD" ? fb.cur : "PLN", rec: Number(fb.rec) || null, hg: String(fb.hg || "").slice(0, 120) };
   await env.DB.prepare("INSERT INTO offer_fb (token, to_email, name, lang, payload, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(token, to.toLowerCase(), String(fb.name || "").slice(0, 120), ofLang(fb.lang), JSON.stringify(pl), String(who && who.email || ""), Math.floor(Date.now() / 1e3)).run();
   const base = (await svfCfg(env)).public_base || "https://ask.nowamowa.com";
   return { token, url: base + "/oferta?t=" + token };
@@ -14781,7 +15369,7 @@ async function ofbPage(request, env, url, ctx) {
     pl = JSON.parse(f && f.payload || "{}") || {};
   } catch (e) {
   }
-  const V = pl.variants || [], T = pl.terms || [], money = /* @__PURE__ */ __name((n) => n ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (pl.cur === "EUR" ? " \u20AC" : " z\u0142") : "", "money");
+  const V = pl.variants || [], T = pl.terms || [], money = /* @__PURE__ */ __name((n) => n ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (pl.cur === "EUR" ? " \u20AC" : pl.cur === "USD" ? " USD" : " z\u0142") : "", "money");
   const page = /* @__PURE__ */ __name((inner) => new Response(
     '<!doctype html><html lang="' + lg + '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Nowa Mowa</title><style>body{margin:0;background:#f4f1ed;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;color:#2b2b2b}.w{max-width:560px;margin:0 auto;padding:16px}.c{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}.h{background:#1E1E1E;color:#fff;padding:16px 20px;border-top:6px solid #F5A623}.h small{color:#F5A623;letter-spacing:2px;font-weight:700;font-size:11px}.h div{font-size:20px;font-weight:700;margin-top:2px}.b{padding:18px 20px;font-size:16px;line-height:1.5}h3{font-size:15px;margin:18px 0 6px;color:#D9822B}label.o{display:flex;gap:10px;align-items:flex-start;border:1px solid #E6D9C3;border-radius:10px;padding:11px 12px;margin:6px 0;cursor:pointer}label.o:has(input:checked){border-color:#E8A317;background:#FFF6E0}label.o input{margin-top:3px;width:18px;height:18px;flex:none}input[type=text],input[type=date],textarea{width:100%;box-sizing:border-box;border:1px solid #D9CBB4;border-radius:8px;padding:10px;font:inherit;font-size:15px;margin-top:6px}.sub{color:#8C7A5C;font-size:13px}.btn{display:block;width:100%;border:0;border-radius:10px;padding:15px;font-size:17px;font-weight:700;cursor:pointer;margin-top:16px;background:#2E7D4F;color:#fff}.hid{display:none}</style></head><body><div class="w"><div class="c"><div class="h"><small>SZKO\u0141A NOWEJ MOWY</small><div>' + esc(L.t) + '</div></div><div class="b">' + inner + '</div></div><p style="text-align:center;color:#8C7A5C;font-size:12px">Szko\u0142a Nowej Mowy \xB7 Rynek 3/1A, Miko\u0142\xF3w</p></div></body></html>',
     { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
@@ -15019,7 +15607,7 @@ var OF_FLU = {
 };
 function ofFluMoney(n, cur) {
   const v = Math.round(Number(n) || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, "\xA0");
-  return cur === "EUR" ? v + "\xA0\u20AC" : v + "\xA0z\u0142";
+  return cur === "EUR" ? v + "\xA0\u20AC" : cur === "USD" ? v + "\xA0USD" : v + "\xA0z\u0142";
 }
 __name(ofFluMoney, "ofFluMoney");
 function ofFluPay(x, L) {
@@ -15319,7 +15907,7 @@ async function ofFluPickPage(request, env, url) {
     V = JSON.parse(r.variants || "[]") || [];
   } catch (er) {
   }
-  const cur = r.currency === "EUR" ? "EUR" : "PLN", X = { lang: lg, variants: V, picked: r.picked, days: r.days, price: r.price };
+  const cur = r.currency === "EUR" || r.currency === "USD" ? r.currency : "PLN", X = { lang: lg, variants: V, picked: r.picked, days: r.days, price: r.price };
   const termOf = /* @__PURE__ */ __name((st) => !r.start_date ? L.tbd : ofDateL(r.start_date, lg, true) + (st.days > 1 ? " \u2013 " + ofDateL(ofAddDays(r.start_date, st.days - 1), lg, true) : "") + (r.start_time ? ", " + L.at + " " + r.start_time : ""), "termOf");
   if (request.method === "POST" && body.k && V.some((v) => v.k === body.k)) {
     const st = ofFluState(Object.assign({}, X, { picked: body.k })), now = Math.floor(Date.now() / 1e3);
@@ -15904,9 +16492,9 @@ async function ofLifecycle(env, r, act, b, who, now) {
         const n = Math.round(Number(String(v == null ? "" : v).replace(/[^\d,.-]/g, "").replace(",", ".")));
         return isFinite(n) && n > 0 ? n : 0;
       }, "num");
-      const price = num(b.price) || Number(r.price) || 0, dep = b.deposit != null && String(b.deposit) !== "" ? num(b.deposit) : Number(r.deposit) || 0, cur = b.currency === "EUR" || r.currency === "EUR" ? "EUR" : "PLN";
+      const price = num(b.price) || Number(r.price) || 0, dep = b.deposit != null && String(b.deposit) !== "" ? num(b.deposit) : Number(r.deposit) || 0, cur = b.currency === "USD" || !b.currency && r.currency === "USD" ? "USD" : b.currency === "EUR" || r.currency === "EUR" ? "EUR" : "PLN";
       const before = Number(r.paid_total) || 0, amt = num(b.amount) || (price ? Math.max(0, price - dep - before) : 0), total = before + amt;
-      const rest = price ? Math.max(0, price - dep - total) : num(b.rest), fm = /* @__PURE__ */ __name((n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (cur === "EUR" ? " \u20AC" : " z\u0142"), "fm");
+      const rest = price ? Math.max(0, price - dep - total) : num(b.rest), fm = /* @__PURE__ */ __name((n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (cur === "EUR" ? " \u20AC" : cur === "USD" ? " USD" : " z\u0142"), "fm");
       upd = {
         paid_at: pd ? Math.floor((/* @__PURE__ */ new Date(pd + "T12:00:00Z")).getTime() / 1e3) : now,
         paid_by: by,
@@ -18164,11 +18752,11 @@ async function svList(env) {
     for (const x of (await env.DB.prepare("SELECT * FROM survey_status").all()).results || []) stat[x.row_key] = x;
     for (const x of (await env.DB.prepare("SELECT row_key FROM survey_hidden").all()).results || []) hidden.add(x.row_key);
     for (const x of (await env.DB.prepare("SELECT row_key, into_key FROM survey_merge").all()).results || []) merged[x.row_key] = x.into_key;
-    for (const x of (await env.DB.prepare("SELECT id, LOWER(to_email) AS e, kind, variant, variant_name, price, created_at, html_key, pdf_key FROM offer_meta ORDER BY created_at").all()).results || []) {
+    for (const x of (await env.DB.prepare("SELECT id, LOWER(to_email) AS e, kind, variant, variant_name, price, created_at, html_key, pdf_key, uploaded FROM offer_meta ORDER BY created_at").all()).results || []) {
       const m = meta[x.e] = meta[x.e] || {};
-      m[x.kind] = x;
+      if (!x.uploaded) m[x.kind] = x;
       if (x.html_key) {
-        (m.docs = m.docs || []).push({ id: x.id, kind: x.kind, at: x.created_at, pdf: !!x.pdf_key, variant: x.variant });
+        (m.docs = m.docs || []).push({ id: x.id, kind: x.kind, at: x.created_at, pdf: !!x.pdf_key, variant: x.variant, saved: !!x.uploaded });
       }
     }
   } catch (e) {
